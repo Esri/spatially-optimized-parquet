@@ -1,0 +1,14 @@
+[package]
+name = "spatial-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "parquet-opt"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread"] }
+spatial = { path = "../spatial" }

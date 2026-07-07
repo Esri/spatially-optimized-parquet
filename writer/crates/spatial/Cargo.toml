@@ -1,0 +1,36 @@
+[package]
+name = "spatial"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+arrow-array = { version = "57.1.0", features = ["ffi"] }
+arrow-ord = "57.1.0"
+arrow-schema = "57.1.0"
+arrow-select = "57.1.0"
+datafusion = "52.1.0"
+engine = { path = "../engine" }
+futures-util = "0.3"
+gdal = "0.19"
+gdal-src = { version = "0.3", features = ["driver_gpkg"] }
+gdal-sys = { version = "0.12", features = ["bundled"] }
+geo = "0.32.0"
+geo-traits = "0.3.0"
+geo-types = "0.7.16"
+geoparquet = "0.7.0"
+indicatif = "0.17"
+parquet = { version = "57.1.0", features = ["arrow"] }
+prost = "0.13"
+rayon = "1.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tokio = { version = "1.48", features = ["rt-multi-thread"] }
+wkb = "0.9"
+object_store = { version = "0.12", features = ["http"] }
+url = "2.5"
+
+[dev-dependencies]
+tempfile = "3.13"
