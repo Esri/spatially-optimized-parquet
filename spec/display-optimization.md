@@ -431,13 +431,14 @@ The following example shows `geodisplay` metadata for a file containing a single
 
 ### Generating Z-codes
 
-Z-code generation normalizes projected point coordinates into the index extent and interleaves their quantized coordinate bits. The resulting code gives point features a spatial ordering that Parquet readers can query with page statistics.
+Z-code generation maps projected point coordinates into fixed-width cells across `fullExtent` and interleaves their quantized coordinate bits. The resulting code gives point features a spatial ordering that Parquet readers can query with page statistics.
 
 1. Project features into the spatial reference of the index.
 2. Calculate the `fullExtent` of the data.
 3. Normalize each coordinate into the range `0` through `1` using `fullExtent`.
-4. Multiply each normalized coordinate by the maximum unsigned integer represented by `coordinatePrecision`.
-5. Compute the Z-code by swizzling the quantized x and y values for each point.
+4. Multiply each normalized coordinate by `2^coordinatePrecision`, then truncate to an integer cell index.
+5. Clamp each cell index into the range `0` through `2^coordinatePrecision - 1`.
+6. Compute the Z-code by swizzling the quantized x and y values for each point.
 
 ```rust
 
