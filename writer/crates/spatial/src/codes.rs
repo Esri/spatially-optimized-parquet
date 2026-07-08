@@ -121,9 +121,10 @@ fn quantize_to_bits(value: f64, min: f64, max: f64, coordinate_precision: u32) -
   if coordinate_precision == 0 || (max - min).abs() < f64::EPSILON {
     return 0;
   }
-  let normalized = ((value - min) / (max - min)).clamp(0.0, 1.0);
-  let max_value = (1u64 << coordinate_precision.min(32)) - 1;
-  (normalized * max_value as f64).round() as u32
+  let cell_count = 1u64 << coordinate_precision.min(32);
+  let normalized = (value - min) / (max - min);
+  let quantized = (normalized * cell_count as f64) as i64;
+  quantized.clamp(0, cell_count as i64 - 1) as u32
 }
 
 fn code_for_level(quadrant_code: u32, depth: u32, max_depth: u32) -> DisplayCode {
@@ -159,6 +160,20 @@ mod tests {
     assert_eq!(point_z_code(full_extent, -180.0, -90.0, 4), 0);
     assert_eq!(point_z_code(full_extent, 180.0, 90.0, 2), 15);
     assert_eq!(point_z_code(full_extent, 0.0, 0.0, 1), 3);
+  }
+
+  #[test]
+  fn point_z_code_uses_cell_quantization() {
+    let full_extent = Extent2D {
+      xmin: 0.0,
+      ymin: 0.0,
+      xmax: 1.0,
+      ymax: 1.0,
+    };
+
+    assert_eq!(point_z_code(full_extent, 0.2, 0.0, 2), 0);
+    assert_eq!(point_z_code(full_extent, 0.25, 0.0, 2), 1);
+    assert_eq!(point_z_code(full_extent, 1.0, 1.0, 2), 15);
   }
 
   #[test]
