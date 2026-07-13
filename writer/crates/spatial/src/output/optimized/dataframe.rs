@@ -4,19 +4,20 @@ use crate::analysis::{DisplayGeometryType, DisplayJobAnalysis, GeometryFamily};
 use crate::geometry::GeometrySpec;
 use crate::input::materialized::input_dataframe_for_job;
 use crate::input::{InputSource, RowRange};
+use crate::output::geoparquet::feature_bbox_expr;
+use crate::output::optimized::clustering::{
+  bounds_expr, non_point_xzcode_from_bounds_expr, point_expr, point_zcode_from_xy_expr,
+};
+use crate::output::optimized::multiscale::non_point_geodisplay_expr;
 use crate::output::optimized::multiscale::{
   DISPLAY_COLUMN, GeometryEncoding, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_CODE_COLUMN,
-  TEMP_REPROJECTED_GEOMETRY_COLUMN, TEMP_XMAX_COLUMN, TEMP_XMIN_COLUMN, TEMP_XZ_CODE_COLUMN,
-  TEMP_YMAX_COLUMN, TEMP_YMIN_COLUMN,
+  TEMP_BOUNDS_COLUMN, TEMP_POINT_COORDS_COLUMN, TEMP_REPROJECTED_GEOMETRY_COLUMN, TEMP_XMAX_COLUMN,
+  TEMP_XMIN_COLUMN, TEMP_XZ_CODE_COLUMN, TEMP_YMAX_COLUMN, TEMP_YMIN_COLUMN,
 };
+use crate::output::optimized::reprojection::{TransformSpec, reproject_geometry_expr};
 use crate::progress::finish_row_bar;
-use crate::reprojection::TransformSpec;
-use crate::udf::{
-  bounds_xmax_expr, bounds_xmin_expr, bounds_ymax_expr, bounds_ymin_expr, feature_bbox_expr,
-  non_point_geodisplay_expr, non_point_xzcode_from_bounds_expr, point_x_expr, point_y_expr,
-  point_zcode_from_xy_expr, reproject_geometry_expr,
-};
 use anyhow::Result;
+use datafusion::functions::core::expr_ext::FieldAccessor;
 use datafusion::logical_expr::Expr;
 use datafusion::logical_expr::expr_fn::ident;
 
@@ -228,14 +229,22 @@ fn add_geometry_helper_columns_dataframe(
   };
   match geometry_type.family() {
     GeometryFamily::Point => {
-      projected = projected.with_column(POINT_X_COLUMN, point_x_expr(geometry_column))?;
-      projected = projected.with_column(POINT_Y_COLUMN, point_y_expr(geometry_column))?;
+      projected = projected.with_column(TEMP_POINT_COORDS_COLUMN, point_expr(geometry_column))?;
+      projected =
+        projected.with_column(POINT_X_COLUMN, ident(TEMP_POINT_COORDS_COLUMN).field("x"))?;
+      projected =
+        projected.with_column(POINT_Y_COLUMN, ident(TEMP_POINT_COORDS_COLUMN).field("y"))?;
     }
     GeometryFamily::NonPoint => {
-      projected = projected.with_column(TEMP_XMIN_COLUMN, bounds_xmin_expr(geometry_column))?;
-      projected = projected.with_column(TEMP_YMIN_COLUMN, bounds_ymin_expr(geometry_column))?;
-      projected = projected.with_column(TEMP_XMAX_COLUMN, bounds_xmax_expr(geometry_column))?;
-      projected = projected.with_column(TEMP_YMAX_COLUMN, bounds_ymax_expr(geometry_column))?;
+      projected = projected.with_column(TEMP_BOUNDS_COLUMN, bounds_expr(geometry_column))?;
+      projected =
+        projected.with_column(TEMP_XMIN_COLUMN, ident(TEMP_BOUNDS_COLUMN).field("xmin"))?;
+      projected =
+        projected.with_column(TEMP_YMIN_COLUMN, ident(TEMP_BOUNDS_COLUMN).field("ymin"))?;
+      projected =
+        projected.with_column(TEMP_XMAX_COLUMN, ident(TEMP_BOUNDS_COLUMN).field("xmax"))?;
+      projected =
+        projected.with_column(TEMP_YMAX_COLUMN, ident(TEMP_BOUNDS_COLUMN).field("ymax"))?;
     }
   }
   Ok(projected)

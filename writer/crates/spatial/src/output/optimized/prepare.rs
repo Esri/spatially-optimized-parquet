@@ -11,8 +11,8 @@ use crate::geometry::GeometrySpec;
 use crate::input::materialized::input_dataframe_for_job;
 use crate::metadata::source::SourceDatasetMetadata;
 use crate::output::geoparquet::resolve_context as resolve_geoparquet_context;
+use crate::output::optimized::reprojection::ReprojectionPlan;
 use crate::progress::{finish_row_bar, row_bar};
-use crate::reprojection::ReprojectionPlan;
 
 use super::OptimizeOutputRequest;
 use super::analysis::{

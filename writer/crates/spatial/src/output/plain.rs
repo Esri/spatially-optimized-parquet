@@ -5,22 +5,22 @@
 //! plan until DataFusion writes the final Parquet file.
 
 use anyhow::{Context, Result, bail};
+use datafusion::functions::core::expr_ext::FieldAccessor;
 use datafusion::logical_expr::expr_fn::ident;
 use engine::plan::{OutputPlan, output_paths};
 use engine::write::{create_datafusion_parquet_options, parse_compression};
 
+use super::write::write_dataframe;
 use crate::input::{InputSource, RowRange};
 use crate::output::geoparquet::{
-  build_geo_key_values, build_geo_metadata, resolve_context, validate_covering_configuration,
+  build_geo_key_values, build_geo_metadata, feature_bbox_expr, resolve_context,
+  validate_covering_configuration,
 };
+use crate::output::optimized::clustering::bounds_expr;
 use crate::output::optimized::multiscale::{
-  COVERING_BBOX_COLUMN, TEMP_XMAX_COLUMN, TEMP_XMIN_COLUMN, TEMP_YMAX_COLUMN, TEMP_YMIN_COLUMN,
+  COVERING_BBOX_COLUMN, TEMP_BOUNDS_COLUMN, TEMP_XMAX_COLUMN, TEMP_XMIN_COLUMN, TEMP_YMAX_COLUMN,
+  TEMP_YMIN_COLUMN,
 };
-use crate::udf::{
-  bounds_xmax_expr, bounds_xmin_expr, bounds_ymax_expr, bounds_ymin_expr, feature_bbox_expr,
-};
-
-use super::write::write_dataframe;
 
 /// Carries the source and writer controls required by plain GeoParquet output.
 pub struct PlainOutputRequest<'a> {
@@ -99,10 +99,11 @@ fn add_covering_column(
   source_schema: &arrow_schema::Schema,
   geometry_column: &str,
 ) -> Result<engine::DataFrame> {
-  dataframe = dataframe.with_column(TEMP_XMIN_COLUMN, bounds_xmin_expr(geometry_column))?;
-  dataframe = dataframe.with_column(TEMP_YMIN_COLUMN, bounds_ymin_expr(geometry_column))?;
-  dataframe = dataframe.with_column(TEMP_XMAX_COLUMN, bounds_xmax_expr(geometry_column))?;
-  dataframe = dataframe.with_column(TEMP_YMAX_COLUMN, bounds_ymax_expr(geometry_column))?;
+  dataframe = dataframe.with_column(TEMP_BOUNDS_COLUMN, bounds_expr(geometry_column))?;
+  dataframe = dataframe.with_column(TEMP_XMIN_COLUMN, ident(TEMP_BOUNDS_COLUMN).field("xmin"))?;
+  dataframe = dataframe.with_column(TEMP_YMIN_COLUMN, ident(TEMP_BOUNDS_COLUMN).field("ymin"))?;
+  dataframe = dataframe.with_column(TEMP_XMAX_COLUMN, ident(TEMP_BOUNDS_COLUMN).field("xmax"))?;
+  dataframe = dataframe.with_column(TEMP_YMAX_COLUMN, ident(TEMP_BOUNDS_COLUMN).field("ymax"))?;
   let expressions: Vec<datafusion::logical_expr::Expr> = source_schema
     .fields()
     .iter()

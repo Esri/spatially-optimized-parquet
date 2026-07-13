@@ -12,14 +12,13 @@ use crate::analysis::{
 };
 use crate::geometry::GeometrySpec;
 use crate::metadata::source::SourceDatasetMetadata;
+use crate::output::optimized::clustering::{bounds_expr, point_expr};
 use crate::output::optimized::multiscale::{
   POINT_X_COLUMN, POINT_Y_COLUMN, TEMP_BOUNDS_COLUMN, TEMP_POINT_COORDS_COLUMN, TEMP_XMAX_COLUMN,
   TEMP_XMIN_COLUMN, TEMP_YMAX_COLUMN, TEMP_YMIN_COLUMN,
 };
-use crate::reprojection::TransformSpec;
-use crate::udf::{
-  bounds_xmax_expr, bounds_xmin_expr, bounds_ymax_expr, bounds_ymin_expr, point_x_expr,
-  point_y_expr, transformed_bounds_expr, transformed_point_coords_expr,
+use crate::output::optimized::reprojection::{
+  TransformSpec, transformed_bounds_expr, transformed_point_coords_expr,
 };
 
 use super::execution::collect_dataframe_with_metric_polling;
@@ -56,9 +55,10 @@ pub(crate) async fn analyze_display_dataframe(
         ),
       )?,
     (GeometryFamily::Point, None) => dataframe
+      .with_column(TEMP_POINT_COORDS_COLUMN, point_expr(&geometry_spec.column))?
       .select(vec![
-        point_x_expr(&geometry_spec.column),
-        point_y_expr(&geometry_spec.column),
+        point_coords_field_expr("x").alias(POINT_X_COLUMN),
+        point_coords_field_expr("y").alias(POINT_Y_COLUMN),
       ])?
       .aggregate(
         vec![],
@@ -90,11 +90,12 @@ pub(crate) async fn analyze_display_dataframe(
         ),
       )?,
     (GeometryFamily::NonPoint, None) => dataframe
+      .with_column(TEMP_BOUNDS_COLUMN, bounds_expr(&geometry_spec.column))?
       .select(vec![
-        bounds_xmin_expr(&geometry_spec.column),
-        bounds_ymin_expr(&geometry_spec.column),
-        bounds_xmax_expr(&geometry_spec.column),
-        bounds_ymax_expr(&geometry_spec.column),
+        bounds_field_expr("xmin").alias(TEMP_XMIN_COLUMN),
+        bounds_field_expr("ymin").alias(TEMP_YMIN_COLUMN),
+        bounds_field_expr("xmax").alias(TEMP_XMAX_COLUMN),
+        bounds_field_expr("ymax").alias(TEMP_YMAX_COLUMN),
       ])?
       .aggregate(
         vec![],

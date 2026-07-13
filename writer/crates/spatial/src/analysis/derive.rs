@@ -8,7 +8,7 @@ use crate::geometry::{GeometryKind, GeometrySpec, geometry_kind_from_wkb_type};
 use crate::input::RowRange;
 use crate::metadata::source::SourceGeometryMetadata;
 use crate::output::optimized::multiscale::geometry_extent_from_trait;
-use crate::reprojection::TransformSpec;
+use crate::output::optimized::reprojection::TransformSpec;
 
 const ANALYSIS_PROGRESS_MAX_CHUNK_ROWS: usize = 8_192;
 const ANALYSIS_PROGRESS_TARGET_UPDATES_PER_BATCH: usize = 32;

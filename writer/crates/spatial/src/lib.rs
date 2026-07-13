@@ -6,9 +6,8 @@
 //! opens validated resources and routes execution into plain or optimized output workflows.
 //!
 //! Lower-level modules isolate the algorithms behind that flow. [`output::optimized`] owns
-//! spatial clustering, multiscale geometry encoding, and optimized planning. [`udf`] exposes
-//! those operations to DataFusion, [`reprojection`] wraps GDAL/PROJ transforms, and [`metadata`]
-//! defines the normalized source and serialized output models.
+//! spatial clustering, typed DataFusion expressions, reprojection, multiscale geometry encoding,
+//! and optimized planning. [`metadata`] defines normalized source and serialized output models.
 
 #![warn(missing_docs)]
 
@@ -20,5 +19,3 @@ pub mod job;
 pub mod metadata;
 pub mod output;
 pub mod progress;
-pub mod reprojection;
-pub mod udf;

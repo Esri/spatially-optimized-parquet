@@ -20,7 +20,6 @@ use crate::output::geoparquet::validate_covering_configuration;
 use crate::output::optimized::{OptimizeOutputRequest, run as run_optimized_output};
 use crate::output::plain::{PlainOutputRequest, write as write_plain_geoparquet};
 use crate::progress::format_elapsed;
-use crate::udf::register_display_udfs;
 
 /// Configures one complete optimization or pass-through execution.
 pub struct OptimizeJobOptions {
@@ -145,7 +144,6 @@ async fn open_optimize_job(options: &OptimizeJobOptions) -> Result<OpenedOptimiz
 
   let session = new_datafusion_session()?;
   configure_explain_session(session.context(), options.explain);
-  register_display_udfs(session.context());
   Ok(OpenedOptimizeJob {
     input,
     output_plan,

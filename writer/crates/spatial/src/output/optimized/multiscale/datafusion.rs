@@ -2,7 +2,7 @@
 
 use std::any::Any;
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use arrow_array::builder::BinaryBuilder;
 use arrow_array::{Array, ArrayRef, Float64Array, StructArray, UInt64Array};
@@ -12,25 +12,27 @@ use datafusion::common::cast::{
 };
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
 use datafusion::logical_expr::{
-  ColumnarValue, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature,
+  ColumnarValue, Expr, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature,
+  Volatility,
 };
+use datafusion::prelude::col;
 
 use crate::analysis::DisplayGeometryType;
-use crate::output::optimized::multiscale::{
-  BOUNDS_COLUMN, GeometryEncodeScratch, GeometryEncoding, XZ_CODE_COLUMN,
+use crate::output::geometry::{BinaryValueAccess, to_datafusion_error};
+
+use super::{
+  BOUNDS_COLUMN, DISPLAY_COLUMN, GeometryEncodeScratch, GeometryEncoding, TEMP_XMAX_COLUMN,
+  TEMP_XMIN_COLUMN, TEMP_XZ_CODE_COLUMN, TEMP_YMAX_COLUMN, TEMP_YMIN_COLUMN, XZ_CODE_COLUMN,
   encode_flat_geometry_with_scratch,
   flat_geometry_payload_from_wkb as pbf_flat_geometry_payload_from_wkb,
 };
-
-use super::signatures::non_point_geodisplay_signature;
-use super::support::{BinaryValueAccess, to_datafusion_error};
 
 #[derive(Debug, Clone)]
 /// Encodes non-point WKB into the complete geodisplay struct for each row.
 ///
 /// Equality and hashing include every encoding parameter because DataFusion uses UDF
 /// identity when comparing and optimizing logical expressions.
-pub(super) struct NonPointGeodisplayUdf {
+pub(crate) struct NonPointGeodisplayUdf {
   geometry_type: DisplayGeometryType,
   encodings: Vec<GeometryEncoding>,
   display_fields: Fields,
@@ -201,7 +203,7 @@ impl ScalarUDFImpl for NonPointGeodisplayUdf {
   }
 
   fn signature(&self) -> &Signature {
-    non_point_geodisplay_signature()
+    multiscale_signature()
   }
 
   fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
@@ -254,11 +256,54 @@ impl ScalarUDFImpl for NonPointGeodisplayUdf {
     Ok(ColumnarValue::Array(Arc::new(output) as ArrayRef))
   }
 }
-pub(super) fn non_point_geodisplay_udf(
+pub(crate) fn non_point_geodisplay_udf(
   geometry_type: DisplayGeometryType,
   encodings: Vec<GeometryEncoding>,
 ) -> ScalarUDF {
   ScalarUDF::new_from_impl(NonPointGeodisplayUdf::new(geometry_type, encodings))
+}
+
+fn multiscale_signature() -> &'static Signature {
+  static SIGNATURE: OnceLock<Signature> = OnceLock::new();
+  SIGNATURE.get_or_init(|| {
+    Signature::one_of(
+      [
+        DataType::Binary,
+        DataType::LargeBinary,
+        DataType::BinaryView,
+      ]
+      .into_iter()
+      .map(|geometry_type| {
+        TypeSignature::Exact(vec![
+          geometry_type,
+          DataType::UInt64,
+          DataType::Float64,
+          DataType::Float64,
+          DataType::Float64,
+          DataType::Float64,
+        ])
+      })
+      .collect(),
+      Volatility::Immutable,
+    )
+  })
+}
+
+pub(crate) fn non_point_geodisplay_expr(
+  geometry_column: &str,
+  geometry_type: DisplayGeometryType,
+  encodings: &[GeometryEncoding],
+) -> Expr {
+  non_point_geodisplay_udf(geometry_type, encodings.to_vec())
+    .call(vec![
+      col(geometry_column),
+      col(TEMP_XZ_CODE_COLUMN),
+      col(TEMP_XMIN_COLUMN),
+      col(TEMP_YMIN_COLUMN),
+      col(TEMP_XMAX_COLUMN),
+      col(TEMP_YMAX_COLUMN),
+    ])
+    .alias(DISPLAY_COLUMN)
 }
 
 #[cfg(test)]

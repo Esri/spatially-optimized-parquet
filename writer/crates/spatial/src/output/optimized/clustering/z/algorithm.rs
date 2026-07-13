@@ -2,7 +2,7 @@
 
 use crate::analysis::Extent2D;
 
-use super::common::DisplayCode;
+use super::super::DisplayCode;
 
 /// Stores the default number of quantization bits per point coordinate axis.
 pub(crate) const DEFAULT_COORDINATE_PRECISION: u32 = 20;

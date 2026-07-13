@@ -8,8 +8,7 @@ use crate::geometry::GeometryKind;
 use crate::metadata::output::{DisplayIndexXz, DisplayIndexZ, GeodisplayMetadata};
 use crate::metadata::source::SourceDatasetMetadata;
 use crate::output::geoparquet::{build_geo_key_values, build_geo_metadata};
-use crate::output::optimized::clustering::xz::DEFAULT_XZ_MAX_LEVEL;
-use crate::output::optimized::clustering::z::DEFAULT_COORDINATE_PRECISION;
+use crate::output::optimized::clustering::{DEFAULT_COORDINATE_PRECISION, DEFAULT_XZ_MAX_LEVEL};
 use crate::output::optimized::multiscale::{
   BOUNDS_COLUMN, COVERING_BBOX_COLUMN, DISPLAY_COLUMN, GeometryEncoding, POINT_X_COLUMN,
   POINT_Y_COLUMN, POINT_Z_CODE_COLUMN, XZ_CODE_COLUMN, metadata_levels,

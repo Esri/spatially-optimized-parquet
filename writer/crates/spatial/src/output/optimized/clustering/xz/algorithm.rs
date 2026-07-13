@@ -2,7 +2,7 @@
 
 use crate::analysis::Extent2D;
 
-use super::common::DisplayCode;
+use super::super::DisplayCode;
 
 /// Stores the default maximum depth of the XZ hierarchy.
 pub(crate) const DEFAULT_XZ_MAX_LEVEL: u32 = 20;

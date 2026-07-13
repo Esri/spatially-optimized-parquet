@@ -1,6 +1,7 @@
 //! Owns optimized display columns, level planning, geometry traversal, and PBF encoding.
 
 mod columns;
+mod datafusion;
 mod levels;
 mod payload;
 mod quantize;
@@ -8,6 +9,7 @@ mod traversal;
 mod wire;
 
 pub(crate) use columns::*;
+pub(crate) use datafusion::non_point_geodisplay_expr;
 pub use levels::{
   DEFAULT_MAX_LEVEL, DISPLAY_OUTPUT_WKID, GeometryEncoding, create_geometry_encodings,
   metadata_levels,

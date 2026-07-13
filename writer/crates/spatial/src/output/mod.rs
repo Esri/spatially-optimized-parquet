@@ -4,6 +4,7 @@
 //! adds reprojection, spatial ordering, and display payloads. Both workflows share geometry,
 //! CRS, extent, covering, and GeoParquet metadata rules through [`geoparquet`].
 
+pub(crate) mod geometry;
 pub mod geoparquet;
 mod mode;
 pub mod optimized;
