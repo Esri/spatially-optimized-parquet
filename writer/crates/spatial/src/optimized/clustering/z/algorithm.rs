@@ -2,7 +2,7 @@
 
 use crate::geometry::Extent2D;
 
-use super::super::DisplayCode;
+use super::super::ClusterKey;
 
 /// Stores the default number of quantization bits per point coordinate axis.
 pub(crate) const DEFAULT_COORDINATE_PRECISION: u32 = 20;
@@ -13,22 +13,22 @@ pub(crate) fn point_z_code(
   x: f64,
   y: f64,
   coordinate_precision: u32,
-) -> DisplayCode {
+) -> ClusterKey {
   let quantized_x = quantize_to_bits(x, full_extent.xmin, full_extent.xmax, coordinate_precision);
   let quantized_y = quantize_to_bits(y, full_extent.ymin, full_extent.ymax, coordinate_precision);
   swizzle_bits(quantized_x, quantized_y, coordinate_precision)
 }
 
 /// Interleave x and y bits into one Morton-order code.
-pub(crate) fn swizzle_bits(x: u32, y: u32, coordinate_precision: u32) -> DisplayCode {
+pub(crate) fn swizzle_bits(x: u32, y: u32, coordinate_precision: u32) -> ClusterKey {
   let mut code = 0;
   for bit in 0..coordinate_precision.min(32) {
-    let x_bit = ((x >> bit) & 1) as DisplayCode;
-    let y_bit = ((y >> bit) & 1) as DisplayCode;
+    let x_bit = ((x >> bit) & 1) as u64;
+    let y_bit = ((y >> bit) & 1) as u64;
     code |= x_bit << (2 * bit);
     code |= y_bit << (2 * bit + 1);
   }
-  code
+  ClusterKey::new(code)
 }
 
 fn quantize_to_bits(value: f64, min: f64, max: f64, coordinate_precision: u32) -> u32 {
@@ -47,11 +47,11 @@ mod tests {
 
   #[test]
   fn swizzle_bits_interleaves_xy_bits() {
-    assert_eq!(swizzle_bits(0, 0, 4), 0);
-    assert_eq!(swizzle_bits(1, 0, 4), 1);
-    assert_eq!(swizzle_bits(0, 1, 4), 2);
-    assert_eq!(swizzle_bits(1, 1, 4), 3);
-    assert_eq!(swizzle_bits(3, 3, 2), 15);
+    assert_eq!(swizzle_bits(0, 0, 4), ClusterKey::new(0));
+    assert_eq!(swizzle_bits(1, 0, 4), ClusterKey::new(1));
+    assert_eq!(swizzle_bits(0, 1, 4), ClusterKey::new(2));
+    assert_eq!(swizzle_bits(1, 1, 4), ClusterKey::new(3));
+    assert_eq!(swizzle_bits(3, 3, 2), ClusterKey::new(15));
   }
 
   #[test]
@@ -63,9 +63,15 @@ mod tests {
       ymax: 90.0,
     };
 
-    assert_eq!(point_z_code(full_extent, -180.0, -90.0, 4), 0);
-    assert_eq!(point_z_code(full_extent, 180.0, 90.0, 2), 15);
-    assert_eq!(point_z_code(full_extent, 0.0, 0.0, 1), 3);
+    assert_eq!(
+      point_z_code(full_extent, -180.0, -90.0, 4),
+      ClusterKey::new(0)
+    );
+    assert_eq!(
+      point_z_code(full_extent, 180.0, 90.0, 2),
+      ClusterKey::new(15)
+    );
+    assert_eq!(point_z_code(full_extent, 0.0, 0.0, 1), ClusterKey::new(3));
   }
 
   #[test]
@@ -77,8 +83,8 @@ mod tests {
       ymax: 1.0,
     };
 
-    assert_eq!(point_z_code(full_extent, 0.2, 0.0, 2), 0);
-    assert_eq!(point_z_code(full_extent, 0.25, 0.0, 2), 1);
-    assert_eq!(point_z_code(full_extent, 1.0, 1.0, 2), 15);
+    assert_eq!(point_z_code(full_extent, 0.2, 0.0, 2), ClusterKey::new(0));
+    assert_eq!(point_z_code(full_extent, 0.25, 0.0, 2), ClusterKey::new(1));
+    assert_eq!(point_z_code(full_extent, 1.0, 1.0, 2), ClusterKey::new(15));
   }
 }

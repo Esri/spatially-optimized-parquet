@@ -8,8 +8,8 @@ use datafusion::logical_expr::expr_fn::ident;
 use datafusion::prelude::lit;
 use indicatif::ProgressBar;
 
-use super::clustering::ClusterRangeBoundaries;
-use super::execution::collect_dataframe_with_metric_polling;
+use super::aggregate::collect_aggregate_with_progress;
+use super::clustering::{ClusterKey, ClusterRangeBoundaries};
 
 /// Estimate balanced cluster-key ranges with one minimum and approximate percentiles.
 pub(crate) async fn compute_cluster_range_boundaries(
@@ -22,7 +22,7 @@ pub(crate) async fn compute_cluster_range_boundaries(
 ) -> Result<ClusterRangeBoundaries> {
   if bucket_count <= 1 {
     return Ok(ClusterRangeBoundaries {
-      min_value: 0,
+      min_value: ClusterKey::new(0),
       boundaries: Vec::new(),
     });
   }
@@ -36,7 +36,7 @@ pub(crate) async fn compute_cluster_range_boundaries(
     )
     .alias(format!("range_boundary_{index}"))
   }));
-  let batches = collect_dataframe_with_metric_polling(
+  let batches = collect_aggregate_with_progress(
     dataframe.aggregate(vec![], aggregate_expressions)?,
     progress_bar,
     total_input_rows,
@@ -46,13 +46,13 @@ pub(crate) async fn compute_cluster_range_boundaries(
   .await?;
   let Some(batch) = batches.first() else {
     return Ok(ClusterRangeBoundaries {
-      min_value: 0,
+      min_value: ClusterKey::new(0),
       boundaries: Vec::new(),
     });
   };
   if batch.num_rows() == 0 {
     return Ok(ClusterRangeBoundaries {
-      min_value: 0,
+      min_value: ClusterKey::new(0),
       boundaries: Vec::new(),
     });
   }
@@ -63,9 +63,9 @@ pub(crate) async fn compute_cluster_range_boundaries(
     .downcast_ref::<UInt64Array>()
     .context("range partition minimum aggregate did not return UInt64")?;
   let min_value = if minimum_values.is_null(0) {
-    0
+    ClusterKey::new(0)
   } else {
-    minimum_values.value(0)
+    ClusterKey::new(minimum_values.value(0))
   };
 
   let mut boundaries = Vec::with_capacity(batch.num_columns().saturating_sub(1));
@@ -75,7 +75,7 @@ pub(crate) async fn compute_cluster_range_boundaries(
       .downcast_ref::<UInt64Array>()
       .context("range boundary aggregate did not return UInt64")?;
     if !values.is_null(0) {
-      boundaries.push(values.value(0));
+      boundaries.push(ClusterKey::new(values.value(0)));
     }
   }
   boundaries.sort_unstable();

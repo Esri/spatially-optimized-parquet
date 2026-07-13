@@ -7,7 +7,7 @@ use arrow_array::{
   StringArray, StringViewArray, StructArray, UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema};
-use engine::read::read_parquet_df;
+use engine::parquet_scan::scan_parquet;
 use gdal_sys::OGRwkbGeometryType;
 use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions};
 use parquet::file::metadata::KeyValue;
@@ -191,7 +191,7 @@ fn optimize_job_preserves_same_crs_wkb_and_writes_sorted_metadata() {
     .unwrap();
 
   let df = runtime()
-    .block_on(read_parquet_df(output.to_str().unwrap()))
+    .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let output_schema = Arc::new(df.schema().as_arrow().clone());
   let batches = runtime().block_on(df.collect()).unwrap();
@@ -276,7 +276,7 @@ fn optimize_job_writes_covering_bbox_for_reprojected_points() {
     .unwrap();
 
   let df = runtime()
-    .block_on(read_parquet_df(output.to_str().unwrap()))
+    .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let output_schema = Arc::new(df.schema().as_arrow().clone());
   assert!(output_schema.index_of("bbox").is_ok());
@@ -356,7 +356,7 @@ fn optimize_job_reprojects_geoparquet_point_output_to_wgs84() {
     .unwrap();
 
   let df = runtime()
-    .block_on(read_parquet_df(output.to_str().unwrap()))
+    .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let batches = runtime().block_on(df.collect()).unwrap();
   let batch = &batches[0];
@@ -408,7 +408,7 @@ fn optimize_job_reprojects_geoparquet_point_output_to_wgs84() {
 }
 
 #[test]
-fn optimize_job_writes_non_point_display_struct_and_metadata() {
+fn optimize_job_writes_non_point_geodisplay_struct_and_metadata() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("polygons.parquet");
   let output = temp.path().join("polygons-optimized.parquet");
@@ -459,7 +459,7 @@ fn optimize_job_writes_non_point_display_struct_and_metadata() {
     .unwrap();
 
   let df = runtime()
-    .block_on(read_parquet_df(output.to_str().unwrap()))
+    .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let output_schema = Arc::new(df.schema().as_arrow().clone());
   let batches = runtime().block_on(df.collect()).unwrap();
@@ -470,7 +470,7 @@ fn optimize_job_writes_non_point_display_struct_and_metadata() {
     .as_any()
     .downcast_ref::<Int32Array>()
     .unwrap();
-  let display = batch
+  let geodisplay_column = batch
     .column_by_name("geodisplay")
     .unwrap()
     .as_any()
@@ -479,8 +479,8 @@ fn optimize_job_writes_non_point_display_struct_and_metadata() {
 
   assert!(output_schema.index_of("geodisplay").is_ok());
   assert_eq!(ids.value(0), 1);
-  assert!(display.column_by_name("xzCode").is_some());
-  assert!(display.column_by_name("bounds").is_some());
+  assert!(geodisplay_column.column_by_name("xzCode").is_some());
+  assert!(geodisplay_column.column_by_name("bounds").is_some());
 
   let kv = kv_map(&output);
   let geo: serde_json::Value = serde_json::from_str(kv.get("geo").unwrap()).unwrap();
@@ -593,7 +593,7 @@ fn optimize_job_writes_covering_bbox_for_non_point_output() {
     .unwrap();
 
   let df = runtime()
-    .block_on(read_parquet_df(output.to_str().unwrap()))
+    .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let output_schema = Arc::new(df.schema().as_arrow().clone());
   assert!(output_schema.index_of("bbox").is_ok());
@@ -619,7 +619,7 @@ fn optimize_job_writes_covering_bbox_for_non_point_output() {
 #[test]
 fn optimize_job_replaces_existing_non_point_geodisplay_column() {
   let temp = TempDir::new().unwrap();
-  let input = temp.path().join("polygons-with-display.parquet");
+  let input = temp.path().join("polygons-with-geodisplay.parquet");
   let output = temp.path().join("polygons-regenerated.parquet");
 
   let schema = Arc::new(Schema::new(vec![
@@ -633,7 +633,7 @@ fn optimize_job_replaces_existing_non_point_geodisplay_column() {
     vec![
       Arc::new(Int32Array::from(vec![1])),
       Arc::new(BinaryArray::from(vec![Some(polygon.as_slice())])),
-      Arc::new(StringArray::from(vec![Some("stale-display")])),
+      Arc::new(StringArray::from(vec![Some("stale-geodisplay")])),
     ],
   )
   .unwrap();
@@ -666,7 +666,7 @@ fn optimize_job_replaces_existing_non_point_geodisplay_column() {
     .unwrap();
 
   let df = runtime()
-    .block_on(read_parquet_df(output.to_str().unwrap()))
+    .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let output_schema = Arc::new(df.schema().as_arrow().clone());
   let geodisplay_fields = output_schema
@@ -675,7 +675,7 @@ fn optimize_job_replaces_existing_non_point_geodisplay_column() {
     .filter(|field| field.name() == "geodisplay")
     .count();
   let batches = runtime().block_on(df.collect()).unwrap();
-  let display = batches[0]
+  let geodisplay_column = batches[0]
     .column_by_name("geodisplay")
     .unwrap()
     .as_any()
@@ -683,8 +683,8 @@ fn optimize_job_replaces_existing_non_point_geodisplay_column() {
     .unwrap();
 
   assert_eq!(geodisplay_fields, 1);
-  assert!(display.column_by_name("xzCode").is_some());
-  assert!(display.column_by_name("bounds").is_some());
+  assert!(geodisplay_column.column_by_name("xzCode").is_some());
+  assert!(geodisplay_column.column_by_name("bounds").is_some());
 }
 
 #[test]
@@ -752,19 +752,19 @@ fn optimize_job_sorts_non_point_rows_across_multiple_input_batches() {
     .unwrap();
 
   let df = runtime()
-    .block_on(read_parquet_df(output.to_str().unwrap()))
+    .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let batches = runtime().block_on(df.collect()).unwrap();
   let xz_codes: Vec<u64> = batches
     .iter()
     .flat_map(|batch| {
-      let display = batch
+      let geodisplay_column = batch
         .column_by_name("geodisplay")
         .unwrap()
         .as_any()
         .downcast_ref::<StructArray>()
         .unwrap();
-      let xz_codes = display
+      let xz_codes = geodisplay_column
         .column_by_name("xzCode")
         .unwrap()
         .as_any()
@@ -833,7 +833,7 @@ fn optimize_job_writes_range_partitioned_multi_file_output() {
     .unwrap();
 
   let df = runtime()
-    .block_on(read_parquet_df(output_dir.to_str().unwrap()))
+    .block_on(scan_parquet(output_dir.to_str().unwrap()))
     .unwrap();
   let batches = runtime().block_on(df.collect()).unwrap();
   let total_rows: usize = batches.iter().map(|batch| batch.num_rows()).sum();
@@ -907,7 +907,7 @@ fn optimize_job_writes_range_partitioned_multi_file_output() {
 
   for range_dir in range_dirs {
     let df = runtime()
-      .block_on(read_parquet_df(range_dir.to_str().unwrap()))
+      .block_on(scan_parquet(range_dir.to_str().unwrap()))
       .unwrap();
     let batches = runtime().block_on(df.collect()).unwrap();
     let z_codes: Vec<u64> = batches
@@ -990,7 +990,7 @@ fn optimize_job_row_range_writes_requested_input_rows() {
     .unwrap();
 
   let df = runtime()
-    .block_on(read_parquet_df(output.to_str().unwrap()))
+    .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let batches = runtime().block_on(df.collect()).unwrap();
   let total_rows: usize = batches.iter().map(|batch| batch.num_rows()).sum();
@@ -1077,7 +1077,7 @@ fn plain_geoparquet_preserves_same_crs_wkb_and_rows_without_sop_metadata() {
     .unwrap();
 
   let df = runtime()
-    .block_on(read_parquet_df(output.to_str().unwrap()))
+    .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let batches = runtime().block_on(df.collect()).unwrap();
   let batch = &batches[0];
@@ -1152,7 +1152,7 @@ fn plain_geoparquet_writes_covering_bbox() {
     }))
     .unwrap();
   let dataframe = runtime()
-    .block_on(read_parquet_df(output.to_str().unwrap()))
+    .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let batches = runtime().block_on(dataframe.collect()).unwrap();
   assert!(batches[0].column_by_name("bbox").is_some());
@@ -1221,7 +1221,7 @@ fn plain_geoparquet_reprojects_wkb_covering_extent_and_crs() {
     .unwrap();
 
   let dataframe = runtime()
-    .block_on(read_parquet_df(output.to_str().unwrap()))
+    .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let batches = runtime().block_on(dataframe.collect()).unwrap();
   let batch = &batches[0];
@@ -1547,7 +1547,7 @@ fn optimize_job_accepts_single_layer_geopackage_input() {
     .unwrap();
 
   let df = runtime()
-    .block_on(read_parquet_df(output.to_str().unwrap()))
+    .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let output_schema = Arc::new(df.schema().as_arrow().clone());
   let batches = runtime().block_on(df.collect()).unwrap();
@@ -1618,7 +1618,7 @@ fn optimize_job_reprojects_geopackage_polygon_output_to_wgs84() {
     .unwrap();
 
   let df = runtime()
-    .block_on(read_parquet_df(output.to_str().unwrap()))
+    .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let batches = runtime().block_on(df.collect()).unwrap();
   let batch = &batches[0];
@@ -1629,13 +1629,13 @@ fn optimize_job_reprojects_geopackage_polygon_output_to_wgs84() {
   assert_close(extent.xmax, 1.0);
   assert_close(extent.ymax, 1.0);
 
-  let display = batch
+  let geodisplay_column = batch
     .column_by_name("geodisplay")
     .unwrap()
     .as_any()
     .downcast_ref::<StructArray>()
     .unwrap();
-  let bounds = display
+  let bounds = geodisplay_column
     .column_by_name("bounds")
     .unwrap()
     .as_any()
@@ -1669,7 +1669,7 @@ fn optimize_job_reprojects_geopackage_polygon_output_to_wgs84() {
   assert_close(ymin.value(0), 0.0);
   assert_close(xmax.value(0), 1.0);
   assert_close(ymax.value(0), 1.0);
-  let level_zero = display.column_by_name("level_0").unwrap();
+  let level_zero = geodisplay_column.column_by_name("level_0").unwrap();
   assert!(!binary_value(level_zero.as_ref(), 0).is_empty());
 
   let covering = batch
@@ -1778,7 +1778,7 @@ fn optimize_job_selects_requested_geopackage_layer() {
     .unwrap();
 
   let df = runtime()
-    .block_on(read_parquet_df(output.to_str().unwrap()))
+    .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let output_schema = Arc::new(df.schema().as_arrow().clone());
   let batches = runtime().block_on(df.collect()).unwrap();
@@ -1789,7 +1789,7 @@ fn optimize_job_selects_requested_geopackage_layer() {
     .as_any()
     .downcast_ref::<Int32Array>()
     .unwrap();
-  let display = batch
+  let geodisplay_column = batch
     .column_by_name("geodisplay")
     .unwrap()
     .as_any()
@@ -1798,8 +1798,8 @@ fn optimize_job_selects_requested_geopackage_layer() {
 
   assert!(output_schema.index_of("geodisplay").is_ok());
   assert_eq!(ids.value(0), 1);
-  assert!(display.column_by_name("xzCode").is_some());
-  assert!(display.column_by_name("bounds").is_some());
+  assert!(geodisplay_column.column_by_name("xzCode").is_some());
+  assert!(geodisplay_column.column_by_name("bounds").is_some());
 
   let kv = kv_map(&output);
   let geo: serde_json::Value = serde_json::from_str(kv.get("geo").unwrap()).unwrap();

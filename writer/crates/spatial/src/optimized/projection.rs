@@ -1,19 +1,18 @@
 //! Builds the lazy spatially ordered projection for optimized output.
 
 use crate::geoparquet::feature_bbox_expr;
-use crate::input::materialized::input_dataframe_for_job;
 use crate::optimized::clustering::{
   bounds_expr, build_cluster_range_expr, cluster_key_column, cluster_partition_column,
   cluster_sort_expr, non_point_xzcode_from_bounds_expr, point_expr, point_zcode_from_xy_expr,
 };
 use crate::optimized::multiscale::non_point_geodisplay_expr;
 use crate::optimized::multiscale::{
-  DISPLAY_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_CODE_COLUMN, TEMP_BOUNDS_COLUMN,
+  GEODISPLAY_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_CODE_COLUMN, TEMP_BOUNDS_COLUMN,
   TEMP_POINT_COORDS_COLUMN, TEMP_REPROJECTED_GEOMETRY_COLUMN, TEMP_XMAX_COLUMN, TEMP_XMIN_COLUMN,
   TEMP_XZ_CODE_COLUMN, TEMP_YMAX_COLUMN, TEMP_YMIN_COLUMN,
 };
-use crate::optimized::{ClusteringFamily, OptimizedContext, OptimizedGeometry};
-use crate::output::reprojection::{TransformSpec, reproject_geometry_expr};
+use crate::optimized::{ClusteringFamily, OptimizedGeometry, ResolvedOptimization};
+use crate::output::reprojection::{CoordinateTransformSpec, reproject_geometry_expr};
 use crate::output::stage::OutputStageContext;
 use crate::progress::finish_row_bar;
 use anyhow::Result;
@@ -21,12 +20,12 @@ use datafusion::functions::core::expr_ext::FieldAccessor;
 use datafusion::logical_expr::Expr;
 use datafusion::logical_expr::expr_fn::ident;
 
-use super::partitioning::compute_cluster_range_boundaries;
+use super::range_boundaries::compute_cluster_range_boundaries;
 
 /// Build the complete lazy projection for globally sorted or range-partitioned output.
 pub(crate) async fn build_optimized_projection(
   request: &OutputStageContext<'_>,
-  context: &OptimizedContext,
+  context: &ResolvedOptimization,
 ) -> Result<engine::DataFrame> {
   let ordered_dataframe = if request.output_layout.parts > 1 {
     let partition_column = cluster_partition_column(context.geometry.clustering_family);
@@ -37,13 +36,7 @@ pub(crate) async fn build_optimized_projection(
     );
     let range_source = add_sort_columns_dataframe(
       build_narrow_helper_projection_dataframe(
-        input_dataframe_for_job(
-          request.input,
-          request.session,
-          request.row_range,
-          request.materialized_batches,
-        )
-        .await?,
+        request.input_dataframe.clone(),
         &context.geometry,
         context.reprojection.transform(),
       )?,
@@ -64,13 +57,7 @@ pub(crate) async fn build_optimized_projection(
       "Computed partition ranges".to_string(),
     );
     build_helper_projection_dataframe(
-      input_dataframe_for_job(
-        request.input,
-        request.session,
-        request.row_range,
-        request.materialized_batches,
-      )
-      .await?,
+      request.input_dataframe.clone(),
       request.source_schema,
       context,
     )?
@@ -84,13 +71,7 @@ pub(crate) async fn build_optimized_projection(
     )?
   } else {
     build_helper_projection_dataframe(
-      input_dataframe_for_job(
-        request.input,
-        request.session,
-        request.row_range,
-        request.materialized_batches,
-      )
-      .await?,
+      request.input_dataframe.clone(),
       request.source_schema,
       context,
     )?
@@ -123,7 +104,7 @@ pub(crate) async fn build_optimized_projection(
 fn build_narrow_helper_projection_dataframe(
   dataframe: engine::DataFrame,
   geometry: &OptimizedGeometry,
-  transform: Option<&TransformSpec>,
+  transform: Option<&CoordinateTransformSpec>,
 ) -> Result<engine::DataFrame> {
   let projected = dataframe.select(vec![ident(&geometry.geometry_spec.column)])?;
   add_geometry_helper_columns_dataframe(projected, geometry, transform)
@@ -132,7 +113,7 @@ fn build_narrow_helper_projection_dataframe(
 /// Build public output expressions while removing internal projection columns.
 fn build_output_projection_expressions(
   source_schema: &arrow_schema::Schema,
-  context: &OptimizedContext,
+  context: &ResolvedOptimization,
   partition_column: Option<&str>,
   retained_cluster_key_column: Option<&str>,
   projected_geometry_column: Option<&str>,
@@ -142,7 +123,7 @@ fn build_output_projection_expressions(
     .fields()
     .iter()
     .filter(|field| {
-      !is_generated_display_output_column(field.name(), context.geometry.clustering_family)
+      !is_generated_optimized_output_column(field.name(), context.geometry.clustering_family)
     })
     .map(|field| {
       if field.name() == &context.geometry.geometry_spec.column
@@ -198,7 +179,7 @@ fn build_base_helper_projection_dataframe(
   dataframe: engine::DataFrame,
   source_schema: &arrow_schema::Schema,
   geometry: &OptimizedGeometry,
-  transform: Option<&TransformSpec>,
+  transform: Option<&CoordinateTransformSpec>,
 ) -> Result<engine::DataFrame> {
   let projected = dataframe.select(
     source_schema
@@ -213,7 +194,7 @@ fn build_base_helper_projection_dataframe(
 fn add_geometry_helper_columns_dataframe(
   mut projected: engine::DataFrame,
   geometry: &OptimizedGeometry,
-  transform: Option<&TransformSpec>,
+  transform: Option<&CoordinateTransformSpec>,
 ) -> Result<engine::DataFrame> {
   let geometry_column = if let Some(transform) = transform {
     projected = projected.with_column(
@@ -249,7 +230,7 @@ fn add_geometry_helper_columns_dataframe(
 
 fn add_sort_columns_dataframe(
   dataframe: engine::DataFrame,
-  context: &OptimizedContext,
+  context: &ResolvedOptimization,
 ) -> Result<engine::DataFrame> {
   match context.geometry.clustering_family {
     ClusteringFamily::Point => Ok(dataframe.with_column(
@@ -272,7 +253,7 @@ fn add_sort_columns_dataframe(
 fn build_helper_projection_dataframe(
   dataframe: engine::DataFrame,
   source_schema: &arrow_schema::Schema,
-  context: &OptimizedContext,
+  context: &ResolvedOptimization,
 ) -> Result<engine::DataFrame> {
   let projected = build_base_helper_projection_dataframe(
     dataframe,
@@ -283,11 +264,11 @@ fn build_helper_projection_dataframe(
   add_sort_columns_dataframe(projected, context)
 }
 
-fn is_generated_display_output_column(name: &str, clustering_family: ClusteringFamily) -> bool {
+fn is_generated_optimized_output_column(name: &str, clustering_family: ClusteringFamily) -> bool {
   match clustering_family {
     ClusteringFamily::Point => {
       matches!(name, POINT_Z_CODE_COLUMN | POINT_X_COLUMN | POINT_Y_COLUMN)
     }
-    ClusteringFamily::NonPoint => name == DISPLAY_COLUMN,
+    ClusteringFamily::NonPoint => name == GEODISPLAY_COLUMN,
   }
 }

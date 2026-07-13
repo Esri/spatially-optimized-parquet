@@ -17,11 +17,10 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::{col, lit};
 
-use crate::geometry::Extent2D;
-use crate::optimized::multiscale::{POINT_Z_CODE_COLUMN, point_xy_from_wkb};
-use crate::output::geometry::{
-  BinaryValueAccess, geometry_signature, map_geometry_to_u64, to_datafusion_error,
+use crate::geometry::{
+  BinaryValueAccess, Extent2D, geometry_signature, map_geometry_to_u64, to_datafusion_error,
 };
+use crate::optimized::multiscale::{POINT_Z_CODE_COLUMN, point_xy_from_wkb};
 
 use super::algorithm::{DEFAULT_COORDINATE_PRECISION, point_z_code};
 
@@ -34,7 +33,7 @@ impl ScalarUDFImpl for PointUdf {
   }
 
   fn name(&self) -> &str {
-    "display_point"
+    "clustering_point"
   }
 
   fn signature(&self) -> &Signature {
@@ -73,7 +72,7 @@ impl ScalarUDFImpl for ZGeometryClusterKeyUdf {
   }
 
   fn name(&self) -> &str {
-    "display_point_zcode"
+    "clustering_point_zcode"
   }
 
   fn signature(&self) -> &Signature {
@@ -93,12 +92,7 @@ impl ScalarUDFImpl for ZGeometryClusterKeyUdf {
     let output = map_geometry_to_u64(geometry, |bytes| match bytes {
       Some(bytes) => {
         let (x, y) = point_xy_from_wkb(bytes).map_err(to_datafusion_error)?;
-        Ok(point_z_code(
-          full_extent,
-          x,
-          y,
-          DEFAULT_COORDINATE_PRECISION,
-        ))
+        Ok(point_z_code(full_extent, x, y, DEFAULT_COORDINATE_PRECISION).value())
       }
       None => Ok(0),
     })?;
@@ -115,7 +109,7 @@ impl ScalarUDFImpl for ZPointClusterKeyUdf {
   }
 
   fn name(&self) -> &str {
-    "display_point_zcode_from_xy"
+    "clustering_point_zcode_from_xy"
   }
 
   fn signature(&self) -> &Signature {
@@ -142,6 +136,7 @@ impl ScalarUDFImpl for ZPointClusterKeyUdf {
           y.value(index),
           DEFAULT_COORDINATE_PRECISION,
         )
+        .value()
       });
     }
     Ok(ColumnarValue::Array(

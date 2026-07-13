@@ -17,11 +17,11 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::col;
 
+use crate::geometry::{BinaryValueAccess, to_datafusion_error};
 use crate::optimized::OptimizedGeometryType;
-use crate::output::geometry::{BinaryValueAccess, to_datafusion_error};
 
 use super::{
-  BOUNDS_COLUMN, DISPLAY_COLUMN, GeometryEncodeScratch, GeometryEncoding, TEMP_XMAX_COLUMN,
+  BOUNDS_COLUMN, GEODISPLAY_COLUMN, GeometryEncodeScratch, GeometryEncoding, TEMP_XMAX_COLUMN,
   TEMP_XMIN_COLUMN, TEMP_XZ_CODE_COLUMN, TEMP_YMAX_COLUMN, TEMP_YMIN_COLUMN, XZ_CODE_COLUMN,
   encode_flat_geometry_with_scratch,
   flat_geometry_payload_from_wkb as pbf_flat_geometry_payload_from_wkb,
@@ -35,7 +35,7 @@ use super::{
 pub(crate) struct NonPointGeodisplayUdf {
   geometry_type: OptimizedGeometryType,
   encodings: Vec<GeometryEncoding>,
-  display_fields: Fields,
+  geodisplay_fields: Fields,
   bounds_fields: Fields,
 }
 
@@ -48,7 +48,7 @@ impl NonPointGeodisplayUdf {
       Arc::new(Field::new("xmax", DataType::Float64, true)),
       Arc::new(Field::new("ymax", DataType::Float64, true)),
     ]);
-    let mut display_fields = vec![
+    let mut geodisplay_fields = vec![
       Arc::new(Field::new(XZ_CODE_COLUMN, DataType::UInt64, false)),
       Arc::new(Field::new(
         BOUNDS_COLUMN,
@@ -57,7 +57,7 @@ impl NonPointGeodisplayUdf {
       )),
     ];
     for encoding in &encodings {
-      display_fields.push(Arc::new(Field::new(
+      geodisplay_fields.push(Arc::new(Field::new(
         &encoding.column,
         DataType::Binary,
         true,
@@ -66,12 +66,12 @@ impl NonPointGeodisplayUdf {
     Self {
       geometry_type,
       encodings,
-      display_fields: Fields::from(display_fields),
+      geodisplay_fields: Fields::from(geodisplay_fields),
       bounds_fields,
     }
   }
 
-  /// Decode each non-null WKB value once and encode every configured display level.
+  /// Decode each non-null WKB value once and encode every configured multiscale level.
   fn build_display<T: BinaryValueAccess>(
     &self,
     geometry: &T,
@@ -119,12 +119,12 @@ impl NonPointGeodisplayUdf {
     )
     .map_err(to_datafusion_error)?;
 
-    let mut display_columns: Vec<ArrayRef> = vec![Arc::new(xz_code.clone()), Arc::new(bounds)];
+    let mut geodisplay_columns: Vec<ArrayRef> = vec![Arc::new(xz_code.clone()), Arc::new(bounds)];
     for mut builder in pbf_builders {
-      display_columns.push(Arc::new(builder.finish()));
+      geodisplay_columns.push(Arc::new(builder.finish()));
     }
 
-    StructArray::try_new(self.display_fields.clone(), display_columns, None)
+    StructArray::try_new(self.geodisplay_fields.clone(), geodisplay_columns, None)
       .map_err(to_datafusion_error)
   }
 }
@@ -199,7 +199,7 @@ impl ScalarUDFImpl for NonPointGeodisplayUdf {
   }
 
   fn name(&self) -> &str {
-    "display_nonpoint_geodisplay"
+    "geodisplay_nonpoint"
   }
 
   fn signature(&self) -> &Signature {
@@ -207,7 +207,7 @@ impl ScalarUDFImpl for NonPointGeodisplayUdf {
   }
 
   fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
-    Ok(DataType::Struct(self.display_fields.clone()))
+    Ok(DataType::Struct(self.geodisplay_fields.clone()))
   }
 
   fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
@@ -303,7 +303,7 @@ pub(crate) fn non_point_geodisplay_expr(
       col(TEMP_XMAX_COLUMN),
       col(TEMP_YMAX_COLUMN),
     ])
-    .alias(DISPLAY_COLUMN)
+    .alias(GEODISPLAY_COLUMN)
 }
 
 #[cfg(test)]

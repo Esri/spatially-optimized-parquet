@@ -12,14 +12,14 @@ use engine::session::{DataFusionSession, new_datafusion_session};
 
 use crate::diagnostics::{configure_explain_session, explain_stage_note, explain_timing};
 use crate::geoparquet::{PlainGeoParquet, validate_covering_configuration};
-use crate::input::materialized::{materialize_selected_http_range, validate_http_row_range};
 use crate::input::{
   InputOpenOptions, InputSource, RowRange, SourceFormat, open_input, resolve_source_format,
 };
 use crate::optimized::OptimizedGeoParquet;
+use crate::optimized::multiscale::validate_internal_projection_columns;
 use crate::output::stage::{OutputStage, OutputStageContext};
 use crate::output::{GeoParquetOutputMode, validate_output_wkid};
-use crate::progress::format_elapsed;
+use crate::progress::{finish_row_bar, format_elapsed, row_bar};
 
 /// Configures one complete optimization or pass-through execution.
 pub struct OptimizeJobOptions {
@@ -57,11 +57,12 @@ pub struct OptimizeJobOptions {
 
 /// Owns validated source, destination, and execution resources for one job.
 struct OpenedOptimizeJob {
+  _session: DataFusionSession,
   input: Arc<dyn InputSource>,
   output_layout: OutputLayout,
   source_schema: SchemaRef,
   total_input_rows: u64,
-  session: DataFusionSession,
+  input_dataframe: engine::DataFrame,
 }
 
 /// Execute one spatial optimization job from provider selection through durable output.
@@ -69,23 +70,14 @@ pub async fn run_optimize_job(options: OptimizeJobOptions) -> Result<()> {
   validate_output_wkid(options.output_wkid);
   let job_start = Instant::now();
   let job = open_optimize_job(&options).await?;
-  let materialized_row_range = materialize_selected_http_range(
-    job.input.as_ref(),
-    options.row_range,
-    job.total_input_rows,
-    options.progress,
-    options.explain,
-  )
-  .await?;
 
   let output_context = OutputStageContext {
     input: job.input.as_ref(),
-    session: job.session.context(),
+    input_dataframe: job.input_dataframe.clone(),
     output_layout: &job.output_layout,
     source_schema: job.source_schema.as_ref(),
     total_input_rows: job.total_input_rows,
     row_range: options.row_range,
-    materialized_batches: materialized_row_range.as_deref(),
     geometry_column: options.geometry_column.as_deref(),
     input_wkid: options.input_wkid,
     output_wkid: options.output_wkid,
@@ -104,7 +96,7 @@ pub async fn run_optimize_job(options: OptimizeJobOptions) -> Result<()> {
       options.explain,
       "Plain GeoParquet",
       &format!(
-        "wrote {} selected rows without SOP display optimization",
+        "wrote {} selected rows without optimized clustering",
         output_result.rows_written
       ),
     );
@@ -116,7 +108,6 @@ pub async fn run_optimize_job(options: OptimizeJobOptions) -> Result<()> {
 
 /// Open and validate source, destination, and DataFusion resources for one job.
 async fn open_optimize_job(options: &OptimizeJobOptions) -> Result<OpenedOptimizeJob> {
-  validate_http_row_range(&options.input, options.row_range)?;
   let input_format = resolve_source_format(&options.input, options.input_format)?;
   let input = open_input(
     input_format,
@@ -130,6 +121,7 @@ async fn open_optimize_job(options: &OptimizeJobOptions) -> Result<OpenedOptimiz
     resolve_output_layout(&options.output, options.output_files, options.overwrite)?;
   let source_schema = input.schema()?;
   validate_covering_configuration(options.covering, source_schema.as_ref())?;
+  validate_internal_projection_columns(source_schema.as_ref())?;
   let discovered_rows = input.total_rows()?;
   let total_input_rows = options.row_range.effective_rows(discovered_rows);
   explain_run_configuration(
@@ -143,13 +135,48 @@ async fn open_optimize_job(options: &OptimizeJobOptions) -> Result<OpenedOptimiz
 
   let session = new_datafusion_session()?;
   configure_explain_session(session.context(), options.explain);
+  let input_dataframe =
+    prepare_input_dataframe(input.as_ref(), session.context(), options, total_input_rows).await?;
   Ok(OpenedOptimizeJob {
+    _session: session,
     input,
     output_layout,
     source_schema,
     total_input_rows,
-    session,
+    input_dataframe,
   })
+}
+
+async fn prepare_input_dataframe(
+  input: &dyn InputSource,
+  session: &engine::SessionContext,
+  options: &OptimizeJobOptions,
+  total_input_rows: u64,
+) -> Result<engine::DataFrame> {
+  let dataframe = input.to_dataframe(session, options.row_range).await?;
+  if !should_cache_input_dataframe(options.row_range) {
+    return Ok(dataframe);
+  }
+
+  let cache_bar = row_bar(options.progress, "Caching selected input", total_input_rows);
+  let cache_start = Instant::now();
+  let dataframe = dataframe.cache().await?;
+  cache_bar.inc(total_input_rows);
+  finish_row_bar(
+    &cache_bar,
+    total_input_rows,
+    "Cached selected input".to_string(),
+  );
+  explain_timing(
+    options.explain,
+    "Caching selected input",
+    cache_start.elapsed(),
+  );
+  Ok(dataframe)
+}
+
+fn should_cache_input_dataframe(row_range: RowRange) -> bool {
+  row_range.num.is_some()
 }
 
 fn report_job_completion(options: &OptimizeJobOptions, job_start: Instant) {
@@ -186,4 +213,23 @@ fn explain_run_configuration(
     options.overwrite,
     options.progress,
   );
+}
+
+#[cfg(test)]
+mod tests {
+  use super::should_cache_input_dataframe;
+  use crate::input::RowRange;
+
+  #[test]
+  fn caches_only_explicitly_bounded_selections() {
+    assert!(!should_cache_input_dataframe(RowRange::default()));
+    assert!(!should_cache_input_dataframe(RowRange {
+      start: 10,
+      num: None,
+    }));
+    assert!(should_cache_input_dataframe(RowRange {
+      start: 10,
+      num: Some(25),
+    }));
+  }
 }

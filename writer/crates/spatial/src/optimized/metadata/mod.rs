@@ -4,7 +4,7 @@ mod types;
 mod writer;
 
 pub use types::{
-  DisplayIndex, DisplayIndexXz, DisplayIndexXzInput, DisplayIndexZ, DisplayIndexZInput,
-  GeodisplayMetadata,
+  ClusteringIndex, GeodisplayMetadata, XzClusteringIndex, XzClusteringIndexInput, ZClusteringIndex,
+  ZClusteringIndexInput,
 };
 pub(crate) use writer::build_optimized_metadata;

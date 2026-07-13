@@ -59,7 +59,7 @@ pub(super) fn visit_geometry_for_display<G: GeometryTrait<T = f64>, S: GeometryP
     (OptimizedGeometryType::Polygon, GeometryType::MultiPolygon(polygons)) => {
       visit_multipolygon(polygons, sink)
     }
-    _ => bail!("unsupported geometry for display type {geometry_type:?}"),
+    _ => bail!("unsupported geometry for optimized type {geometry_type:?}"),
   }
   Ok(())
 }

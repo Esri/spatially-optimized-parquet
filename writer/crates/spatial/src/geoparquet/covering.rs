@@ -3,8 +3,9 @@
 use std::any::Any;
 use std::sync::{Arc, OnceLock};
 
+use anyhow::{Result, bail};
 use arrow_array::{ArrayRef, Float64Array, StructArray};
-use arrow_schema::{DataType, Field, Fields};
+use arrow_schema::{DataType, Field, Fields, Schema};
 use datafusion::common::cast::as_float64_array;
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
 use datafusion::logical_expr::{
@@ -13,8 +14,16 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::col;
 
+use crate::geometry::to_datafusion_error;
 use crate::optimized::multiscale::COVERING_BBOX_COLUMN;
-use crate::output::geometry::to_datafusion_error;
+
+/// Reject covering output that would overwrite an existing source column.
+pub(crate) fn validate_covering_configuration(covering: bool, schema: &Schema) -> Result<()> {
+  if covering && schema.field_with_name(COVERING_BBOX_COLUMN).is_ok() {
+    bail!("--covering would overwrite existing input column '{COVERING_BBOX_COLUMN}'");
+  }
+  Ok(())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct FeatureBboxUdf;
@@ -25,7 +34,7 @@ impl ScalarUDFImpl for FeatureBboxUdf {
   }
 
   fn name(&self) -> &str {
-    "display_feature_bbox"
+    "geoparquet_feature_bbox"
   }
 
   fn signature(&self) -> &Signature {

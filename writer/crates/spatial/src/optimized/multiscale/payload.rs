@@ -28,7 +28,7 @@ pub struct GeometryPayload {
   pub bounds: Extent2D,
 }
 
-/// Decode WKB into flattened display geometry and bounds.
+/// Decode WKB into flattened optimized geometry and bounds.
 pub fn geometry_payload_from_wkb(
   bytes: &[u8],
   geometry_type: OptimizedGeometryType,
@@ -41,7 +41,7 @@ pub fn geometry_payload_from_wkb(
   })
 }
 
-/// Decode WKB into flattened display geometry without calculating bounds.
+/// Decode WKB into flattened optimized geometry without calculating bounds.
 pub fn flat_geometry_payload_from_wkb(
   bytes: &[u8],
   geometry_type: OptimizedGeometryType,

@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::Arc;
 
 use ::parquet::file::metadata::KeyValue;
 use anyhow::Result;
@@ -18,7 +19,7 @@ use futures_util::future::BoxFuture;
 use crate::geometry::GeometrySpec;
 use crate::geoparquet::metadata::source::SourceDatasetMetadata;
 
-use super::is_http_url;
+use super::{SourceFormat, gpkg, parquet};
 
 /// Streams fallible Arrow batches without exposing a source implementation.
 pub type InputBatchStream = Pin<Box<dyn Stream<Item = Result<RecordBatch>> + Send + 'static>>;
@@ -66,9 +67,38 @@ impl InputOpenOptions {
     }
   }
 
+  /// Return whether the location uses HTTP or HTTPS.
+  pub fn is_http(&self) -> bool {
+    is_http_location(&self.location)
+  }
+
   /// Return the local path when the location does not use HTTP.
   pub fn local_path(&self) -> Option<&Path> {
-    (!is_http_url(&self.location)).then(|| Path::new(&self.location))
+    (!self.is_http()).then(|| Path::new(&self.location))
+  }
+}
+
+pub(crate) fn is_http_location(value: &str) -> bool {
+  value.starts_with("http://") || value.starts_with("https://")
+}
+
+/// Open one source implementation selected by a resolved physical format.
+pub async fn open_input(
+  format: SourceFormat,
+  options: &InputOpenOptions,
+) -> Result<Arc<dyn InputSource>> {
+  if let Some(path) = options.local_path()
+    && !path.exists()
+  {
+    return Err(anyhow::anyhow!(
+      "input path does not exist: {}",
+      path.display()
+    ));
+  }
+
+  match format {
+    SourceFormat::GeoPackage => gpkg::open_source(options).await,
+    SourceFormat::Parquet => parquet::open_source(options).await,
   }
 }
 
@@ -98,4 +128,28 @@ pub trait InputSource: Send + Sync {
     ctx: &'a SessionContext,
     row_range: RowRange,
   ) -> BoxFuture<'a, Result<DataFrame>>;
+}
+
+#[cfg(test)]
+mod tests {
+  use std::path::Path;
+
+  use super::InputOpenOptions;
+
+  #[test]
+  fn input_open_options_classify_http_and_local_locations() {
+    let http = InputOpenOptions {
+      location: "https://example.com/data.parquet".to_string(),
+      layer: None,
+    };
+    let local = InputOpenOptions {
+      location: "data.parquet".to_string(),
+      layer: None,
+    };
+
+    assert!(http.is_http());
+    assert!(http.local_path().is_none());
+    assert!(!local.is_http());
+    assert_eq!(local.local_path(), Some(Path::new("data.parquet")));
+  }
 }

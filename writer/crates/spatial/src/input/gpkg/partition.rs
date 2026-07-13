@@ -14,7 +14,7 @@ use gdal::vector::{LayerAccess, sql};
 
 use crate::input::RowRange;
 
-use super::arrow::{gpkg_batch_stream, open_gpkg_batch_state, to_datafusion_error};
+use super::batch_reader::{batch_stream, open_gpkg_batch_reader, to_datafusion_error};
 use super::open::open_gpkg_dataset;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -68,7 +68,7 @@ impl PartitionStream for GpkgPartitionStream {
   }
 
   fn execute(&self, _ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
-    let result = open_gpkg_batch_state(
+    let result = open_gpkg_batch_reader(
       &self.input_path,
       &self.layer_name,
       self.schema.clone(),
@@ -78,9 +78,9 @@ impl PartitionStream for GpkgPartitionStream {
     .with_context(|| format!("failed to stream GeoPackage layer {}", self.layer_name));
 
     match result {
-      Ok(state) => Box::pin(RecordBatchStreamAdapter::new(
+      Ok(reader) => Box::pin(RecordBatchStreamAdapter::new(
         self.schema.clone(),
-        gpkg_batch_stream(state).map_err(to_datafusion_error),
+        batch_stream(reader).map_err(to_datafusion_error),
       )),
       Err(err) => Box::pin(RecordBatchStreamAdapter::new(
         self.schema.clone(),

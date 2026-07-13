@@ -10,7 +10,7 @@ use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions};
 use parquet::arrow::async_reader::ParquetObjectReader;
 use url::Url;
 
-use crate::input::{InputOpenOptions, InputSource, is_http_url};
+use crate::input::{InputOpenOptions, InputSource};
 
 use super::source::{ParquetInputLocation, ParquetInputSource};
 
@@ -21,7 +21,7 @@ pub async fn open_source(options: &InputOpenOptions) -> Result<Arc<dyn InputSour
       "parquet input does not support --layer (got '{layer}')"
     ));
   }
-  if is_http_url(&options.location) {
+  if options.is_http() {
     return open_http_parquet(&options.location).await;
   }
 
@@ -85,8 +85,6 @@ async fn open_http_parquet(location: &str) -> Result<Arc<dyn InputSource>> {
       input_url: location.to_string(),
       store_url,
       store,
-      object_path,
-      object_meta: Box::new(object_meta),
     },
     location.to_string(),
     vec![metadata],

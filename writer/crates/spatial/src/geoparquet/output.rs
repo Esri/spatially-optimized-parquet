@@ -1,4 +1,4 @@
-//! Writes GeoParquet without SOP display columns or spatial sorting.
+//! Writes GeoParquet without optimized clustering columns or spatial sorting.
 
 use anyhow::{Context, Result, bail};
 use arrow_array::{Array, Float64Array, RecordBatch};
@@ -8,12 +8,14 @@ use datafusion::functions_aggregate::expr_fn::{max, min};
 use datafusion::logical_expr::Expr;
 use datafusion::logical_expr::expr_fn::ident;
 use engine::output_layout::resolved_output_paths;
-use engine::write::{create_datafusion_parquet_options, parse_compression};
+use engine::parquet_write::{
+  create_datafusion_parquet_options, parse_compression, write_single_file,
+};
 
 use crate::geometry::{Extent2D, GeometryCategory};
 use crate::geoparquet::{
-  GeoMetadataInput, build_geo_key_values, build_geo_metadata, feature_bbox_expr,
-  resolve_source_context, validate_covering_configuration,
+  GeoMetadataInput, build_geo_key_values, build_geo_metadata, feature_bbox_expr, resolve_source,
+  validate_covering_configuration,
 };
 use crate::optimized::clustering::{bounds_expr, point_expr};
 use crate::optimized::multiscale::{
@@ -22,11 +24,10 @@ use crate::optimized::multiscale::{
   TEMP_YMIN_COLUMN,
 };
 use crate::output::reprojection::{
-  ReprojectionContext, TransformSpec, reproject_geometry_expr, transformed_bounds_expr,
+  CoordinateTransformSpec, ReprojectionSpec, reproject_geometry_expr, transformed_bounds_expr,
   transformed_point_coords_expr,
 };
 use crate::output::stage::{OutputStage, OutputStageContext, OutputStageResult};
-use crate::output::write::write_dataframe;
 
 /// Provides normalized, unsorted GeoParquet through the shared output-stage boundary.
 pub(crate) struct PlainGeoParquet;
@@ -38,34 +39,28 @@ impl OutputStage for PlainGeoParquet {
       bail!("plain GeoParquet output does not support --output-files");
     }
     validate_covering_configuration(context.covering, context.source_schema)?;
-    let source_context = resolve_source_context(
+    let source_context = resolve_source(
       context.input,
+      context.input_dataframe.clone(),
       context.source_schema,
       context.geometry_column,
       context.input_wkid,
       context.row_range,
     )
     .await?;
-    let source_dataframe = if let Some(batches) = context.materialized_batches {
-      context.session.read_batches(batches.iter().cloned())?
-    } else {
-      context
-        .input
-        .to_dataframe(context.session, context.row_range)
-        .await?
-    };
+    let source_dataframe = context.input_dataframe.clone();
     let source_projjson = source_context
       .source_spatial_reference
       .projjson
       .as_ref()
       .context("missing resolved source CRS PROJJSON")?;
-    let reprojection_context =
-      ReprojectionContext::from_source_projjson(source_projjson, context.output_wkid)?;
+    let reprojection_spec =
+      ReprojectionSpec::from_source_projjson(source_projjson, context.output_wkid)?;
     let target_extent = analyze_target_extent(
       source_dataframe.clone(),
       &source_context.geometry_spec.column,
       source_context.geometry_shape.category(),
-      reprojection_context.transform(),
+      reprojection_spec.transform(),
     )
     .await?;
     let dataframe = build_output_dataframe(
@@ -73,14 +68,14 @@ impl OutputStage for PlainGeoParquet {
       context.source_schema,
       &source_context.geometry_spec.column,
       source_context.geometry_shape.category(),
-      reprojection_context.transform(),
+      reprojection_spec.transform(),
       context.covering,
     )?;
     let geo_metadata = build_geo_metadata(GeoMetadataInput {
       geometry_column: &source_context.geometry_spec.column,
       geometry_types: &source_context.geometry_types,
       output_extent: target_extent,
-      output_spatial_reference: reprojection_context.target_spatial_reference(),
+      output_spatial_reference: reprojection_spec.target_spatial_reference(),
       has_z: source_context.has_z,
       has_m: source_context.has_m,
       covering: context.covering,
@@ -95,7 +90,7 @@ impl OutputStage for PlainGeoParquet {
       .context("missing output path")?
       .to_string_lossy()
       .into_owned();
-    let rows_written = write_dataframe(dataframe, &output_path, writer_options).await?;
+    let rows_written = write_single_file(dataframe, &output_path, writer_options).await?;
     Ok(OutputStageResult { rows_written })
   }
 }
@@ -104,7 +99,7 @@ async fn analyze_target_extent(
   dataframe: engine::DataFrame,
   geometry_column: &str,
   geometry_category: GeometryCategory,
-  transform: Option<&TransformSpec>,
+  transform: Option<&CoordinateTransformSpec>,
 ) -> Result<Extent2D> {
   let aggregate_dataframe =
     add_target_coordinate_columns(dataframe, geometry_column, geometry_category, transform)?
@@ -126,7 +121,7 @@ fn build_output_dataframe(
   source_schema: &arrow_schema::Schema,
   geometry_column: &str,
   geometry_category: GeometryCategory,
-  transform: Option<&TransformSpec>,
+  transform: Option<&CoordinateTransformSpec>,
   covering: bool,
 ) -> Result<engine::DataFrame> {
   if covering {
@@ -169,7 +164,7 @@ fn add_target_coordinate_columns(
   mut dataframe: engine::DataFrame,
   geometry_column: &str,
   geometry_category: GeometryCategory,
-  transform: Option<&TransformSpec>,
+  transform: Option<&CoordinateTransformSpec>,
 ) -> Result<engine::DataFrame> {
   match geometry_category {
     GeometryCategory::Point => {

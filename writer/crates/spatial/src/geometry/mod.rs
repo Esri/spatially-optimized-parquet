@@ -7,11 +7,16 @@
 //! format.
 //!
 //! WKB decoding helpers intentionally determine only the top-level geometry kind. Coordinate
-//! traversal, extents, reprojection, and display encoding belong to dedicated modules.
+//! traversal, extents, reprojection, and optimized encoding belong to dedicated modules.
 
+mod binary_array;
 mod extent;
 mod types;
 
+pub(crate) use binary_array::{
+  BinaryValueAccess, geometry_signature, map_geometry_to_binary, map_geometry_to_u64,
+  to_datafusion_error,
+};
 pub use extent::Extent2D;
 pub use types::{
   GeometryCategory, GeometryEncoding, GeometryKind, GeometryShape, GeometrySpec,

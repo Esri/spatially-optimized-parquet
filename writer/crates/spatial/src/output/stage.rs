@@ -1,5 +1,4 @@
 use anyhow::Result;
-use arrow_array::RecordBatch;
 use arrow_schema::Schema;
 use async_trait::async_trait;
 use engine::output_layout::OutputLayout;
@@ -9,12 +8,11 @@ use crate::input::{InputSource, RowRange};
 /// Stores validated job resources and controls for one output stage.
 pub(crate) struct OutputStageContext<'a> {
   pub(crate) input: &'a dyn InputSource,
-  pub(crate) session: &'a engine::SessionContext,
+  pub(crate) input_dataframe: engine::DataFrame,
   pub(crate) output_layout: &'a OutputLayout,
   pub(crate) source_schema: &'a Schema,
   pub(crate) total_input_rows: u64,
   pub(crate) row_range: RowRange,
-  pub(crate) materialized_batches: Option<&'a [RecordBatch]>,
   pub(crate) geometry_column: Option<&'a str>,
   pub(crate) input_wkid: Option<u32>,
   pub(crate) output_wkid: u32,

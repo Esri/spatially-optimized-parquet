@@ -12,7 +12,7 @@ use gdal::spatial_ref::SpatialRef;
 use parquet::file::metadata::KeyValue;
 use spatial::geometry::{Extent2D, GeometryEncoding, GeometryKind, GeometrySpec};
 use spatial::geoparquet::metadata::source::{SourceDatasetMetadata, SourceGeometryMetadata};
-use spatial::geoparquet::resolve_source_context;
+use spatial::geoparquet::resolve_source;
 use spatial::input::{InputBatchStream, InputSource, RowRange};
 use tempfile::TempDir;
 
@@ -73,6 +73,19 @@ impl InputSource for MetadataInputSource {
 
 fn epsg_projjson(wkid: u32) -> serde_json::Value {
   serde_json::from_str(&SpatialRef::from_epsg(wkid).unwrap().to_projjson().unwrap()).unwrap()
+}
+
+fn source_dataframe(input: &dyn InputSource) -> DataFrame {
+  let context = SessionContext::new();
+  common::runtime()
+    .block_on(input.to_dataframe(&context, RowRange::default()))
+    .unwrap()
+}
+
+fn empty_dataframe(schema: SchemaRef) -> DataFrame {
+  SessionContext::new()
+    .read_batch(RecordBatch::new_empty(schema))
+    .unwrap()
 }
 
 #[test]
@@ -179,7 +192,7 @@ fn source_metadata_tolerates_null_bbox_metadata() {
 }
 
 #[test]
-fn source_context_retains_resolved_crs_and_extent_in_source_metadata() {
+fn resolved_source_retains_crs_and_extent_in_source_metadata() {
   let temp = TempDir::new().unwrap();
   let path = temp.path().join("data.parquet");
   let schema = sample_schema_with_geometry();
@@ -198,8 +211,9 @@ fn source_context_retains_resolved_crs_and_extent_in_source_metadata() {
 
   let input = open_parquet_input(&path);
   let context = common::runtime()
-    .block_on(resolve_source_context(
+    .block_on(resolve_source(
       input.as_ref(),
+      source_dataframe(input.as_ref()),
       input.schema().unwrap().as_ref(),
       None,
       None,
@@ -216,7 +230,7 @@ fn source_context_retains_resolved_crs_and_extent_in_source_metadata() {
 }
 
 #[test]
-fn source_context_uses_complete_metadata_without_scanning_batches() {
+fn resolved_source_uses_complete_metadata_without_scanning_batches() {
   let read_batch_calls = Arc::new(AtomicUsize::new(0));
   let expected_extent = Extent2D {
     xmin: -10.0,
@@ -242,8 +256,9 @@ fn source_context_uses_complete_metadata_without_scanning_batches() {
   };
 
   let context = common::runtime()
-    .block_on(resolve_source_context(
+    .block_on(resolve_source(
       &input,
+      empty_dataframe(input.schema().unwrap()),
       input.schema().unwrap().as_ref(),
       None,
       None,
@@ -257,7 +272,7 @@ fn source_context_uses_complete_metadata_without_scanning_batches() {
 }
 
 #[test]
-fn source_context_prefers_top_level_crs_authority_code() {
+fn resolved_source_prefers_top_level_crs_authority_code() {
   let mut projjson = epsg_projjson(4269);
   projjson["datum"]["id"] = serde_json::json!({
     "authority": "EPSG",
@@ -286,8 +301,9 @@ fn source_context_prefers_top_level_crs_authority_code() {
   };
 
   let context = common::runtime()
-    .block_on(resolve_source_context(
+    .block_on(resolve_source(
       &input,
+      empty_dataframe(input.schema().unwrap()),
       input.schema().unwrap().as_ref(),
       None,
       None,
@@ -299,7 +315,7 @@ fn source_context_prefers_top_level_crs_authority_code() {
 }
 
 #[test]
-fn source_context_preserves_projjson_for_unknown_crs_authority() {
+fn resolved_source_preserves_projjson_for_unknown_crs_authority() {
   let mut projjson = epsg_projjson(4326);
   projjson["id"] = serde_json::json!({
     "authority": "IGNF",
@@ -328,8 +344,9 @@ fn source_context_preserves_projjson_for_unknown_crs_authority() {
   };
 
   let context = common::runtime()
-    .block_on(resolve_source_context(
+    .block_on(resolve_source(
       &input,
+      empty_dataframe(input.schema().unwrap()),
       input.schema().unwrap().as_ref(),
       None,
       None,

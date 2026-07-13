@@ -1,4 +1,4 @@
-//! Centralizes Parquet writer policy for DataFusion sinks.
+//! Centralizes Parquet writer policy and single-file execution.
 //!
 //! The module parses supported compression names, disables dictionary encoding, applies
 //! consistent row-group and write-batch sizes, and propagates key-value metadata through
@@ -9,7 +9,10 @@
 //! the cost of memory, while smaller values reduce buffering and may increase file overhead.
 
 use anyhow::{Context, Result};
+use arrow_array::{Array, RecordBatch, UInt64Array};
 use datafusion::common::config::TableParquetOptions;
+use datafusion::dataframe::DataFrame;
+use datafusion::dataframe::DataFrameWriteOptions;
 use parquet::basic::{BrotliLevel, Compression, GzipLevel, ZstdLevel};
 use parquet::file::metadata::KeyValue;
 
@@ -56,6 +59,36 @@ pub fn create_datafusion_parquet_options(
   options
 }
 
+/// Write one DataFrame to a single Parquet file and return its row count.
+pub async fn write_single_file(
+  dataframe: DataFrame,
+  output_path: &str,
+  options: TableParquetOptions,
+) -> Result<u64> {
+  let batches = dataframe
+    .write_parquet(
+      output_path,
+      DataFrameWriteOptions::new().with_single_file_output(true),
+      Some(options),
+    )
+    .await?;
+  written_row_count(&batches)
+}
+
+/// Decode the row count returned by a DataFusion write operation.
+pub fn written_row_count(batches: &[RecordBatch]) -> Result<u64> {
+  let batch = batches.first().context("write returned no row count")?;
+  let values = batch
+    .column(0)
+    .as_any()
+    .downcast_ref::<UInt64Array>()
+    .context("write result count column was not UInt64")?;
+  if values.is_empty() {
+    return Ok(0);
+  }
+  Ok(values.value(0))
+}
+
 fn compression_to_datafusion_string(compression: Compression) -> String {
   match compression {
     Compression::UNCOMPRESSED => "uncompressed".to_string(),
@@ -82,4 +115,60 @@ fn env_usize(name: &str) -> Option<usize> {
     .ok()
     .and_then(|value| value.parse::<usize>().ok())
     .filter(|value| *value > 0)
+}
+
+#[cfg(test)]
+mod tests {
+  use std::sync::Arc;
+
+  use arrow_array::{RecordBatch, StringArray, UInt64Array};
+  use arrow_schema::{DataType, Field, Schema};
+
+  use super::written_row_count;
+
+  #[test]
+  fn written_row_count_decodes_valid_and_empty_arrays() {
+    let schema = Arc::new(Schema::new(vec![Field::new(
+      "count",
+      DataType::UInt64,
+      false,
+    )]));
+    let valid = RecordBatch::try_new(
+      Arc::clone(&schema),
+      vec![Arc::new(UInt64Array::from(vec![42]))],
+    )
+    .unwrap();
+    let empty =
+      RecordBatch::try_new(schema, vec![Arc::new(UInt64Array::from(Vec::<u64>::new()))]).unwrap();
+
+    assert_eq!(written_row_count(&[valid]).unwrap(), 42);
+    assert_eq!(written_row_count(&[empty]).unwrap(), 0);
+  }
+
+  #[test]
+  fn written_row_count_rejects_missing_and_malformed_results() {
+    let schema = Arc::new(Schema::new(vec![Field::new(
+      "count",
+      DataType::Utf8,
+      false,
+    )]));
+    let malformed = RecordBatch::try_new(
+      schema,
+      vec![Arc::new(StringArray::from(vec!["not-a-count"]))],
+    )
+    .unwrap();
+
+    assert!(
+      written_row_count(&[])
+        .unwrap_err()
+        .to_string()
+        .contains("no row count")
+    );
+    assert!(
+      written_row_count(&[malformed])
+        .unwrap_err()
+        .to_string()
+        .contains("was not UInt64")
+    );
+  }
 }

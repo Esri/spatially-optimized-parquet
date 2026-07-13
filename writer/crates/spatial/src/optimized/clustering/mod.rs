@@ -1,11 +1,11 @@
 //! Defines spatial cluster keys and range partitioning for optimized output.
 
-mod common;
+mod key;
 pub(crate) mod partition;
 mod xz;
 mod z;
 
-pub(crate) use common::DisplayCode;
+pub(crate) use key::ClusterKey;
 pub(crate) use partition::{
   ClusterRangeBoundaries, build_cluster_range_expr, cluster_key_column, cluster_partition_column,
   cluster_sort_expr, validate_cluster_partition_column,

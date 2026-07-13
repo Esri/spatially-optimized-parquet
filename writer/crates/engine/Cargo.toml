@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 anyhow = "1.0"
+arrow-array = "57.1.0"
 arrow-schema = "57.1.0"
 datafusion = "52.1.0"
 datafusion-execution = "52.1.0"

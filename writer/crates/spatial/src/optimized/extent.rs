@@ -10,17 +10,16 @@ use datafusion::logical_expr::{Expr, expr_fn::ident};
 
 use crate::diagnostics::{explain_stage_note, explain_timing};
 use crate::geometry::Extent2D;
-use crate::geoparquet::SourceGeoParquetContext;
-use crate::input::materialized::input_dataframe_for_job;
+use crate::geoparquet::ResolvedGeoParquetSource;
+use crate::optimized::aggregate::collect_aggregate_with_progress;
 use crate::optimized::clustering::{bounds_expr, point_expr};
-use crate::optimized::execution::collect_dataframe_with_metric_polling;
 use crate::optimized::multiscale::{
   POINT_X_COLUMN, POINT_Y_COLUMN, TEMP_BOUNDS_COLUMN, TEMP_POINT_COORDS_COLUMN, TEMP_XMAX_COLUMN,
   TEMP_XMIN_COLUMN, TEMP_YMAX_COLUMN, TEMP_YMIN_COLUMN,
 };
 use crate::optimized::{ClusteringFamily, OptimizedGeometry};
 use crate::output::reprojection::{
-  ReprojectionContext, transformed_bounds_expr, transformed_point_coords_expr,
+  ReprojectionSpec, transformed_bounds_expr, transformed_point_coords_expr,
 };
 use crate::output::stage::OutputStageContext;
 use crate::progress::{finish_row_bar, row_bar};
@@ -28,9 +27,9 @@ use crate::progress::{finish_row_bar, row_bar};
 /// Resolve the selected-row extent in the output coordinate reference system.
 pub(crate) async fn resolve_target_extent(
   request: &OutputStageContext<'_>,
-  source: &SourceGeoParquetContext,
+  source: &ResolvedGeoParquetSource,
   geometry: &OptimizedGeometry,
-  reprojection: &ReprojectionContext,
+  reprojection: &ReprojectionSpec,
 ) -> Result<Extent2D> {
   let progress_bar = row_bar(
     request.progress,
@@ -56,15 +55,9 @@ pub(crate) async fn resolve_target_extent(
     progress_bar.inc(request.total_input_rows);
     source.source_extent
   } else {
-    let dataframe = input_dataframe_for_job(
-      request.input,
-      request.session,
-      request.row_range,
-      request.materialized_batches,
-    )
-    .await?;
+    let dataframe = request.input_dataframe.clone();
     let aggregate_dataframe = build_target_extent_aggregate(dataframe, geometry, reprojection)?;
-    let batches = collect_dataframe_with_metric_polling(
+    let batches = collect_aggregate_with_progress(
       aggregate_dataframe,
       &progress_bar,
       request.total_input_rows,
@@ -85,7 +78,7 @@ pub(crate) async fn resolve_target_extent(
 fn build_target_extent_aggregate(
   dataframe: engine::DataFrame,
   geometry: &OptimizedGeometry,
-  reprojection: &ReprojectionContext,
+  reprojection: &ReprojectionSpec,
 ) -> Result<engine::DataFrame> {
   let dataframe = match geometry.clustering_family {
     ClusteringFamily::Point => {

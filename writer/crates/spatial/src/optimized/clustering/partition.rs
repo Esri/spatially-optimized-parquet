@@ -8,15 +8,15 @@ use datafusion::prelude::lit;
 use crate::optimized::ClusteringFamily;
 use crate::optimized::multiscale::{POINT_Z_CODE_COLUMN, TEMP_XZ_CODE_COLUMN};
 
-use super::DisplayCode;
+use super::ClusterKey;
 
 pub(crate) const POINT_RANGE_COLUMN: &str = "z_order";
 pub(crate) const NON_POINT_RANGE_COLUMN: &str = "xz_order";
 
 /// Stores the minimum cluster key and percentile-derived lower range boundaries.
 pub(crate) struct ClusterRangeBoundaries {
-  pub(crate) min_value: DisplayCode,
-  pub(crate) boundaries: Vec<DisplayCode>,
+  pub(crate) min_value: ClusterKey,
+  pub(crate) boundaries: Vec<ClusterKey>,
 }
 
 pub(crate) fn cluster_sort_expr(clustering_family: ClusteringFamily) -> SortExpr {
@@ -51,17 +51,17 @@ pub(crate) fn validate_cluster_partition_column(
 
 pub(crate) fn build_cluster_range_expr(
   cluster_key_column: &str,
-  min_value: DisplayCode,
-  boundaries: &[DisplayCode],
+  min_value: ClusterKey,
+  boundaries: &[ClusterKey],
 ) -> Result<Expr> {
   let mut lower_bounds = Vec::with_capacity(boundaries.len() + 1);
   lower_bounds.push(min_value);
   lower_bounds.extend(boundaries.iter().copied());
-  let mut range_expr = lit(*lower_bounds.last().unwrap_or(&min_value));
+  let mut range_expr = lit(lower_bounds.last().copied().unwrap_or(min_value).value());
   for (index, boundary) in boundaries.iter().enumerate().rev() {
     range_expr = when(
-      ident(cluster_key_column).lt(lit(*boundary)),
-      lit(lower_bounds[index]),
+      ident(cluster_key_column).lt(lit(boundary.value())),
+      lit(lower_bounds[index].value()),
     )
     .otherwise(range_expr)?;
   }

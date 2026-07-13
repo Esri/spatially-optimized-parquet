@@ -1,4 +1,4 @@
-//! Resolves target coordinate-reference metadata and deferred transform definitions.
+//! Resolves target coordinate-reference metadata and deferred transform specifications.
 
 use anyhow::{Context, Result};
 use gdal::spatial_ref::{AxisMappingStrategy, SpatialRef};
@@ -10,19 +10,19 @@ use super::PreparedTransform;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Stores source and target CRS definitions for deferred transform construction.
-pub struct TransformSpec {
+pub struct CoordinateTransformSpec {
   source_definition: String,
   target_definition: String,
 }
 
 #[derive(Debug, Clone)]
 /// Stores target CRS metadata and the optional transform required to produce it.
-pub struct ReprojectionContext {
-  transform: Option<TransformSpec>,
+pub struct ReprojectionSpec {
+  transform: Option<CoordinateTransformSpec>,
   target_spatial_reference: SpatialReferenceInfo,
 }
 
-impl ReprojectionContext {
+impl ReprojectionSpec {
   /// Resolve target CRS metadata and transformation from source PROJJSON.
   pub fn from_source_projjson(source_projjson: &Value, target_wkid: u32) -> Result<Self> {
     let source_definition =
@@ -34,7 +34,7 @@ impl ReprojectionContext {
       .context("export target CRS as PROJJSON")?;
 
     Ok(Self {
-      transform: (source_spatial_ref != target_spatial_ref).then_some(TransformSpec {
+      transform: (source_spatial_ref != target_spatial_ref).then_some(CoordinateTransformSpec {
         source_definition,
         target_definition: target_definition.clone(),
       }),
@@ -58,7 +58,7 @@ impl ReprojectionContext {
   }
 
   /// Return the deferred transform when reprojection is required.
-  pub fn transform(&self) -> Option<&TransformSpec> {
+  pub fn transform(&self) -> Option<&CoordinateTransformSpec> {
     self.transform.as_ref()
   }
 
@@ -68,7 +68,7 @@ impl ReprojectionContext {
   }
 }
 
-impl TransformSpec {
+impl CoordinateTransformSpec {
   /// Build reusable transformation state from the stored CRS definitions.
   pub fn prepare(&self) -> Result<PreparedTransform> {
     PreparedTransform::new(

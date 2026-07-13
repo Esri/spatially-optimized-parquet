@@ -2,16 +2,13 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use arrow_schema::SchemaRef;
-use engine::read::{execute_stream, read_parquet_df};
+use engine::parquet_scan::scan_parquet;
 use engine::{DataFrame, SessionContext};
 use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use geoparquet::metadata::GeoParquetColumnEncoding;
-use object_store::path::Path as ObjectPath;
-use object_store::{ObjectMeta, ObjectStore};
-use parquet::arrow::ParquetRecordBatchStreamBuilder;
+use object_store::ObjectStore;
 use parquet::arrow::arrow_reader::ArrowReaderMetadata;
-use parquet::arrow::async_reader::ParquetObjectReader;
 use parquet::file::metadata::KeyValue;
 use url::Url;
 
@@ -40,8 +37,6 @@ pub(super) enum ParquetInputLocation {
     input_url: String,
     store_url: Url,
     store: Arc<dyn ObjectStore>,
-    object_path: ObjectPath,
-    object_meta: Box<ObjectMeta>,
   },
 }
 
@@ -139,34 +134,32 @@ impl InputSource for ParquetInputSource {
       ParquetInputLocation::Local { input_path } => {
         let input_path = input_path.clone();
         Box::pin(async move {
-          let mut dataframe = read_parquet_df(&input_path).await?;
+          let mut dataframe = scan_parquet(&input_path).await?;
           if !row_range.is_full() {
             dataframe = dataframe.limit(row_range.start, row_range.num)?;
           }
 
-          let stream = execute_stream(dataframe).await?;
+          let stream = dataframe.execute_stream().await.context("execute stream")?;
           Ok(Box::pin(stream.map(|batch| batch.map_err(Into::into))) as InputBatchStream)
         })
       }
       ParquetInputLocation::Http {
+        input_url,
+        store_url,
         store,
-        object_path,
-        object_meta,
         ..
       } => {
+        let input_url = input_url.clone();
+        let store_url = store_url.clone();
         let store = Arc::clone(store);
-        let object_path = object_path.clone();
-        let object_meta = object_meta.clone();
-        let metadata = self.metadata[0].clone();
         Box::pin(async move {
-          let reader =
-            ParquetObjectReader::new(store, object_path).with_file_size(object_meta.size);
-          let mut builder = ParquetRecordBatchStreamBuilder::new_with_metadata(reader, metadata);
-          builder = builder.with_offset(row_range.start);
-          if let Some(num) = row_range.num {
-            builder = builder.with_limit(num);
+          let context = SessionContext::new();
+          context.register_object_store(&store_url, store);
+          let mut dataframe = context.read_parquet(&input_url, Default::default()).await?;
+          if !row_range.is_full() {
+            dataframe = dataframe.limit(row_range.start, row_range.num)?;
           }
-          let stream = builder.build()?;
+          let stream = dataframe.execute_stream().await.context("execute stream")?;
           Ok(Box::pin(stream.map(|batch| batch.map_err(Into::into))) as InputBatchStream)
         })
       }

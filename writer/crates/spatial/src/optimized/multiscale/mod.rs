@@ -1,4 +1,4 @@
-//! Owns optimized display columns, level planning, geometry traversal, and PBF encoding.
+//! Owns geodisplay columns, level planning, geometry traversal, and PBF encoding.
 
 mod columns;
 mod datafusion;

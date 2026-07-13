@@ -7,17 +7,18 @@ use crate::geometry::GeometryKind;
 use crate::geoparquet::{GeoMetadataInput, build_geo_key_values, build_geo_metadata};
 use crate::optimized::clustering::{DEFAULT_COORDINATE_PRECISION, DEFAULT_XZ_MAX_LEVEL};
 use crate::optimized::metadata::{
-  DisplayIndexXz, DisplayIndexXzInput, DisplayIndexZ, DisplayIndexZInput, GeodisplayMetadata,
+  GeodisplayMetadata, XzClusteringIndex, XzClusteringIndexInput, ZClusteringIndex,
+  ZClusteringIndexInput,
 };
 use crate::optimized::multiscale::{
-  BOUNDS_COLUMN, COVERING_BBOX_COLUMN, DISPLAY_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN,
+  BOUNDS_COLUMN, COVERING_BBOX_COLUMN, GEODISPLAY_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN,
   POINT_Z_CODE_COLUMN, XZ_CODE_COLUMN, metadata_levels,
 };
-use crate::optimized::{ClusteringFamily, OptimizedContext};
+use crate::optimized::{ClusteringFamily, ResolvedOptimization};
 
 /// Build GeoParquet and geodisplay metadata for optimized output.
 pub(crate) fn build_optimized_metadata(
-  context: &OptimizedContext,
+  context: &ResolvedOptimization,
   covering: bool,
 ) -> Result<Vec<KeyValue>> {
   let source_geometry = context
@@ -41,20 +42,22 @@ pub(crate) fn build_optimized_metadata(
   })?;
   let mut metadata = build_geo_key_values(&context.source_metadata, geo_metadata);
   let geodisplay = match context.geometry.clustering_family {
-    ClusteringFamily::Point => GeodisplayMetadata::point(DisplayIndexZ::new(DisplayIndexZInput {
-      code: POINT_Z_CODE_COLUMN.to_string(),
-      x_column: POINT_X_COLUMN.to_string(),
-      y_column: POINT_Y_COLUMN.to_string(),
-      coordinate_precision: DEFAULT_COORDINATE_PRECISION,
-      full_extent: context.target_extent,
-      wkid: context.reprojection.target_spatial_reference().wkid,
-      wkt: context.reprojection.target_spatial_reference().wkt.clone(),
-      has_z: false,
-      has_m: false,
-    })),
+    ClusteringFamily::Point => {
+      GeodisplayMetadata::point(ZClusteringIndex::new(ZClusteringIndexInput {
+        code: POINT_Z_CODE_COLUMN.to_string(),
+        x_column: POINT_X_COLUMN.to_string(),
+        y_column: POINT_Y_COLUMN.to_string(),
+        coordinate_precision: DEFAULT_COORDINATE_PRECISION,
+        full_extent: context.target_extent,
+        wkid: context.reprojection.target_spatial_reference().wkid,
+        wkt: context.reprojection.target_spatial_reference().wkt.clone(),
+        has_z: false,
+        has_m: false,
+      }))
+    }
     ClusteringFamily::NonPoint => GeodisplayMetadata::xz_with_parent(
-      DISPLAY_COLUMN,
-      DisplayIndexXz::new(DisplayIndexXzInput {
+      GEODISPLAY_COLUMN,
+      XzClusteringIndex::new(XzClusteringIndexInput {
         code: XZ_CODE_COLUMN.to_string(),
         encoding: "esriPBF".to_string(),
         geometry_type: context.geometry.geometry_type.as_str().to_string(),
@@ -76,7 +79,7 @@ pub(crate) fn build_optimized_metadata(
   Ok(metadata)
 }
 
-fn fallback_geometry_kind(context: &OptimizedContext) -> GeometryKind {
+fn fallback_geometry_kind(context: &ResolvedOptimization) -> GeometryKind {
   match context.geometry.geometry_type {
     crate::optimized::OptimizedGeometryType::Point => GeometryKind::Point,
     crate::optimized::OptimizedGeometryType::MultiPoint => GeometryKind::MultiPoint,

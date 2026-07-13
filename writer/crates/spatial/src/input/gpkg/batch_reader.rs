@@ -24,7 +24,7 @@ struct GpkgArrowReader {
 }
 
 /// Owns one GDAL Arrow stream and its batch normalization state.
-pub(super) struct GpkgBatchState {
+pub(super) struct GpkgBatchReader {
   arrow_reader: GpkgArrowReader,
   schema: SchemaRef,
   remaining: Option<usize>,
@@ -75,14 +75,14 @@ fn open_arrow_reader(
 }
 
 /// Retain the GDAL layer owner alongside its Arrow reader for the stream lifetime.
-pub(super) fn open_gpkg_batch_state(
+pub(super) fn open_gpkg_batch_reader(
   input_path: &Path,
   layer_name: &str,
   schema: SchemaRef,
   attribute_filter: Option<&str>,
   limit: Option<usize>,
-) -> Result<GpkgBatchState> {
-  Ok(GpkgBatchState {
+) -> Result<GpkgBatchReader> {
+  Ok(GpkgBatchReader {
     arrow_reader: open_arrow_reader(input_path, layer_name, attribute_filter)?,
     schema,
     remaining: limit,
@@ -90,8 +90,8 @@ pub(super) fn open_gpkg_batch_state(
 }
 
 /// Convert a stateful GDAL Arrow reader into a fallible asynchronous batch stream.
-pub(super) fn gpkg_batch_stream(
-  state: GpkgBatchState,
+pub(super) fn batch_stream(
+  state: GpkgBatchReader,
 ) -> impl futures_util::Stream<Item = Result<RecordBatch>> + Send + 'static {
   stream::unfold(Some(state), |state| async move {
     let mut state = match state {

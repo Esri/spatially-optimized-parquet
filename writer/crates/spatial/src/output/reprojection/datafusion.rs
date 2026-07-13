@@ -12,27 +12,27 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::col;
 
-use crate::geometry::GeometryCategory;
-use crate::output::geometry::{
-  BinaryValueAccess, geometry_signature, map_geometry_to_binary, to_datafusion_error,
+use crate::geometry::{
+  BinaryValueAccess, GeometryCategory, geometry_signature, map_geometry_to_binary,
+  to_datafusion_error,
 };
 
-use super::{PreparedTransform, TransformSpec};
+use super::{CoordinateTransformSpec, PreparedTransform};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct TransformedPointCoordsUdf {
-  transform: TransformSpec,
+  transform: CoordinateTransformSpec,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct TransformedBoundsUdf {
-  transform: TransformSpec,
+  transform: CoordinateTransformSpec,
   geometry_category: GeometryCategory,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ReprojectGeometryUdf {
-  transform: TransformSpec,
+  transform: CoordinateTransformSpec,
 }
 
 impl ScalarUDFImpl for TransformedPointCoordsUdf {
@@ -41,7 +41,7 @@ impl ScalarUDFImpl for TransformedPointCoordsUdf {
   }
 
   fn name(&self) -> &str {
-    "display_transformed_point_coords"
+    "reprojection_transformed_point_coords"
   }
 
   fn signature(&self) -> &Signature {
@@ -84,7 +84,7 @@ impl ScalarUDFImpl for TransformedBoundsUdf {
   }
 
   fn name(&self) -> &str {
-    "display_transformed_bounds"
+    "reprojection_transformed_bounds"
   }
 
   fn signature(&self) -> &Signature {
@@ -133,7 +133,7 @@ impl ScalarUDFImpl for ReprojectGeometryUdf {
   }
 
   fn name(&self) -> &str {
-    "display_reproject_geometry"
+    "reprojection_geometry"
   }
 
   fn signature(&self) -> &Signature {
@@ -161,12 +161,12 @@ impl ScalarUDFImpl for ReprojectGeometryUdf {
   }
 }
 
-pub(crate) fn transformed_point_coords_udf(transform: TransformSpec) -> ScalarUDF {
+pub(crate) fn transformed_point_coords_udf(transform: CoordinateTransformSpec) -> ScalarUDF {
   ScalarUDF::new_from_impl(TransformedPointCoordsUdf { transform })
 }
 
 pub(crate) fn transformed_bounds_udf(
-  transform: TransformSpec,
+  transform: CoordinateTransformSpec,
   geometry_category: GeometryCategory,
 ) -> ScalarUDF {
   ScalarUDF::new_from_impl(TransformedBoundsUdf {
@@ -175,13 +175,13 @@ pub(crate) fn transformed_bounds_udf(
   })
 }
 
-pub(crate) fn reproject_geometry_udf(transform: TransformSpec) -> ScalarUDF {
+pub(crate) fn reproject_geometry_udf(transform: CoordinateTransformSpec) -> ScalarUDF {
   ScalarUDF::new_from_impl(ReprojectGeometryUdf { transform })
 }
 
 pub(crate) fn transformed_point_coords_expr(
   geometry_column: &str,
-  transform: &TransformSpec,
+  transform: &CoordinateTransformSpec,
 ) -> Expr {
   transformed_point_coords_udf(transform.clone()).call(vec![col(geometry_column)])
 }
@@ -189,12 +189,15 @@ pub(crate) fn transformed_point_coords_expr(
 pub(crate) fn transformed_bounds_expr(
   geometry_column: &str,
   geometry_category: GeometryCategory,
-  transform: &TransformSpec,
+  transform: &CoordinateTransformSpec,
 ) -> Expr {
   transformed_bounds_udf(transform.clone(), geometry_category).call(vec![col(geometry_column)])
 }
 
-pub(crate) fn reproject_geometry_expr(geometry_column: &str, transform: &TransformSpec) -> Expr {
+pub(crate) fn reproject_geometry_expr(
+  geometry_column: &str,
+  transform: &CoordinateTransformSpec,
+) -> Expr {
   reproject_geometry_udf(transform.clone()).call(vec![col(geometry_column)])
 }
 

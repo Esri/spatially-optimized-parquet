@@ -1,7 +1,7 @@
 use parquet::basic::Compression;
 use parquet::file::metadata::KeyValue;
 
-use engine::write::{create_datafusion_parquet_options, parse_compression};
+use engine::parquet_write::{create_datafusion_parquet_options, parse_compression};
 
 #[test]
 fn parse_compression_accepts_known_codecs() {

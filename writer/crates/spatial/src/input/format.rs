@@ -11,7 +11,7 @@ use std::str::FromStr;
 use anyhow::{Context, Result, bail};
 use url::Url;
 
-use super::is_http_url;
+use super::source::is_http_location;
 
 /// Identifies the physical source implementation used to open an input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,11 +52,11 @@ pub fn resolve_source_format(
     return Ok(explicit_format);
   }
 
-  if !is_http_url(location) && Path::new(location).is_dir() {
+  if !is_http_location(location) && Path::new(location).is_dir() {
     return Ok(SourceFormat::Parquet);
   }
 
-  let extension = if is_http_url(location) {
+  let extension = if is_http_location(location) {
     let url = Url::parse(location).with_context(|| format!("parse input URL: {location}"))?;
     Path::new(url.path())
       .extension()

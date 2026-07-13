@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::optimized::OptimizedGeometryType;
 use crate::output::{DEFAULT_OUTPUT_WKID, WEB_MERCATOR_OUTPUT_WKID};
 
-/// Stores the maximum display hierarchy level advertised in output metadata.
+/// Stores the maximum multiscale hierarchy level advertised in output metadata.
 pub const DEFAULT_MAX_LEVEL: u32 = 20;
 /// Stores the WGS84 angular resolution used for the first multiscale level.
 const FIRST_LEVEL_RESOLUTION: f64 = 0.70312359375;
@@ -21,7 +21,7 @@ const MAX_MULTISCALE_LEVEL: u16 = 16;
 pub struct MultiscaleLevel {
   /// Names the generated payload column.
   pub column: String,
-  /// Stores the display level.
+  /// Stores the multiscale level.
   pub level: u16,
   /// Stores the coordinate resolution.
   pub resolution: f64,
@@ -43,7 +43,7 @@ pub struct QuantizationTransform {
 /// Stores the quantization and simplification settings for one output geometry column.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GeometryEncoding {
-  /// Stores the display level represented by the column.
+  /// Stores the multiscale level represented by the column.
   pub level: u16,
   /// Stores the generated Parquet column name.
   pub column: String,
@@ -57,7 +57,7 @@ pub struct GeometryEncoding {
   pub min_length: usize,
 }
 
-/// Build the supported even-numbered display encodings for the target spatial reference.
+/// Build the supported even-numbered multiscale encodings for the target spatial reference.
 pub fn create_geometry_encodings(
   output_wkid: u32,
   geometry_type: OptimizedGeometryType,

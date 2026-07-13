@@ -1,4 +1,4 @@
-//! Composes the custom DataFusion plan required for multi-file SOP output.
+//! Inserts range repartitioning and partition-local sorting for multi-file output.
 //!
 //! DataFusion provides repartition, sort, and Parquet sink operators, but it does not expose
 //! Spark's combined `repartition(...).sortWithinPartitions(...).write.partitionBy(...)` workflow
@@ -21,7 +21,7 @@ use datafusion::physical_plan::{
 
 /// Describes range partitioning and partition-local ordering for multi-file SOP output.
 #[derive(Clone)]
-pub(crate) struct MultiFileWriteConfig {
+pub(crate) struct PartitionedSortConfig {
   pub(crate) partition_column: String,
   pub(crate) cluster_key_column: String,
   pub(crate) bucket_count: usize,
@@ -29,16 +29,16 @@ pub(crate) struct MultiFileWriteConfig {
 }
 
 /// Insert range repartitioning and spatial sorting where both control columns are available.
-pub(crate) fn preserve_partitioned_sort_execs(
+pub(crate) fn insert_partitioned_sort(
   plan: Arc<dyn ExecutionPlan>,
-  config: &MultiFileWriteConfig,
+  config: &PartitionedSortConfig,
 ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
   insert_partitioned_sort_exec(plan, config)
 }
 
 fn insert_partitioned_sort_exec(
   plan: Arc<dyn ExecutionPlan>,
-  config: &MultiFileWriteConfig,
+  config: &PartitionedSortConfig,
 ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
   let schema = plan.schema();
   let partition_column_index = schema.index_of(&config.partition_column);
@@ -75,7 +75,7 @@ fn insert_partitioned_sort_exec(
 
 fn build_partitioned_sort_exec(
   plan: Arc<dyn ExecutionPlan>,
-  config: &MultiFileWriteConfig,
+  config: &PartitionedSortConfig,
   partition_column_index: usize,
   cluster_key_column_index: usize,
 ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
@@ -86,7 +86,7 @@ fn build_partitioned_sort_exec(
         &config.partition_column,
         partition_column_index,
       ))],
-      multi_file_sort_partition_count(config.bucket_count),
+      partitioned_sort_partition_count(config.bucket_count),
     ),
   )?);
   let sort_order: LexOrdering = [PhysicalSortExpr {
@@ -122,7 +122,7 @@ fn build_partitioned_sort_exec(
   )?))
 }
 
-fn multi_file_sort_partition_count(bucket_count: usize) -> usize {
+fn partitioned_sort_partition_count(bucket_count: usize) -> usize {
   bucket_count.saturating_mul(2).max(8)
 }
 
@@ -155,9 +155,9 @@ mod tests {
       let session = new_datafusion_session().unwrap();
       let dataframe = session.context().read_batch(batch).unwrap();
       let physical_plan = dataframe.create_physical_plan().await.unwrap();
-      let rewritten = preserve_partitioned_sort_execs(
+      let rewritten = insert_partitioned_sort(
         physical_plan,
-        &MultiFileWriteConfig {
+        &PartitionedSortConfig {
           partition_column: POINT_RANGE_COLUMN.to_string(),
           cluster_key_column: POINT_Z_CODE_COLUMN.to_string(),
           bucket_count: 2,

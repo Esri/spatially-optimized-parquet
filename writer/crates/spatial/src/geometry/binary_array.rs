@@ -1,4 +1,4 @@
-//! Provides Arrow binary-array mapping and DataFusion error conversion for geometry output.
+//! Adapts Arrow binary geometry arrays for shared spatial operations.
 
 use std::sync::{Arc, OnceLock};
 
@@ -127,4 +127,31 @@ impl BinaryValueAccess for arrow_array::BinaryViewArray {
 
 pub(crate) fn to_datafusion_error(error: impl Into<anyhow::Error>) -> DataFusionError {
   DataFusionError::External(error.into().into())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::BinaryValueAccess;
+
+  fn assert_null_and_value(array: &impl BinaryValueAccess) {
+    assert_eq!(array.len(), 2);
+    assert_eq!(array.value_opt(0), Some(&b"wkb"[..]));
+    assert_eq!(array.value_opt(1), None);
+  }
+
+  #[test]
+  fn binary_value_access_preserves_nulls_across_arrow_encodings() {
+    assert_null_and_value(&arrow_array::BinaryArray::from(vec![
+      Some(&b"wkb"[..]),
+      None,
+    ]));
+    assert_null_and_value(&arrow_array::LargeBinaryArray::from(vec![
+      Some(&b"wkb"[..]),
+      None,
+    ]));
+    assert_null_and_value(&arrow_array::BinaryViewArray::from(vec![
+      Some(&b"wkb"[..]),
+      None,
+    ]));
+  }
 }

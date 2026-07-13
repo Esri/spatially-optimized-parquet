@@ -2,7 +2,7 @@
 
 use crate::geometry::Extent2D;
 
-use super::super::DisplayCode;
+use super::super::ClusterKey;
 
 /// Stores the default maximum depth of the XZ hierarchy.
 pub(crate) const DEFAULT_XZ_MAX_LEVEL: u32 = 20;
@@ -32,7 +32,7 @@ pub(crate) fn extent_xz_code(
   full_extent: Extent2D,
   feature_extent: Extent2D,
   max_depth: u32,
-) -> DisplayCode {
+) -> ClusterKey {
   let full_extent_width = full_extent.xmax - full_extent.xmin;
   let full_extent_height = full_extent.ymax - full_extent.ymin;
   let mut level = extent_xz_level(full_extent, feature_extent, max_depth);
@@ -71,10 +71,10 @@ pub(crate) fn point_xz_code(
   point_y: f64,
   max_depth: u32,
   insert_level: Option<u32>,
-) -> DisplayCode {
+) -> ClusterKey {
   let insert_level = insert_level.unwrap_or(max_depth);
   let mut depth = 0;
-  let mut sequence_code: DisplayCode = 0;
+  let mut sequence_code = 0_u64;
   let mut xmin = full_extent.xmin;
   let mut ymin = full_extent.ymin;
   let mut xmax = full_extent.xmax;
@@ -104,14 +104,14 @@ pub(crate) fn point_xz_code(
     depth += 1;
   }
 
-  sequence_code
+  ClusterKey::new(sequence_code)
 }
 
-fn code_for_level(quadrant_code: u32, depth: u32, max_depth: u32) -> DisplayCode {
-  (quadrant_code as DisplayCode) * element_count(max_depth, depth) + 1
+fn code_for_level(quadrant_code: u32, depth: u32, max_depth: u32) -> u64 {
+  (quadrant_code as u64) * element_count(max_depth, depth) + 1
 }
 
-fn element_count(max_depth: u32, sequence_index: u32) -> DisplayCode {
+fn element_count(max_depth: u32, sequence_index: u32) -> u64 {
   (4u64.pow(max_depth - sequence_index) - 1) / 3
 }
 
@@ -139,7 +139,7 @@ mod tests {
         },
         1,
       ),
-      1
+      ClusterKey::new(1)
     );
     assert_eq!(
       extent_xz_code(
@@ -152,7 +152,7 @@ mod tests {
         },
         1,
       ),
-      4
+      ClusterKey::new(4)
     );
     assert_eq!(
       extent_xz_code(
@@ -165,9 +165,12 @@ mod tests {
         },
         2,
       ),
-      2
+      ClusterKey::new(2)
     );
-    assert_eq!(extent_xz_code(full_extent, full_extent, 3), 0);
+    assert_eq!(
+      extent_xz_code(full_extent, full_extent, 3),
+      ClusterKey::new(0)
+    );
     assert_eq!(
       extent_xz_code(
         full_extent,
@@ -179,7 +182,7 @@ mod tests {
         },
         3,
       ),
-      51
+      ClusterKey::new(51)
     );
   }
 
@@ -200,7 +203,7 @@ mod tests {
 
     assert_eq!(
       extent_xz_code(full_extent, feature_extent, 20),
-      555482436952
+      ClusterKey::new(555482436952)
     );
   }
 
@@ -212,9 +215,21 @@ mod tests {
       xmax: 4.0,
       ymax: 4.0,
     };
-    assert_eq!(point_xz_code(full_extent, 2.0, 2.0, 1, None), 1);
-    assert_eq!(point_xz_code(full_extent, 3.0, 2.0, 1, None), 2);
-    assert_eq!(point_xz_code(full_extent, 2.0, 3.0, 1, None), 3);
-    assert_eq!(point_xz_code(full_extent, 3.0, 3.0, 1, None), 4);
+    assert_eq!(
+      point_xz_code(full_extent, 2.0, 2.0, 1, None),
+      ClusterKey::new(1)
+    );
+    assert_eq!(
+      point_xz_code(full_extent, 3.0, 2.0, 1, None),
+      ClusterKey::new(2)
+    );
+    assert_eq!(
+      point_xz_code(full_extent, 2.0, 3.0, 1, None),
+      ClusterKey::new(3)
+    );
+    assert_eq!(
+      point_xz_code(full_extent, 3.0, 3.0, 1, None),
+      ClusterKey::new(4)
+    );
   }
 }

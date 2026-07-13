@@ -5,7 +5,7 @@
 //! and Arrow schema. DataFusion schedules rowid partitions while GDAL owns SQLite access,
 //! feature decoding, WKB production, and Arrow conversion.
 
-mod arrow;
+mod batch_reader;
 mod metadata;
 mod open;
 mod partition;

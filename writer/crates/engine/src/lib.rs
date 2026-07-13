@@ -3,9 +3,9 @@
 //! The crate separates reusable mechanics into focused modules:
 //!
 //! - [`session`] configures DataFusion memory, partitioning, and disk spilling.
-//! - [`read`] converts lazy DataFrames into ordered or partitioned batch streams.
+//! - [`parquet_scan`] constructs local Parquet scans through DataFusion.
 //! - [`output_layout`] resolves file-versus-directory output layouts before execution.
-//! - [`mod@write`] configures DataFusion Parquet sinks.
+//! - [`parquet_write`] configures and executes DataFusion Parquet sinks.
 //!
 //! Geospatial policy intentionally remains outside this crate. The `spatial` crate decides
 //! which columns to derive, how geometries should be indexed, and which metadata to emit.
@@ -14,9 +14,9 @@
 #![warn(missing_docs)]
 
 pub mod output_layout;
-pub mod read;
+pub mod parquet_scan;
+pub mod parquet_write;
 pub mod session;
-pub mod write;
 
 pub use arrow_schema::SchemaRef;
 pub use datafusion::dataframe::DataFrame;

@@ -1,12 +1,13 @@
 use spatial::geometry::Extent2D;
 use spatial::optimized::metadata::{
-  DisplayIndexXz, DisplayIndexXzInput, DisplayIndexZ, DisplayIndexZInput, GeodisplayMetadata,
+  GeodisplayMetadata, XzClusteringIndex, XzClusteringIndexInput, ZClusteringIndex,
+  ZClusteringIndexInput,
 };
 use spatial::optimized::multiscale::{MultiscaleLevel, QuantizationTransform};
 
 #[test]
 fn point_metadata_serializes_spec_keys() {
-  let metadata = GeodisplayMetadata::point(DisplayIndexZ::new(DisplayIndexZInput {
+  let metadata = GeodisplayMetadata::point(ZClusteringIndex::new(ZClusteringIndexInput {
     code: "zCode".to_string(),
     x_column: "x".to_string(),
     y_column: "y".to_string(),
@@ -38,7 +39,7 @@ fn point_metadata_serializes_spec_keys() {
 fn xz_metadata_serializes_bounds_and_levels() {
   let metadata = GeodisplayMetadata::xz_with_parent(
     "geodisplay",
-    DisplayIndexXz::new(DisplayIndexXzInput {
+    XzClusteringIndex::new(XzClusteringIndexInput {
       code: "xzCode".to_string(),
       encoding: "pbf".to_string(),
       geometry_type: "polygon".to_string(),

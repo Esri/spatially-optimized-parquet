@@ -2,7 +2,7 @@ use serde_json::Value;
 
 /// Selects the default output spatial reference.
 pub const DEFAULT_OUTPUT_WKID: u32 = 4326;
-/// Selects the projected spatial reference supported by display optimization.
+/// Selects the projected spatial reference supported by optimized output.
 pub const WEB_MERCATOR_OUTPUT_WKID: u32 = 3857;
 
 #[derive(Debug, Clone, PartialEq, Default)]

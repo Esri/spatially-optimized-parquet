@@ -17,12 +17,11 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::{col, lit};
 
-use crate::geometry::Extent2D;
+use crate::geometry::{
+  BinaryValueAccess, Extent2D, geometry_signature, map_geometry_to_u64, to_datafusion_error,
+};
 use crate::optimized::multiscale::TEMP_XZ_CODE_COLUMN;
 use crate::optimized::multiscale::geometry_extent_from_wkb;
-use crate::output::geometry::{
-  BinaryValueAccess, geometry_signature, map_geometry_to_u64, to_datafusion_error,
-};
 
 use super::algorithm::{DEFAULT_XZ_MAX_LEVEL, extent_xz_code};
 
@@ -35,7 +34,7 @@ impl ScalarUDFImpl for BoundsUdf {
   }
 
   fn name(&self) -> &str {
-    "display_bounds"
+    "clustering_bounds"
   }
 
   fn signature(&self) -> &Signature {
@@ -74,7 +73,7 @@ impl ScalarUDFImpl for XZGeometryClusterKeyUdf {
   }
 
   fn name(&self) -> &str {
-    "display_nonpoint_xzcode"
+    "clustering_nonpoint_xzcode"
   }
 
   fn signature(&self) -> &Signature {
@@ -92,11 +91,14 @@ impl ScalarUDFImpl for XZGeometryClusterKeyUdf {
       .ok_or_else(|| DataFusionError::Execution("missing geometry argument".to_string()))?;
     let full_extent = extent_from_args(&arrays, 1)?;
     let output = map_geometry_to_u64(geometry, |bytes| match bytes {
-      Some(bytes) => Ok(extent_xz_code(
-        full_extent,
-        geometry_extent_from_wkb(bytes).map_err(to_datafusion_error)?,
-        DEFAULT_XZ_MAX_LEVEL,
-      )),
+      Some(bytes) => Ok(
+        extent_xz_code(
+          full_extent,
+          geometry_extent_from_wkb(bytes).map_err(to_datafusion_error)?,
+          DEFAULT_XZ_MAX_LEVEL,
+        )
+        .value(),
+      ),
       None => Ok(0),
     })?;
     Ok(ColumnarValue::Array(Arc::new(output) as ArrayRef))
@@ -112,7 +114,7 @@ impl ScalarUDFImpl for XZBoundsClusterKeyUdf {
   }
 
   fn name(&self) -> &str {
-    "display_nonpoint_xzcode_from_bounds"
+    "clustering_nonpoint_xzcode_from_bounds"
   }
 
   fn signature(&self) -> &Signature {
@@ -147,6 +149,7 @@ impl ScalarUDFImpl for XZBoundsClusterKeyUdf {
             },
             DEFAULT_XZ_MAX_LEVEL,
           )
+          .value()
         },
       );
     }

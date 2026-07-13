@@ -1,4 +1,4 @@
-//! Executes DataFrames while polling physical-plan metrics for progress.
+//! Collects aggregate DataFrames while polling physical-plan metrics for progress.
 
 use std::sync::{
   Arc,
@@ -18,7 +18,7 @@ use crate::diagnostics::{
 use crate::progress::{collect_plan_progress, update_metric_count_bar};
 
 /// Execute an aggregate DataFrame while polling physical-plan metrics.
-pub(crate) async fn collect_dataframe_with_metric_polling(
+pub(crate) async fn collect_aggregate_with_progress(
   dataframe: engine::DataFrame,
   progress_bar: &ProgressBar,
   total_input_rows: u64,

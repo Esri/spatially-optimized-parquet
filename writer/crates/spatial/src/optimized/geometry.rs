@@ -3,7 +3,7 @@
 use anyhow::{Result, bail};
 
 use crate::geometry::{GeometryCategory, GeometryKind, GeometrySpec};
-use crate::geoparquet::SourceGeoParquetContext;
+use crate::geoparquet::ResolvedGeoParquetSource;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Groups optimized geometry types by their clustering strategy.
@@ -94,7 +94,7 @@ pub struct OptimizedGeometry {
 
 impl OptimizedGeometry {
   /// Resolve optimized geometry from normalized source geometry facts.
-  pub(crate) fn resolve(source: &SourceGeoParquetContext) -> Result<Self> {
+  pub(crate) fn resolve(source: &ResolvedGeoParquetSource) -> Result<Self> {
     let geometry_type = OptimizedGeometryType::from_kinds(&source.geometry_types)?;
     let geometry = Self {
       geometry_spec: source.geometry_spec.clone(),
@@ -107,13 +107,13 @@ impl OptimizedGeometry {
     Ok(geometry)
   }
 
-  /// Validate geometry dimensions and categories implemented by display encoding.
+  /// Validate geometry dimensions and categories implemented by optimized encoding.
   fn validate(&self) -> Result<()> {
     if self.has_z || self.has_m {
-      bail!("display optimization does not yet support Z/M geometries")
+      bail!("optimized output does not yet support Z/M geometries")
     }
     if matches!(self.geometry_type, OptimizedGeometryType::MultiPoint) {
-      bail!("display optimization does not yet support multipoint geometries")
+      bail!("optimized output does not yet support multipoint geometries")
     }
     Ok(())
   }

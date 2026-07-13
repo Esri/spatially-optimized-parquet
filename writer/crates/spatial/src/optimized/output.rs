@@ -1,14 +1,14 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::geoparquet::{resolve_source_context, validate_covering_configuration};
+use crate::geoparquet::{resolve_source, validate_covering_configuration};
 use crate::optimized::clustering::{cluster_partition_column, validate_cluster_partition_column};
 use crate::optimized::extent::resolve_target_extent;
 use crate::optimized::metadata::build_optimized_metadata;
 use crate::optimized::multiscale::create_geometry_encodings;
 use crate::optimized::projection::build_optimized_projection;
-use crate::optimized::{ClusteringFamily, OptimizedContext, OptimizedGeometry};
-use crate::output::reprojection::ReprojectionContext;
+use crate::optimized::{ClusteringFamily, OptimizedGeometry, ResolvedOptimization};
+use crate::output::reprojection::ReprojectionSpec;
 use crate::output::stage::{OutputStage, OutputStageContext, OutputStageResult};
 
 use super::write::write_optimized_output;
@@ -20,8 +20,9 @@ pub(crate) struct OptimizedGeoParquet;
 impl OutputStage for OptimizedGeoParquet {
   async fn execute(&self, context: OutputStageContext<'_>) -> Result<OutputStageResult> {
     validate_covering_configuration(context.covering, context.source_schema)?;
-    let source = resolve_source_context(
+    let source = resolve_source(
       context.input,
+      context.input_dataframe.clone(),
       context.source_schema,
       context.geometry_column,
       context.input_wkid,
@@ -35,7 +36,7 @@ impl OutputStage for OptimizedGeoParquet {
       .as_ref()
       .ok_or_else(|| anyhow::anyhow!("missing resolved source CRS PROJJSON"))?;
     let reprojection =
-      ReprojectionContext::from_source_projjson(source_projjson, context.output_wkid)?;
+      ReprojectionSpec::from_source_projjson(source_projjson, context.output_wkid)?;
     let target_extent = resolve_target_extent(&context, &source, &geometry, &reprojection).await?;
     let encodings = match geometry.clustering_family {
       ClusteringFamily::Point => Vec::new(),
@@ -43,7 +44,7 @@ impl OutputStage for OptimizedGeoParquet {
         create_geometry_encodings(context.output_wkid, geometry.geometry_type)?
       }
     };
-    let optimized = OptimizedContext {
+    let optimized = ResolvedOptimization {
       source_metadata: source.source_metadata,
       geometry,
       reprojection,

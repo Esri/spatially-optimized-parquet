@@ -1,9 +1,9 @@
 //! Defines the strongly typed metadata serialized into optimized Parquet files.
 //!
-//! Point output uses [`DisplayIndexZ`] to describe the Morton code and generated coordinate
-//! columns. Non-point output uses [`DisplayIndexXz`] to describe XZ order, bounds, geometry
+//! Point output uses [`ZClusteringIndex`] to describe the Morton code and generated coordinate
+//! columns. Non-point output uses [`XzClusteringIndex`] to describe XZ order, bounds, geometry
 //! encoding, and every multiscale level. [`GeodisplayMetadata::xz_with_parent`] links nested
-//! display data back to its source geometry column.
+//! geodisplay data back to its source geometry column.
 //!
 //! Serde field renames implement the external camel-case geodisplay contract while Rust fields
 //! retain idiomatic names. Constructors fix index discriminators to supported values, preventing
@@ -17,25 +17,25 @@ use serde::Serialize;
 /// Represents the root geodisplay metadata attached to an optimized geometry representation.
 pub struct GeodisplayMetadata {
   #[serde(rename = "parentColumn")]
-  /// Names the source column represented by nested display metadata.
+  /// Names the source column represented by nested geodisplay metadata.
   pub parent_column: Option<String>,
   /// Stores point or non-point index metadata.
-  pub index: DisplayIndex,
+  pub index: ClusteringIndex,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
-/// Selects point Z-order or non-point XZ-order display indexing metadata.
-pub enum DisplayIndex {
+/// Selects point Z-order or non-point XZ-order clustering metadata.
+pub enum ClusteringIndex {
   /// Stores point Z-order metadata.
-  Z(DisplayIndexZ),
+  Z(ZClusteringIndex),
   /// Stores non-point XZ-order metadata.
-  Xz(DisplayIndexXz),
+  Xz(XzClusteringIndex),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-/// Describes a point display index and its coordinate columns.
-pub struct DisplayIndexZ {
+/// Describes a point clustering index and its coordinate columns.
+pub struct ZClusteringIndex {
   #[serde(rename = "type")]
   /// Stores the fixed `z` index discriminator.
   pub index_type: &'static str,
@@ -72,8 +72,8 @@ pub struct DisplayIndexZ {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-/// Describes a non-point display index, bounds column, and multiscale payloads.
-pub struct DisplayIndexXz {
+/// Describes a non-point clustering index, bounds column, and multiscale payloads.
+pub struct XzClusteringIndex {
   #[serde(rename = "type")]
   /// Stores the fixed `xz` index discriminator.
   pub index_type: &'static str,
@@ -86,7 +86,7 @@ pub struct DisplayIndexXz {
   /// Names the geometry payload encoding.
   pub encoding: String,
   #[serde(rename = "geometryType")]
-  /// Names the display geometry category.
+  /// Names the geodisplay geometry category.
   pub geometry_type: String,
   /// Names the feature bounds field.
   pub bounds: String,
@@ -107,7 +107,7 @@ pub struct DisplayIndexXz {
 }
 
 /// Stores point index values before fixed metadata fields are applied.
-pub struct DisplayIndexZInput {
+pub struct ZClusteringIndexInput {
   /// Names the Z-order code column.
   pub code: String,
   /// Names the x-coordinate column.
@@ -129,12 +129,12 @@ pub struct DisplayIndexZInput {
 }
 
 /// Stores non-point index values before fixed metadata fields are applied.
-pub struct DisplayIndexXzInput {
+pub struct XzClusteringIndexInput {
   /// Names the XZ-order code field.
   pub code: String,
   /// Names the geometry payload encoding.
   pub encoding: String,
-  /// Names the display geometry category.
+  /// Names the geodisplay geometry category.
   pub geometry_type: String,
   /// Names the feature bounds field.
   pub bounds: String,
@@ -156,33 +156,33 @@ pub struct DisplayIndexXzInput {
 
 impl GeodisplayMetadata {
   /// Build metadata for a point Z-order index.
-  pub fn point(index: DisplayIndexZ) -> Self {
+  pub fn point(index: ZClusteringIndex) -> Self {
     Self {
       parent_column: None,
-      index: DisplayIndex::Z(index),
+      index: ClusteringIndex::Z(index),
     }
   }
 
   /// Build root metadata for a non-point XZ-order index.
-  pub fn xz(index: DisplayIndexXz) -> Self {
+  pub fn xz(index: XzClusteringIndex) -> Self {
     Self {
       parent_column: None,
-      index: DisplayIndex::Xz(index),
+      index: ClusteringIndex::Xz(index),
     }
   }
 
   /// Build nested metadata for an XZ-order representation derived from a parent column.
-  pub fn xz_with_parent(parent_column: impl Into<String>, index: DisplayIndexXz) -> Self {
+  pub fn xz_with_parent(parent_column: impl Into<String>, index: XzClusteringIndex) -> Self {
     Self {
       parent_column: Some(parent_column.into()),
-      index: DisplayIndex::Xz(index),
+      index: ClusteringIndex::Xz(index),
     }
   }
 }
 
-impl DisplayIndexZ {
+impl ZClusteringIndex {
   /// Build point-index metadata with fixed `z` index semantics.
-  pub fn new(input: DisplayIndexZInput) -> Self {
+  pub fn new(input: ZClusteringIndexInput) -> Self {
     Self {
       index_type: "z",
       code: input.code,
@@ -200,9 +200,9 @@ impl DisplayIndexZ {
   }
 }
 
-impl DisplayIndexXz {
+impl XzClusteringIndex {
   /// Build non-point index metadata with fixed `xz` index semantics.
-  pub fn new(input: DisplayIndexXzInput) -> Self {
+  pub fn new(input: XzClusteringIndexInput) -> Self {
     Self {
       index_type: "xz",
       code: input.code,

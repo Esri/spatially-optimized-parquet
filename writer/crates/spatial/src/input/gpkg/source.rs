@@ -12,11 +12,9 @@ use gdal::vector::LayerAccess;
 
 use crate::geometry::{GeometryEncoding, GeometrySpec};
 use crate::geoparquet::metadata::source::SourceDatasetMetadata;
-use crate::input::{
-  InputBatchStream, InputOpenOptions, InputSource, RowRange, SourceFormat, require_local_path,
-};
+use crate::input::{InputBatchStream, InputOpenOptions, InputSource, RowRange};
 
-use super::arrow::{gpkg_batch_stream, load_schema, open_gpkg_batch_state};
+use super::batch_reader::{batch_stream, load_schema, open_gpkg_batch_reader};
 use super::metadata::{build_geometry_metadata, collect_layer_summaries, select_layer_name};
 use super::open::{is_gpkg_path, open_gpkg_dataset};
 use super::partition::{GpkgPartitionStream, plan_gpkg_scan_partitions};
@@ -35,7 +33,9 @@ pub struct GpkgInputSource {
 
 /// Open one local GeoPackage layer through GDAL.
 pub async fn open_source(options: &InputOpenOptions) -> Result<Arc<dyn InputSource>> {
-  let path = require_local_path(SourceFormat::GeoPackage, options)?;
+  let path = options
+    .local_path()
+    .ok_or_else(|| anyhow::anyhow!("gpkg input does not support HTTP locations"))?;
   if !is_gpkg_path(path) {
     bail!("GeoPackage input must use a .gpkg file: {}", path.display());
   }
@@ -104,10 +104,10 @@ impl InputSource for GpkgInputSource {
     let schema = self.schema.clone();
     Box::pin(async move {
       let rows_to_read = row_range.num.map(|num| num.saturating_add(row_range.start));
-      let state = open_gpkg_batch_state(&input_path, &layer_name, schema, None, rows_to_read)
+      let reader = open_gpkg_batch_reader(&input_path, &layer_name, schema, None, rows_to_read)
         .with_context(|| format!("failed to stream GeoPackage layer {layer_name}"))?;
       let mut rows_to_skip = row_range.start;
-      let stream = gpkg_batch_stream(state).filter_map(move |batch| {
+      let stream = batch_stream(reader).filter_map(move |batch| {
         let out = match batch {
           Ok(batch) if rows_to_skip >= batch.num_rows() => {
             rows_to_skip -= batch.num_rows();
