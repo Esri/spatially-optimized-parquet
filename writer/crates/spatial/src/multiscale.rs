@@ -1,10 +1,23 @@
+//! Plans the multiscale geometry representations emitted for non-point features.
+//!
+//! The writer generates even-numbered levels from zero through sixteen. Each level halves
+//! resolution twice relative to the preceding emitted level, records its map scale, and defines
+//! a quantization transform for the PBF encoder. Geometry-family-specific minimum vertex counts
+//! prevent simplification from collapsing valid lines or polygons below their structural limit.
+//!
+//! Output currently targets EPSG:4326 because the initial resolution and scale constants follow
+//! that display scheme. [`metadata_levels`] converts the executable encoding plan into the
+//! serialized geodisplay metadata consumed by clients.
+
 use anyhow::{Result, bail};
 
 use crate::analysis::DisplayGeometryType;
 use crate::metadata::output::{MultiscaleLevel, QuantizationTransform};
 use crate::pbf::min_vertex_count;
 
+/// Stores the maximum display hierarchy level advertised in output metadata.
 pub const DEFAULT_MAX_LEVEL: u32 = 20;
+/// Stores the only coordinate system currently supported for display payload output.
 pub const DISPLAY_OUTPUT_WKID: u32 = 4326;
 // Matches GeoAnalytics/ST STGeoDisplay initialResolution for EPSG:4326:
 // initialScaleDenom * oneMeter / (39.37 * 96dpi).
@@ -12,16 +25,24 @@ const FIRST_LEVEL_RESOLUTION: f64 = 0.70312359375;
 const FIRST_LEVEL_SCALE: f64 = 295_828_763.795_854_7;
 const MAX_MULTISCALE_LEVEL: u16 = 16;
 
+/// Stores the quantization and simplification settings for one output geometry column.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GeometryEncoding {
+  /// Stores the display level represented by the column.
   pub level: u16,
+  /// Stores the generated Parquet column name.
   pub column: String,
+  /// Stores the coordinate resolution at this level.
   pub resolution: f64,
+  /// Stores the map scale denominator at this level.
   pub scale: f64,
+  /// Stores the quantization transform applied before PBF encoding.
   pub transform: QuantizationTransform,
+  /// Stores the minimum retained vertex count for the geometry family.
   pub min_length: usize,
 }
 
+/// Build the supported even-numbered display encodings for WGS84 output.
 pub fn create_geometry_encodings(
   output_wkid: u32,
   geometry_type: DisplayGeometryType,
@@ -61,6 +82,7 @@ pub fn create_geometry_encodings(
   Ok(encodings)
 }
 
+/// Convert runtime encoding plans into serializable output metadata.
 pub fn metadata_levels(encodings: &[GeometryEncoding]) -> Vec<MultiscaleLevel> {
   encodings
     .iter()

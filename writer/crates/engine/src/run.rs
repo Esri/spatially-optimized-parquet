@@ -1,3 +1,15 @@
+//! Streams DataFusion output through a caller-provided batch transform into direct Parquet writers.
+//!
+//! [`run_df`] consumes physical partition streams and favors throughput over global order.
+//! [`run_ordered_df`] consumes one logical stream so rows reach output writers in plan order.
+//! Both paths apply the same transform contract, advance between files using an approximate
+//! row target, emit [`RunStatus`] lifecycle events, attach file metadata, and close every writer.
+//!
+//! This module supports the legacy direct-writer architecture. The current spatial job normally
+//! delegates sorting and final output to DataFusion sinks, which can spill and write partitions
+//! concurrently. The direct path remains useful where callers already own batch transformation
+//! and do not need the custom physical-plan wrappers in `spatial::job`.
+
 use anyhow::Result;
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
@@ -11,37 +23,62 @@ use crate::read::{execute_partitioned, execute_stream};
 use crate::write::{OutputWriter, create_output_writer, finalize_writers, write_batches};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Describes observable lifecycle transitions during a streaming write.
 pub enum RunStatus {
+  /// Indicates that execution is awaiting the next source batch.
   WaitingForBatch,
+  /// Indicates that the configured transform is processing a batch.
   TransformingBatch {
+    /// Stores the batch row count.
     rows: usize,
   },
+  /// Indicates that a transformed batch is entering one output writer.
   WritingBatch {
+    /// Stores the batch row count.
     rows: usize,
+    /// Stores the one-based destination file index.
     file_index: usize,
+    /// Stores the total destination file count.
     file_count: usize,
   },
+  /// Indicates that one batch write completed.
   BatchWritten {
+    /// Stores the batch row count.
     rows: usize,
+    /// Stores the one-based destination file index.
     file_index: usize,
+    /// Stores the total destination file count.
     file_count: usize,
   },
+  /// Indicates that file metadata is being attached and writers are closing.
   FinalizingOutputs,
 }
 
+/// Configures batch transformation, output layout, metadata, and progress reporting.
 pub struct RunConfig<'a, F>
 where
   F: Fn(&RecordBatch, &SchemaRef) -> Result<RecordBatch> + Send + Sync,
 {
+  /// Supplies the schema expected after `transform` runs.
   pub output_schema: &'a SchemaRef,
+  /// Supplies the validated destination layout.
   pub output_plan: &'a OutputPlan,
+  /// Selects the Parquet compression codec.
   pub compression: Compression,
+  /// Supplies the estimated total row count used to divide files.
   pub total_rows: u64,
+  /// Supplies file-level Parquet key-value metadata.
   pub kv_metadata: &'a [KeyValue],
+  /// Converts each source batch into the output schema.
   pub transform: F,
+  /// Receives synchronous lifecycle notifications when configured.
   pub on_status: Option<&'a dyn Fn(RunStatus)>,
 }
 
+/// Execute physical partitions and distribute transformed batches across output files.
+///
+/// Partition streams may arrive in reverse pop order, so this path does not promise
+/// global row ordering.
 pub async fn run_df<F>(df: DataFrame, config: RunConfig<'_, F>) -> Result<()>
 where
   F: Fn(&RecordBatch, &SchemaRef) -> Result<RecordBatch> + Send + Sync,
@@ -97,6 +134,7 @@ where
   Ok(())
 }
 
+/// Execute one ordered stream and distribute transformed batches without reordering rows.
 pub async fn run_ordered_df<F>(df: DataFrame, config: RunConfig<'_, F>) -> Result<()>
 where
   F: Fn(&RecordBatch, &SchemaRef) -> Result<RecordBatch> + Send + Sync,
@@ -155,6 +193,7 @@ fn report_status(callback: Option<&dyn Fn(RunStatus)>, status: RunStatus) {
   }
 }
 
+/// Create one direct Parquet writer for every resolved output path.
 fn build_writers(
   output_plan: &OutputPlan,
   schema: &SchemaRef,

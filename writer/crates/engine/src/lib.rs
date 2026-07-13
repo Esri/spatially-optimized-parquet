@@ -1,3 +1,19 @@
+//! Provides the execution substrate shared by the spatial optimization pipeline.
+//!
+//! The crate separates reusable mechanics into focused modules:
+//!
+//! - [`session`] configures DataFusion memory, partitioning, and disk spilling.
+//! - [`read`] converts lazy DataFrames into ordered or partitioned batch streams.
+//! - [`plan`] validates file-versus-directory output layouts before execution.
+//! - [`mod@write`] keeps direct Arrow writers and DataFusion Parquet sinks consistent.
+//! - [`run`] supports the legacy direct batch-transform/write workflow.
+//!
+//! Geospatial policy intentionally remains outside this crate. The `spatial` crate decides
+//! which columns to derive, how geometries should be indexed, and which metadata to emit.
+//! This boundary lets execution settings evolve without coupling them to geometry semantics.
+
+#![warn(missing_docs)]
+
 pub mod plan;
 pub mod read;
 pub mod run;

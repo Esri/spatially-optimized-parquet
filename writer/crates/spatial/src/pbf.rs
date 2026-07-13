@@ -1,3 +1,16 @@
+//! Converts source geometry into compact multiscale display payloads.
+//!
+//! A shared `geo_traits` traversal flattens supported points, lines, and polygons into
+//! interleaved coordinate sequences plus part lengths. The same traversal can accumulate bounds
+//! without materializing payload coordinates. Encoding then quantizes coordinates, delta-encodes
+//! them, removes redundant collinear vertices without violating geometry minimums, and serializes
+//! the result with the module's internal protocol-buffer wire schema.
+//!
+//! Geometry decoding and flattening happen independently of level-specific quantization, allowing
+//! one flat payload to feed every multiscale level. [`GeometryEncodeScratch`] reuses vectors and
+//! serialization storage across rows and levels, which reduces allocation pressure in the
+//! non-point UDF and direct batch encoder.
+
 use anyhow::{Context, Result, bail};
 use geo_traits::{
   CoordTrait, GeometryTrait, GeometryType, LineStringTrait, MultiLineStringTrait, MultiPointTrait,
@@ -10,19 +23,27 @@ use crate::analysis::{DisplayGeometryType, Extent2D};
 use crate::multiscale::GeometryEncoding;
 
 #[derive(Debug, Clone, PartialEq)]
+/// Stores flattened coordinate and part-length sequences without computed bounds.
 pub struct FlatGeometryPayload {
+  /// Stores interleaved x/y coordinates for every traversed part.
   pub coords: Vec<f64>,
+  /// Stores the coordinate-pair count of each geometry part.
   pub lengths: Vec<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// Stores flattened geometry sequences together with their source extent.
 pub struct GeometryPayload {
+  /// Stores interleaved x/y coordinates for every traversed part.
   pub coords: Vec<f64>,
+  /// Stores the coordinate-pair count of each geometry part.
   pub lengths: Vec<u32>,
+  /// Stores the extent observed while flattening coordinates.
   pub bounds: Extent2D,
 }
 
 #[derive(Debug, Default)]
+/// Reuses quantization vectors and serialization storage across geometry encodes.
 pub struct GeometryEncodeScratch {
   quantized_coords: Vec<i64>,
   quantized_lengths: Vec<u32>,
@@ -30,6 +51,7 @@ pub struct GeometryEncodeScratch {
 }
 
 #[derive(Clone, PartialEq, Message)]
+/// Defines the compact protocol-buffer wire payload for one display geometry.
 struct PbfGeometry {
   #[prost(uint32, repeated, tag = "2")]
   lengths: Vec<u32>,
@@ -37,6 +59,7 @@ struct PbfGeometry {
   coords: Vec<i64>,
 }
 
+/// Decode WKB into flattened display geometry and bounds.
 pub fn geometry_payload_from_wkb(
   bytes: &[u8],
   geometry_type: DisplayGeometryType,
@@ -49,6 +72,7 @@ pub fn geometry_payload_from_wkb(
   })
 }
 
+/// Decode WKB into flattened display geometry without calculating bounds.
 pub fn flat_geometry_payload_from_wkb(
   bytes: &[u8],
   geometry_type: DisplayGeometryType,
@@ -56,6 +80,7 @@ pub fn flat_geometry_payload_from_wkb(
   Ok(geometry_payload_parts_from_wkb(bytes, geometry_type, false)?.0)
 }
 
+/// Flatten an owned `geo_types` geometry and calculate its bounds.
 pub fn geometry_payload_from_geometry(
   geometry: &Geometry<f64>,
   geometry_type: DisplayGeometryType,
@@ -68,11 +93,15 @@ pub fn geometry_payload_from_geometry(
   })
 }
 
+/// Quantize and encode a complete geometry payload into a new byte buffer.
 pub fn encode_geometry(payload: &GeometryPayload, encoding: &GeometryEncoding) -> Result<Vec<u8>> {
   let mut scratch = GeometryEncodeScratch::default();
   encode_geometry_owned_with_scratch_impl(&payload.coords, &payload.lengths, encoding, &mut scratch)
 }
 
+/// Quantize and encode a flat payload into reusable scratch storage.
+///
+/// The returned slice remains valid until the scratch value is mutated again.
 pub fn encode_flat_geometry_with_scratch<'a>(
   payload: &FlatGeometryPayload,
   encoding: &GeometryEncoding,
@@ -81,6 +110,7 @@ pub fn encode_flat_geometry_with_scratch<'a>(
   encode_geometry_with_scratch_impl(&payload.coords, &payload.lengths, encoding, scratch)
 }
 
+/// Quantize with reusable scratch vectors and return an owned encoded buffer.
 pub fn encode_flat_geometry_owned_with_scratch(
   payload: &FlatGeometryPayload,
   encoding: &GeometryEncoding,
@@ -89,11 +119,13 @@ pub fn encode_flat_geometry_owned_with_scratch(
   encode_geometry_owned_with_scratch_impl(&payload.coords, &payload.lengths, encoding, scratch)
 }
 
+/// Decode a WKB point and return its x/y coordinate.
 pub fn point_xy_from_wkb(bytes: &[u8]) -> Result<(f64, f64)> {
   let geometry = wkb::reader::read_wkb(bytes)?;
   point_xy_from_geometry_trait(&geometry)
 }
 
+/// Decode WKB and calculate its axis-aligned extent.
 pub fn geometry_extent_from_wkb(bytes: &[u8]) -> Result<Extent2D> {
   let geometry = wkb::reader::read_wkb(bytes)?;
   geometry_extent_from_trait(&geometry).context("geometry missing bounding rectangle")
@@ -106,6 +138,7 @@ struct EncodedPayload {
   lengths: Vec<u32>,
 }
 
+/// Traverse a geometry implementation and calculate its supported two-dimensional extent.
 pub(crate) fn geometry_extent_from_trait<G: GeometryTrait<T = f64>>(
   geometry: &G,
 ) -> Option<Extent2D> {
@@ -159,6 +192,7 @@ fn point_xy_from_geometry_trait<G: GeometryTrait<T = f64>>(geometry: &G) -> Resu
   }
 }
 
+/// Traverse only geometry structures compatible with the requested display category.
 fn visit_geometry_for_display<G: GeometryTrait<T = f64>, S: GeometryPartSink>(
   geometry: &G,
   geometry_type: DisplayGeometryType,
@@ -243,6 +277,7 @@ fn visit_line_string<L: LineStringTrait<T = f64>, S: GeometryPartSink>(line: &L,
   sink.finish_part();
 }
 
+/// Receives normalized geometry parts from the shared traversal algorithm.
 trait GeometryPartSink {
   fn start_part(&mut self);
   fn push_coord(&mut self, x: f64, y: f64);
@@ -250,6 +285,7 @@ trait GeometryPartSink {
 }
 
 #[derive(Default)]
+/// Accumulates coordinate extrema without building a display payload.
 struct ExtentAccumulator {
   extent: Option<Extent2D>,
 }
@@ -279,6 +315,7 @@ impl ExtentAccumulator {
   }
 }
 
+/// Builds flattened coordinates, part lengths, and optional bounds during traversal.
 struct PayloadBuilder {
   coords: Vec<f64>,
   lengths: Vec<u32>,
@@ -328,6 +365,7 @@ impl GeometryPartSink for PayloadBuilder {
 }
 
 #[derive(Default)]
+/// Adapts coordinate traversal into an extent accumulator.
 struct BoundsCollector {
   bounds: ExtentAccumulator,
 }
@@ -349,6 +387,7 @@ impl GeometryPartSink for BoundsCollector {
 }
 
 #[cfg(test)]
+/// Quantize delta-encoded coordinates, remove redundant collinear vertices, and serialize PBF.
 fn encode_quantized_payload(
   payload: &GeometryPayload,
   encoding: &GeometryEncoding,
@@ -365,6 +404,7 @@ fn encode_quantized_payload(
   Ok(EncodedPayload { coords, lengths })
 }
 
+/// Encode quantized coordinates into caller-provided reusable storage.
 fn encode_quantized_payload_into(
   input_coords: &[f64],
   input_lengths: &[u32],
@@ -451,6 +491,7 @@ fn encode_quantized_payload_into(
   Ok(())
 }
 
+/// Encode borrowed coordinate slices and return scratch-owned bytes.
 fn encode_geometry_with_scratch_impl<'a>(
   coords: &[f64],
   lengths: &[u32],
@@ -466,6 +507,7 @@ fn encode_geometry_with_scratch_impl<'a>(
   Ok(scratch.buffer.as_slice())
 }
 
+/// Encode borrowed coordinate slices and copy the result into an owned buffer.
 fn encode_geometry_owned_with_scratch_impl(
   coords: &[f64],
   lengths: &[u32],
@@ -500,6 +542,7 @@ fn quantized_message_from_slices(
   Ok(message)
 }
 
+/// Quantize one coordinate and reject non-finite or overflowing results.
 fn quantize(value: f64, scale: f64, translate: f64) -> Result<i64> {
   let normalized = ((value - translate) / scale).round();
   if !normalized.is_finite() || normalized < i64::MIN as f64 || normalized > i64::MAX as f64 {
@@ -508,6 +551,7 @@ fn quantize(value: f64, scale: f64, translate: f64) -> Result<i64> {
   Ok(normalized as i64)
 }
 
+/// Return the minimum vertices retained for each display geometry type.
 pub fn min_vertex_count(geometry_type: DisplayGeometryType) -> usize {
   match geometry_type {
     DisplayGeometryType::MultiPoint => 1,

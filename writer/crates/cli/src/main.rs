@@ -1,3 +1,15 @@
+//! Defines the `parquet-opt` process boundary and translates command-line arguments into
+//! one [`OptimizeJobOptions`] request.
+//!
+//! This module deliberately contains no storage-format or geometry logic. Clap validates
+//! argument shape, the local parsers enforce row-range constraints, and [`run`] maps the
+//! resulting values into domain options. The `spatial` crate then owns input detection,
+//! metadata discovery, DataFusion planning, geometry transformation, progress reporting,
+//! and durable output.
+//!
+//! Keeping this layer thin prevents CLI concerns from leaking into reusable job code. A
+//! failure returned by the job propagates through `main`, producing a non-zero process exit.
+
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -82,12 +94,14 @@ async fn run(cli: Cli) -> Result<()> {
   run_optimize_job(options).await
 }
 
+/// Parse a zero-based input row offset.
 fn parse_start(value: &str) -> Result<usize, String> {
   value
     .parse::<usize>()
     .map_err(|_| format!("invalid value for --start: {value}"))
 }
 
+/// Parse a non-zero maximum row count.
 fn parse_num(value: &str) -> Result<usize, String> {
   let num = value
     .parse::<usize>()

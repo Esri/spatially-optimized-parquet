@@ -1,3 +1,16 @@
+//! Builds optimized display columns directly on Arrow record batches.
+//!
+//! Point batches gain x/y coordinates and a Morton Z-order code. Non-point batches gain a
+//! `geodisplay` struct containing XZ order, feature bounds, and one quantized PBF payload per
+//! configured level of detail. The module can merge batches, sort them by the generated code,
+//! and finalize intermediate columns into the exact output schema.
+//!
+//! The current job pipeline constructs equivalent operations as DataFusion UDF expressions,
+//! which allows sorting and writing to participate in one physical plan. These batch helpers
+//! preserve the direct transformation path and its tests. Non-point encoding switches to
+//! windowed Rayon execution for sufficiently large batches while retaining deterministic row
+//! order and thread-local scratch buffers.
+
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -21,26 +34,42 @@ use crate::pbf::{
   geometry_payload_from_wkb, point_xy_from_wkb,
 };
 
+/// Names the generated point Z-order code column.
 pub const POINT_Z_CODE_COLUMN: &str = "zCode";
+/// Names the generated point x-coordinate column.
 pub const POINT_X_COLUMN: &str = "x";
+/// Names the generated point y-coordinate column.
 pub const POINT_Y_COLUMN: &str = "y";
+/// Names the generated non-point display struct column.
 pub const DISPLAY_COLUMN: &str = "geodisplay";
+/// Names the XZ-order field within the display struct.
 pub const XZ_CODE_COLUMN: &str = "xzCode";
+/// Names the bounds field within the display struct.
 pub const BOUNDS_COLUMN: &str = "bounds";
+/// Names the optional GeoParquet 1.1 covering bbox column.
 pub const COVERING_BBOX_COLUMN: &str = "bbox";
+/// Names the temporary transformed point-coordinate struct.
 pub const TEMP_POINT_COORDS_COLUMN: &str = "__display_point_coords";
+/// Names the temporary transformed bounds struct.
 pub const TEMP_BOUNDS_COLUMN: &str = "__display_bounds";
+/// Names the temporary target-CRS WKB column.
 pub const TEMP_REPROJECTED_GEOMETRY_COLUMN: &str = "__display_reprojected_geometry";
+/// Names the temporary XZ-order scalar column.
 pub const TEMP_XZ_CODE_COLUMN: &str = "__display_xzcode";
+/// Names the temporary minimum-x scalar column.
 pub const TEMP_XMIN_COLUMN: &str = "__display_xmin";
+/// Names the temporary minimum-y scalar column.
 pub const TEMP_YMIN_COLUMN: &str = "__display_ymin";
+/// Names the temporary maximum-x scalar column.
 pub const TEMP_XMAX_COLUMN: &str = "__display_xmax";
+/// Names the temporary maximum-y scalar column.
 pub const TEMP_YMAX_COLUMN: &str = "__display_ymax";
 
 const NON_POINT_PARALLEL_MIN_ROWS: usize = 512;
 const NON_POINT_ENCODE_WINDOW_ROWS: usize = 1024;
 const NON_POINT_ENCODE_CHUNK_ROWS: usize = 128;
 
+/// Build the final Arrow schema for point or non-point display optimization.
 pub fn build_output_schema(
   input_schema: &SchemaRef,
   analysis: &DisplayJobAnalysis,
@@ -102,6 +131,7 @@ pub fn build_output_schema(
   ))
 }
 
+/// Append computed display columns to one input batch.
 pub fn append_display_columns(
   batch: &RecordBatch,
   output_schema: &SchemaRef,
@@ -124,6 +154,7 @@ pub fn append_display_columns(
   RecordBatch::try_new(output_schema.clone(), columns).context("build display record batch")
 }
 
+/// Merge batches and sort rows by their generated Z-order or XZ-order code.
 pub fn sort_batches(
   schema: &SchemaRef,
   analysis: &DisplayJobAnalysis,
@@ -166,6 +197,7 @@ pub fn sort_batches(
   Ok(Some(sorted))
 }
 
+/// Convert a transformed batch into the exact output schema.
 pub fn finalize_output_batch(
   batch: &RecordBatch,
   output_schema: &SchemaRef,
@@ -291,6 +323,7 @@ fn finalize_non_point_batch(
   Ok(RecordBatch::try_new(output_schema.clone(), columns)?)
 }
 
+/// Append point coordinates and their Z-order code to one batch.
 fn append_point_columns(
   batch: &RecordBatch,
   columns: &mut Vec<Arc<dyn Array>>,
@@ -333,6 +366,7 @@ fn append_point_columns(
   Ok(())
 }
 
+/// Decode non-point rows, calculate bounds and XZ codes, and append display payloads.
 fn append_non_point_columns(
   batch: &RecordBatch,
   columns: &mut Vec<Arc<dyn Array>>,
@@ -446,6 +480,7 @@ fn append_non_point_columns(
   Ok(())
 }
 
+/// Select sequential or Rayon-backed payload encoding from the batch size.
 fn append_non_point_payload_columns(
   geometry_values: &[Option<&[u8]>],
   geometry_type: DisplayGeometryType,
@@ -469,6 +504,7 @@ fn append_non_point_payload_columns(
   }
 }
 
+/// Encode non-point rows in source order on the current thread.
 fn append_non_point_payload_columns_sequential(
   geometry_values: &[Option<&[u8]>],
   geometry_type: DisplayGeometryType,
@@ -491,6 +527,7 @@ fn append_non_point_payload_columns_sequential(
   Ok(())
 }
 
+/// Encode windows concurrently while preserving deterministic source-row order.
 fn append_non_point_payload_columns_parallel(
   geometry_values: &[Option<&[u8]>],
   geometry_type: DisplayGeometryType,
@@ -513,6 +550,7 @@ fn append_non_point_payload_columns_parallel(
   Ok(())
 }
 
+/// Decode and encode one window with reusable scratch storage.
 fn encode_non_point_rows(
   geometry_values: &[Option<&[u8]>],
   geometry_type: DisplayGeometryType,
@@ -573,6 +611,7 @@ fn estimated_pbf_builder_bytes(geometry_values: &[Option<&[u8]>]) -> usize {
     .max(1024)
 }
 
+/// Borrow WKB values from any supported Arrow binary representation.
 fn collect_geometry_values<'a>(array: &'a dyn Array) -> Result<Vec<Option<&'a [u8]>>> {
   match array.data_type() {
     DataType::Binary => {
@@ -615,10 +654,12 @@ fn collect_geometry_values<'a>(array: &'a dyn Array) -> Result<Vec<Option<&'a [u
 }
 
 #[derive(Default)]
+/// Stores reusable per-thread geometry encoding buffers.
 struct NonPointEncodeScratch {
   encoder: GeometryEncodeScratch,
 }
 
+/// Represents either a null geometry or every encoded level for one non-point row.
 enum EncodedNonPointRow {
   Null,
   Values(Vec<Vec<u8>>),

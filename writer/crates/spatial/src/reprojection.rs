@@ -1,3 +1,16 @@
+//! Plans and executes coordinate-reference transformations through GDAL and PROJ.
+//!
+//! [`ReprojectionPlan`] validates that the selected geometry has source CRS metadata, constructs
+//! the target EPSG definition, and omits transformation when source and target references match.
+//! [`TransformSpec`] stores hashable source/target definitions so parameterized DataFusion UDFs
+//! can participate in expression equality and physical planning.
+//!
+//! [`PreparedTransform`] owns the GDAL spatial references and coordinate operation required for
+//! repeated batch work. Point and bounds paths avoid unnecessary geometry reconstruction, while
+//! general WKB reprojection decodes through GDAL, transforms every coordinate, and re-encodes WKB.
+//! Bounds transformations densify edges because nonlinear projections can move extrema away from
+//! the original corners.
+
 use anyhow::{Context, Result};
 use gdal::spatial_ref::{AxisMappingStrategy, CoordTransform, SpatialRef};
 use gdal::vector::Geometry;
@@ -9,18 +22,21 @@ use crate::metadata::source::SourceDatasetMetadata;
 const TRANSFORM_BOUNDS_DENSIFY_POINTS: i32 = 21;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Stores source and target CRS definitions for deferred transform construction.
 pub struct TransformSpec {
   source_definition: String,
   target_definition: String,
 }
 
 #[derive(Debug, Clone)]
+/// Describes whether a job needs reprojection and the metadata of its target CRS.
 pub struct ReprojectionPlan {
   transform: Option<TransformSpec>,
   target_spatial_reference: SpatialReferenceInfo,
 }
 
 #[derive(Debug)]
+/// Owns a prepared GDAL coordinate transform and the spatial references backing it.
 pub struct PreparedTransform {
   _source: SpatialRef,
   _target: SpatialRef,
@@ -28,6 +44,7 @@ pub struct PreparedTransform {
 }
 
 impl ReprojectionPlan {
+  /// Resolve source CRS metadata and plan transformation into the target EPSG code.
   pub fn from_source_metadata(
     source_metadata: &SourceDatasetMetadata,
     geometry_column: &str,
@@ -61,20 +78,24 @@ impl ReprojectionPlan {
     })
   }
 
+  /// Return whether source and target spatial references differ.
   pub fn requires_reprojection(&self) -> bool {
     self.transform.is_some()
   }
 
+  /// Return the deferred transform when reprojection is required.
   pub fn transform(&self) -> Option<&TransformSpec> {
     self.transform.as_ref()
   }
 
+  /// Return metadata describing the target coordinate reference system.
   pub fn target_spatial_reference(&self) -> &SpatialReferenceInfo {
     &self.target_spatial_reference
   }
 }
 
 impl TransformSpec {
+  /// Build reusable GDAL transformation state from the stored CRS definitions.
   pub fn prepare(&self) -> Result<PreparedTransform> {
     let source = spatial_ref_from_definition(&self.source_definition)?;
     let target = spatial_ref_from_definition(&self.target_definition)?;
@@ -87,14 +108,17 @@ impl TransformSpec {
     })
   }
 
+  /// Transform one point, preparing a short-lived transform for this call.
   pub fn transform_point(&self, x: f64, y: f64) -> Result<(f64, f64)> {
     self.prepare()?.transform_point(x, y)
   }
 
+  /// Transform and densify an axis-aligned extent.
   pub fn transform_bounds(&self, bounds: Extent2D) -> Result<Extent2D> {
     self.prepare()?.transform_bounds(bounds)
   }
 
+  /// Decode WKB and calculate its extent in the target CRS.
   pub fn transform_geometry_bounds_from_wkb(
     &self,
     bytes: &[u8],
@@ -105,12 +129,14 @@ impl TransformSpec {
       .transform_geometry_bounds_from_wkb(bytes, geometry_type)
   }
 
+  /// Decode, transform, and re-encode one WKB geometry.
   pub fn reproject_wkb(&self, bytes: &[u8]) -> Result<Vec<u8>> {
     self.prepare()?.reproject_wkb(bytes)
   }
 }
 
 impl PreparedTransform {
+  /// Transform one point with the prepared GDAL coordinate operation.
   pub fn transform_point(&self, x: f64, y: f64) -> Result<(f64, f64)> {
     let mut xs = [x];
     let mut ys = [y];
@@ -121,6 +147,7 @@ impl PreparedTransform {
     Ok((xs[0], ys[0]))
   }
 
+  /// Transform an extent with edge densification to preserve nonlinear extrema.
   pub fn transform_bounds(&self, bounds: Extent2D) -> Result<Extent2D> {
     let [xmin, ymin, xmax, ymax] = self
       .coord_transform
@@ -137,6 +164,7 @@ impl PreparedTransform {
     })
   }
 
+  /// Calculate target-CRS bounds, using a direct point path when possible.
   pub fn transform_geometry_bounds_from_wkb(
     &self,
     bytes: &[u8],
@@ -166,6 +194,7 @@ impl PreparedTransform {
     })
   }
 
+  /// Reproject one WKB geometry and return target-CRS WKB.
   pub fn reproject_wkb(&self, bytes: &[u8]) -> Result<Vec<u8>> {
     let geometry = Geometry::from_wkb(bytes).context("decode geometry for reprojection")?;
     let geometry = geometry

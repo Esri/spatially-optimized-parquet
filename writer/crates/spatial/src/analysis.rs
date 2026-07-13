@@ -1,3 +1,15 @@
+//! Determines the geometry facts required before an optimization plan can be built.
+//!
+//! Analysis resolves the selected geometry into a supported display category, point/non-point
+//! strategy, full extent, coordinate reference system, and Z/M dimensionality. Complete source
+//! metadata provides a constant-time fast path. Row limits, missing extents, ambiguous geometry
+//! declarations, or reprojection invalidate that path and force a WKB scan.
+//!
+//! The scan accepts all Arrow binary representations used by providers, reports progress in
+//! bounded chunks, rejects mixed display categories, and merges per-feature bounds. Transform
+//! specifications can calculate extents in the target CRS during analysis, ensuring later
+//! spatial codes use the same coordinate space as output geometry.
+
 use anyhow::{Context, Result};
 use arrow_array::{Array, ArrayRef, BinaryArray, BinaryViewArray, LargeBinaryArray};
 use arrow_schema::DataType;
@@ -15,20 +27,29 @@ const ANALYSIS_PROGRESS_MAX_CHUNK_ROWS: usize = 8_192;
 const ANALYSIS_PROGRESS_TARGET_UPDATES_PER_BATCH: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Groups geometry types by the output indexing and encoding strategy they require.
 pub enum GeometryFamily {
+  /// Uses scalar x/y columns and Morton Z-order indexing.
   Point,
+  /// Uses bounds, XZ-order indexing, and multiscale geometry payloads.
   NonPoint,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Identifies the display geometry categories supported by spatial optimization.
 pub enum DisplayGeometryType {
+  /// Represents single-point features.
   Point,
+  /// Represents multipoint features.
   MultiPoint,
+  /// Represents line string and multi-line string features.
   Polyline,
+  /// Represents polygon and multipolygon features.
   Polygon,
 }
 
 impl DisplayGeometryType {
+  /// Return the canonical metadata label for this display type.
   pub fn as_str(self) -> &'static str {
     match self {
       Self::Point => "point",
@@ -38,6 +59,7 @@ impl DisplayGeometryType {
     }
   }
 
+  /// Return the output strategy family for this display type.
   pub fn family(self) -> GeometryFamily {
     match self {
       Self::Point => GeometryFamily::Point,
@@ -47,10 +69,15 @@ impl DisplayGeometryType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Default)]
+/// Represents an axis-aligned two-dimensional extent.
 pub struct Extent2D {
+  /// Stores the minimum x coordinate.
   pub xmin: f64,
+  /// Stores the minimum y coordinate.
   pub ymin: f64,
+  /// Stores the maximum x coordinate.
   pub xmax: f64,
+  /// Stores the maximum y coordinate.
   pub ymax: f64,
 }
 
@@ -64,23 +91,36 @@ impl Extent2D {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
+/// Stores equivalent identifiers and definitions for one coordinate reference system.
 pub struct SpatialReferenceInfo {
+  /// Stores an EPSG well-known identifier when one can be inferred.
   pub wkid: Option<u32>,
+  /// Stores a WKT definition when available.
   pub wkt: Option<String>,
+  /// Stores the authoritative PROJJSON definition.
   pub projjson: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// Captures the geometry facts required to build display columns and output metadata.
 pub struct DisplayJobAnalysis {
+  /// Stores the selected source geometry column.
   pub geometry_spec: GeometrySpec,
+  /// Stores the display category used by metadata and encoders.
   pub geometry_type: DisplayGeometryType,
+  /// Stores the output strategy family.
   pub geometry_family: GeometryFamily,
+  /// Stores the extent in the output coordinate reference system.
   pub full_extent: Extent2D,
+  /// Stores the output coordinate reference system.
   pub spatial_reference: SpatialReferenceInfo,
+  /// Indicates whether source metadata declares Z ordinates.
   pub has_z: bool,
+  /// Indicates whether source metadata declares M ordinates.
   pub has_m: bool,
 }
 
+/// Resolve a source geometry column into a supported display category.
 pub(crate) fn source_display_geometry_type(
   source_metadata: &SourceDatasetMetadata,
   geometry_column: &str,
@@ -92,6 +132,7 @@ pub(crate) fn source_display_geometry_type(
     .and_then(metadata_display_geometry_type)
 }
 
+/// Analyze the complete input without progress callbacks or reprojection.
 pub async fn analyze_display_job(
   input: &dyn InputSource,
   geometry_spec: &GeometrySpec,
@@ -109,6 +150,7 @@ pub async fn analyze_display_job(
   .await
 }
 
+/// Analyze an optional leading row subset while reporting scanned rows.
 pub async fn analyze_display_job_with_progress(
   input: &dyn InputSource,
   geometry_spec: &GeometrySpec,
@@ -128,6 +170,10 @@ pub async fn analyze_display_job_with_progress(
   .await
 }
 
+/// Analyze selected rows and optionally evaluate extents after coordinate transformation.
+///
+/// Complete metadata avoids a scan only when no row limit or transform invalidates the
+/// source-wide geometry facts.
 pub async fn analyze_display_job_with_progress_and_transform(
   input: &dyn InputSource,
   geometry_spec: &GeometrySpec,
@@ -207,6 +253,7 @@ pub async fn analyze_display_job_with_progress_and_transform(
   })
 }
 
+/// Build analysis directly from complete, untransformed source metadata.
 fn metadata_fast_path_analysis(
   geometry_spec: &GeometrySpec,
   source_geometry: Option<&SourceGeometryMetadata>,
@@ -237,6 +284,7 @@ fn metadata_fast_path_analysis(
   }))
 }
 
+/// Scan a supported Arrow binary representation and merge observed type and bounds.
 fn scan_geometry_array<F: FnMut(u64)>(
   array: &ArrayRef,
   max_rows: usize,
@@ -283,6 +331,7 @@ fn scan_geometry_array<F: FnMut(u64)>(
   }
 }
 
+/// Scan standard Arrow binary WKB values in bounded progress chunks.
 fn scan_binary<F: FnMut(u64)>(
   array: &BinaryArray,
   max_rows: usize,
@@ -314,6 +363,7 @@ fn scan_binary<F: FnMut(u64)>(
   Ok(())
 }
 
+/// Scan large Arrow binary WKB values in bounded progress chunks.
 fn scan_large_binary<F: FnMut(u64)>(
   array: &LargeBinaryArray,
   max_rows: usize,
@@ -345,6 +395,7 @@ fn scan_large_binary<F: FnMut(u64)>(
   Ok(())
 }
 
+/// Scan Arrow binary-view WKB values in bounded progress chunks.
 fn scan_binary_view<F: FnMut(u64)>(
   array: &BinaryViewArray,
   max_rows: usize,
@@ -376,11 +427,13 @@ fn scan_binary_view<F: FnMut(u64)>(
   Ok(())
 }
 
+/// Choose a chunk size that limits callback overhead while keeping progress responsive.
 fn analysis_progress_chunk_rows(max_rows: usize) -> usize {
   let target_chunk = max_rows / ANALYSIS_PROGRESS_TARGET_UPDATES_PER_BATCH;
   target_chunk.clamp(1, ANALYSIS_PROGRESS_MAX_CHUNK_ROWS)
 }
 
+/// Decode one geometry and merge its type and extent into the running analysis.
 fn observe_geometry(
   bytes: &[u8],
   observed_type: &mut Option<DisplayGeometryType>,
@@ -424,6 +477,7 @@ fn map_kind_to_display_type(kind: GeometryKind) -> Option<DisplayGeometryType> {
   }
 }
 
+/// Resolve one unambiguous source geometry declaration into a display type.
 fn metadata_display_geometry_type(
   geometry_meta: &SourceGeometryMetadata,
 ) -> Option<DisplayGeometryType> {
@@ -445,6 +499,7 @@ fn metadata_display_geometry_type(
   geometry_type
 }
 
+/// Normalize PROJJSON into the spatial-reference forms written by output metadata.
 fn resolve_spatial_reference_info(projjson: Option<Value>) -> Result<SpatialReferenceInfo> {
   Ok(SpatialReferenceInfo {
     wkid: projjson.as_ref().and_then(infer_wkid),

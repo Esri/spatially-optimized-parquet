@@ -1,3 +1,20 @@
+//! Integrates GeoPackage vector layers through GDAL's Arrow C stream interface.
+//!
+//! [`GpkgInputProvider`] recognizes local `.gpkg` files, opens only the GDAL `GPKG` driver,
+//! inventories vector layers, resolves the requested layer, and normalizes geometry type,
+//! dimensions, extent, CRS, and Arrow schema. Generic GDAL geometry declarations trigger a
+//! bounded feature sample so downstream analysis receives a useful concrete type when possible.
+//!
+//! GeoPackage does not use DataFusion's native file readers. [`GpkgInputSource::to_dataframe`]
+//! calculates rowid boundaries with SQLite offset queries, creates one partition stream
+//! per range, and wraps those streams in a DataFusion `StreamingTable`. DataFusion schedules the
+//! partitions and downstream operators, while GDAL still owns SQLite access, feature decoding,
+//! WKB production, and Arrow conversion.
+//!
+//! Partition planning and stream creation repeat whenever a job executes a new source DataFrame.
+//! Metadata analysis, multi-file range estimation, and final output can therefore reopen and scan
+//! the same GeoPackage independently when the job cannot use metadata fast paths.
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -36,9 +53,11 @@ const GPKG_ALLOWED_DRIVERS: [&str; 1] = ["GPKG"];
 const GPKG_OPEN_OPTIONS: [&str; 2] = ["NOLOCK=YES", "IMMUTABLE=YES"];
 
 #[derive(Debug, Default)]
+/// Detects local `.gpkg` files and opens one selected vector layer.
 pub struct GpkgInputProvider;
 
 #[derive(Debug, Clone)]
+/// Stores normalized GeoPackage metadata and constructs GDAL-backed batch streams.
 pub struct GpkgInputSource {
   input_path: PathBuf,
   source_location: String,
@@ -50,6 +69,7 @@ pub struct GpkgInputSource {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Summarizes one layer for selection errors and diagnostics.
 struct GpkgLayerSummary {
   name: String,
   geometry_type: String,
@@ -57,12 +77,14 @@ struct GpkgLayerSummary {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// Defines an inclusive lower and exclusive upper rowid range for one scan partition.
 struct GpkgScanPartition {
   lower_rowid: Option<i64>,
   upper_rowid: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Captures whether sampled features establish one geometry type or mixed content.
 enum SampledGeometryType {
   Concrete {
     geometry_kind: GeometryKind,
@@ -86,6 +108,7 @@ impl GpkgScanPartition {
 }
 
 impl GpkgInputProvider {
+  /// Build the stateless GeoPackage provider.
   pub fn new() -> Self {
     Self
   }
@@ -234,6 +257,7 @@ impl InputSource for GpkgInputSource {
   }
 }
 
+/// Owns the layer and reader state required to continue one GDAL Arrow stream.
 struct GpkgBatchState {
   _layer: OwnedLayer,
   reader: ArrowArrayStreamReader,
@@ -242,6 +266,7 @@ struct GpkgBatchState {
 }
 
 #[derive(Debug)]
+/// Opens and streams one independently executable GeoPackage rowid partition.
 struct GpkgPartitionStream {
   input_path: PathBuf,
   layer_name: String,
@@ -284,6 +309,7 @@ fn is_gpkg_path(path: &Path) -> bool {
       .is_some_and(|ext| ext.to_string_lossy().eq_ignore_ascii_case("gpkg"))
 }
 
+/// Open a GeoPackage with vector-only, immutable, and no-lock GDAL options.
 fn open_gpkg_dataset(path: &Path) -> Result<Dataset> {
   Dataset::open_ex(
     path,
@@ -319,6 +345,7 @@ fn quoted_sqlite_identifier(identifier: &str) -> String {
   format!("\"{}\"", identifier.replace('"', "\"\""))
 }
 
+/// Query the rowid at one logical feature offset for partition-boundary discovery.
 fn query_layer_rowid_at_offset(
   dataset: &Dataset,
   layer_name: &str,
@@ -365,6 +392,10 @@ fn fallback_gpkg_scan_partitions(
   }])
 }
 
+/// Resolve rowid boundaries that divide a requested row range across DataFusion partitions.
+///
+/// Boundary discovery issues SQLite offset queries before execution. If any boundary
+/// cannot be resolved, the planner falls back to one contiguous partition.
 fn plan_gpkg_scan_partitions(
   path: &Path,
   layer_name: &str,
@@ -403,6 +434,7 @@ fn plan_gpkg_scan_partitions(
   Ok(partitions)
 }
 
+/// Collect user-facing metadata for every vector layer in a dataset.
 fn collect_layer_summaries(dataset: &Dataset) -> Result<Vec<GpkgLayerSummary>> {
   let layer_summaries = dataset
     .layers()
@@ -434,6 +466,7 @@ fn collect_layer_summaries(dataset: &Dataset) -> Result<Vec<GpkgLayerSummary>> {
   Ok(layer_summaries)
 }
 
+/// Resolve an explicit layer or require one when multiple layers exist.
 fn select_layer_name(
   options: &InputOpenOptions,
   layer_summaries: &[GpkgLayerSummary],
@@ -489,6 +522,7 @@ fn sample_geometry_type_hint(layer: &mut impl LayerAccess) -> Option<String> {
   }
 }
 
+/// Inspect a bounded feature sample when GDAL reports a generic geometry type.
 fn sample_geometry_type(layer: &mut impl LayerAccess) -> Option<SampledGeometryType> {
   let mut sampled_geometry: Option<(GeometryKind, bool, bool)> = None;
 
@@ -534,6 +568,7 @@ fn format_feature_count(feature_count: u64) -> String {
   reversed.chars().rev().collect()
 }
 
+/// Normalize geometry type, dimensions, extent, and CRS from a GDAL layer.
 fn build_geometry_metadata(
   layer: &mut impl LayerAccess,
   layer_name: &str,
@@ -668,11 +703,13 @@ fn map_geometry_type(
   }
 }
 
+/// Load the normalized Arrow schema without consuming feature batches.
 fn load_schema(path: &Path, layer_name: &str, geometry_column: &str) -> Result<SchemaRef> {
   let (_layer, reader) = open_arrow_reader(path, layer_name, None)?;
   Ok(normalize_schema(reader.schema(), geometry_column))
 }
 
+/// Open a GDAL Arrow stream and normalize its geometry field into the expected schema.
 fn open_arrow_reader(
   path: &Path,
   layer_name: &str,
@@ -700,6 +737,7 @@ fn open_arrow_reader(
   Ok((layer, reader))
 }
 
+/// Retain the GDAL layer owner alongside its Arrow reader for the stream lifetime.
 fn open_gpkg_batch_state(
   input_path: &Path,
   layer_name: &str,
@@ -716,6 +754,7 @@ fn open_gpkg_batch_state(
   })
 }
 
+/// Convert a stateful GDAL Arrow reader into a fallible asynchronous batch stream.
 fn gpkg_batch_stream(
   state: GpkgBatchState,
 ) -> impl futures_util::Stream<Item = Result<RecordBatch>> + Send + 'static {
@@ -747,6 +786,7 @@ fn to_datafusion_error(err: anyhow::Error) -> DataFusionError {
   DataFusionError::External(err.into())
 }
 
+/// Normalize provider-specific geometry field names and extension metadata.
 fn normalize_schema(schema: SchemaRef, geometry_column: &str) -> SchemaRef {
   let Some(source_geometry_name) = find_geometry_field_name(schema.as_ref()) else {
     return schema;
@@ -787,6 +827,7 @@ fn find_geometry_field_name(schema: &Schema) -> Option<&str> {
   })
 }
 
+/// Replace a provider batch schema with the stable source schema after field normalization.
 fn normalize_batch_schema(batch: RecordBatch, schema: SchemaRef) -> Result<RecordBatch> {
   if batch.schema() == schema {
     return Ok(batch);
@@ -795,6 +836,7 @@ fn normalize_batch_schema(batch: RecordBatch, schema: SchemaRef) -> Result<Recor
   Ok(RecordBatch::try_new(schema, batch.columns().to_vec())?)
 }
 
+/// Slice a batch to the remaining requested row count and update that count.
 fn truncate_batch(batch: RecordBatch, remaining: &mut Option<usize>) -> RecordBatch {
   let Some(remaining_rows) = remaining else {
     return batch;

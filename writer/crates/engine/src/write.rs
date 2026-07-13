@@ -1,3 +1,14 @@
+//! Centralizes Parquet writer policy for both direct Arrow writers and DataFusion sinks.
+//!
+//! The module parses supported compression names, disables dictionary encoding, applies
+//! consistent row-group and write-batch sizes, propagates key-value metadata, and tracks
+//! direct-writer row counts. [`create_datafusion_parquet_options`] mirrors the settings used
+//! by [`create_output_writer`] so output characteristics do not depend on the execution path.
+//!
+//! Row-group and batch sizes can be tuned through `OPT_PARQUET_ROW_GROUP_SIZE` and
+//! `OPT_PARQUET_WRITE_BATCH_SIZE`. Larger values can improve compression and throughput at
+//! the cost of memory, while smaller values reduce buffering and may increase file overhead.
+
 use std::fs;
 use std::path::Path;
 
@@ -15,11 +26,14 @@ const DEFAULT_WRITE_BATCH_SIZE: usize = 8 * 1024;
 const ROW_GROUP_SIZE_ENV: &str = "OPT_PARQUET_ROW_GROUP_SIZE";
 const WRITE_BATCH_SIZE_ENV: &str = "OPT_PARQUET_WRITE_BATCH_SIZE";
 
+/// Owns a direct Arrow Parquet writer and its committed row count.
 pub struct OutputWriter {
   writer: Option<ArrowWriter<fs::File>>,
+  /// Tracks rows accepted by the underlying Parquet writer.
   pub rows_written: u64,
 }
 
+/// Parse a user-facing compression name into a Parquet codec.
 pub fn parse_compression(compression: &str) -> Result<Compression> {
   let codec = match compression.to_ascii_lowercase().as_str() {
     "snappy" => Compression::SNAPPY,
@@ -40,6 +54,7 @@ pub fn parse_compression(compression: &str) -> Result<Compression> {
   Ok(codec)
 }
 
+/// Create a direct Parquet writer with repository-wide row-group and batch settings.
 pub fn create_output_writer(
   path: &Path,
   schema: &SchemaRef,
@@ -60,6 +75,7 @@ pub fn create_output_writer(
   })
 }
 
+/// Append one record batch and update the writer's row count.
 pub fn write_batches(writer: &mut OutputWriter, batch: &RecordBatch) -> Result<()> {
   writer
     .writer
@@ -70,6 +86,7 @@ pub fn write_batches(writer: &mut OutputWriter, batch: &RecordBatch) -> Result<(
   Ok(())
 }
 
+/// Build DataFusion Parquet options equivalent to the direct-writer configuration.
 pub fn create_datafusion_parquet_options(
   compression: Compression,
   kv_metadata: &[KeyValue],
@@ -86,6 +103,7 @@ pub fn create_datafusion_parquet_options(
   options
 }
 
+/// Attach file metadata and close every direct writer.
 pub fn finalize_writers(mut writers: Vec<OutputWriter>, kv_metadata: &[KeyValue]) -> Result<()> {
   for writer in writers.iter_mut() {
     let mut parquet_writer = writer.writer.take().context("missing parquet writer")?;

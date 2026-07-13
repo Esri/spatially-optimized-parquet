@@ -1,27 +1,50 @@
+//! Resolves a user-facing output destination into a safe, concrete Parquet file layout.
+//!
+//! A path with an extension represents one file. A path without an extension represents a
+//! directory and therefore requires an explicit part count. [`validate_output`] enforces
+//! those rules, protects existing output unless overwrite was requested, removes only
+//! compatible directory destinations, and creates the required parent directories.
+//!
+//! The resulting [`OutputPlan`] acts as the invariant-bearing boundary for later writers.
+//! Downstream code can generate deterministic part names and distribute rows without
+//! repeating path validation or filesystem mutation policy.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
 #[derive(Debug)]
+/// Describes the validated output destination and number of Parquet parts.
 pub struct OutputPlan {
+  /// Indicates whether `path` names a directory containing generated part files.
   pub is_directory: bool,
+  /// Stores the output file or directory selected by the caller.
   pub path: PathBuf,
+  /// Stores the exact number of output files to create.
   pub parts: usize,
 }
 
 #[derive(Debug, thiserror::Error)]
+/// Reports invalid or unsafe output-layout requests.
 pub enum PlanError {
+  /// Indicates that replacement was not authorized for an existing destination.
   #[error("output path already exists: {0} (pass --overwrite to replace it)")]
   OutputExists(PathBuf),
+  /// Indicates that directory output omitted its required file count.
   #[error("output path requires --output-files when output is a directory")]
   OutputFilesRequired,
+  /// Indicates that a file output requested more than one part.
   #[error("output path is a file so --output-files must be 1")]
   OutputFilesMustBeOne,
+  /// Indicates that the requested output file count was zero.
   #[error("--output-files must be >= 1")]
   OutputFilesInvalid,
 }
 
+/// Validate the output layout and prepare its parent directory.
+///
+/// Existing compatible destinations are removed only when `overwrite` is true.
 pub fn validate_output(
   output: &Path,
   output_files: Option<usize>,
@@ -71,6 +94,7 @@ pub fn validate_output(
   })
 }
 
+/// Resolve a validated plan into deterministic output file paths.
 pub fn output_paths(plan: &OutputPlan) -> Result<Vec<PathBuf>> {
   if plan.is_directory {
     let mut paths = Vec::new();
@@ -84,6 +108,9 @@ pub fn output_paths(plan: &OutputPlan) -> Result<Vec<PathBuf>> {
   }
 }
 
+/// Calculate the approximate row threshold used to advance sequential writers.
+///
+/// Returns zero for a single output or empty input because no rollover is needed.
 pub fn target_rows_per_file(parts: usize, total_rows: u64) -> u64 {
   if parts <= 1 {
     return 0;

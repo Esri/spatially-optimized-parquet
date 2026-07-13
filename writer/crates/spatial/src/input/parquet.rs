@@ -1,3 +1,21 @@
+//! Integrates local and HTTP Parquet sources, including GeoParquet metadata normalization.
+//!
+//! [`ParquetInputProvider`] accepts one local file, a directory of `.parquet` files, or a direct
+//! HTTP(S) URL ending in `.parquet`. Discovery reads every local footer or performs HTTP object
+//! metadata and footer range requests. GeoParquet `geo` JSON must remain semantically consistent
+//! across a local file set. Reserved metadata stays under writer control, while unrelated
+//! key-value pairs can pass through to output.
+//!
+//! Normal scans delegate to `SessionContext::read_parquet`, so DataFusion owns row-group/page
+//! planning, decompression, partition scheduling, limits, and Arrow batch production. Direct
+//! `read_batches` uses the same DataFusion path locally and a Parquet object reader over HTTP.
+//! The job may materialize very small bounded HTTP ranges once, preventing its independent
+//! analysis and write plans from repeating remote reads.
+//!
+//! Footer discovery cost scales with file count, and HTTP execution can issue new range requests
+//! after provider discovery. The source stores loaded footer metadata so schema, row count, and
+//! spatial metadata queries do not reopen local files.
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -27,14 +45,17 @@ use crate::input::{
 };
 use crate::metadata::source::{SourceDatasetMetadata, SourceGeometryMetadata};
 
+/// Detects local Parquet files, Parquet directories, and direct HTTP Parquet URLs.
 pub struct ParquetInputProvider;
 
+/// Stores Parquet footer metadata and the location needed to construct future scans.
 pub struct ParquetInputSource {
   location: ParquetInputLocation,
   source_location: String,
   metadata: Vec<ArrowReaderMetadata>,
 }
 
+/// Distinguishes local DataFusion paths from registered HTTP object-store locations.
 enum ParquetInputLocation {
   Local {
     input_path: String,
@@ -49,6 +70,7 @@ enum ParquetInputLocation {
 }
 
 impl ParquetInputProvider {
+  /// Build the stateless Parquet provider.
   pub fn new() -> Self {
     Self
   }
@@ -252,6 +274,7 @@ impl InputSource for ParquetInputSource {
   }
 }
 
+/// Open one HTTP Parquet object and load its footer metadata with range requests.
 async fn open_http_parquet(location: &str) -> Result<Arc<dyn InputSource>> {
   if !location
     .split('?')
@@ -296,6 +319,9 @@ async fn open_http_parquet(location: &str) -> Result<Arc<dyn InputSource>> {
   }))
 }
 
+/// Discover a single Parquet file or a sorted directory of Parquet files.
+///
+/// Returns `None` for unsupported paths so another input provider can attempt them.
 fn discover_parquet_files(input: &Path) -> Result<Option<Vec<PathBuf>>> {
   if input.is_file() {
     return Ok(
@@ -328,6 +354,7 @@ fn discover_parquet_files(input: &Path) -> Result<Option<Vec<PathBuf>>> {
   Ok(None)
 }
 
+/// Load Arrow and Parquet metadata from one local file footer.
 fn load_arrow_metadata(file: &Path) -> Result<ArrowReaderMetadata> {
   ArrowReaderMetadata::load(
     &fs::File::open(file).with_context(|| format!("open parquet file: {}", file.display()))?,
@@ -336,6 +363,7 @@ fn load_arrow_metadata(file: &Path) -> Result<ArrowReaderMetadata> {
   .with_context(|| format!("read arrow metadata: {}", file.display()))
 }
 
+/// Parse and require consistent GeoParquet metadata across all discovered files.
 fn load_geo_metadata(metadata_items: &[ArrowReaderMetadata]) -> Result<Option<GeoParquetMetadata>> {
   let mut geo_meta: Option<GeoParquetMetadata> = None;
   let mut saw_geo = false;
@@ -364,6 +392,7 @@ fn load_geo_metadata(metadata_items: &[ArrowReaderMetadata]) -> Result<Option<Ge
   Ok(geo_meta)
 }
 
+/// Decode the GeoParquet `geo` key from one Parquet footer.
 fn parse_geo_metadata(metadata: &ArrowReaderMetadata) -> Result<Option<GeoParquetMetadata>> {
   let Some(geo_value) = metadata
     .metadata()
@@ -382,6 +411,7 @@ fn parse_geo_metadata(metadata: &ArrowReaderMetadata) -> Result<Option<GeoParque
     .map(Some)
 }
 
+/// Remove non-semantic metadata differences before comparing file-level GeoParquet JSON.
 fn sanitize_geo_metadata_json(json: &mut Value) {
   let Some(columns) = json.get_mut("columns").and_then(Value::as_object_mut) else {
     return;
@@ -402,6 +432,7 @@ fn sanitize_geo_metadata_json(json: &mut Value) {
   }
 }
 
+/// Convert GeoParquet metadata into the format-neutral source geometry model.
 fn build_source_geometry_metadata(
   geo_meta: &GeoParquetMetadata,
 ) -> Result<Option<SourceGeometryMetadata>> {
@@ -468,6 +499,7 @@ fn has_dimension_suffix(
   })
 }
 
+/// Preserve non-reserved key-value metadata exactly once across a file set.
 fn passthrough_metadata(metadata_items: &[ArrowReaderMetadata]) -> Vec<KeyValue> {
   let mut seen = BTreeSet::new();
   let mut out = Vec::new();
@@ -487,6 +519,7 @@ fn passthrough_metadata(metadata_items: &[ArrowReaderMetadata]) -> Vec<KeyValue>
   out
 }
 
+/// Collect all file metadata needed by callers, including reserved keys.
 fn file_metadata(metadata_items: &[ArrowReaderMetadata]) -> Vec<KeyValue> {
   let mut seen = BTreeSet::new();
   let mut out = Vec::new();

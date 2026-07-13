@@ -1,10 +1,25 @@
+//! Computes sortable spatial codes used to cluster features for viewport-oriented reads.
+//!
+//! Points use Morton Z-order: coordinates are quantized relative to the dataset extent and
+//! their bits are interleaved. Non-point features use an XZ hierarchy: the feature extent
+//! selects a containment level, then its lower-left point identifies a hierarchy path.
+//! Nearby features therefore tend to receive nearby codes without clipping their geometry.
+//!
+//! These functions perform pure arithmetic and allocate no heap storage. Their results drive
+//! DataFusion sorts and output-range partitioning, so coordinate precision and hierarchy depth
+//! directly affect clustering granularity and the distribution of generated files.
+
 use crate::analysis::Extent2D;
 
+/// Stores a sortable spatial index code.
 pub type DisplayCode = u64;
 
+/// Stores the default maximum depth of the XZ hierarchy.
 pub const DEFAULT_XZ_MAX_LEVEL: u32 = 20;
+/// Stores the default number of quantization bits per point coordinate axis.
 pub const DEFAULT_COORDINATE_PRECISION: u32 = 20;
 
+/// Quantize a point within the full extent and interleave its x/y bits.
 pub fn point_z_code(
   full_extent: Extent2D,
   x: f64,
@@ -16,6 +31,7 @@ pub fn point_z_code(
   swizzle_bits(quantized_x, quantized_y, coordinate_precision)
 }
 
+/// Interleave x and y bits into one Morton-order code.
 pub fn swizzle_bits(x: u32, y: u32, coordinate_precision: u32) -> DisplayCode {
   let mut out = 0u64;
   for bit in 0..coordinate_precision.min(32) {
@@ -27,6 +43,7 @@ pub fn swizzle_bits(x: u32, y: u32, coordinate_precision: u32) -> DisplayCode {
   out
 }
 
+/// Select the deepest XZ hierarchy level whose cell can contain a feature extent.
 pub fn extent_xz_level(full_extent: Extent2D, feature_extent: Extent2D, max_depth: u32) -> u32 {
   let full_extent_width = full_extent.xmax - full_extent.xmin;
   let full_extent_height = full_extent.ymax - full_extent.ymin;
@@ -42,6 +59,7 @@ pub fn extent_xz_level(full_extent: Extent2D, feature_extent: Extent2D, max_dept
   ((x_level.min(y_level).floor() as u32) + 1).min(max_depth)
 }
 
+/// Encode a feature extent at an XZ hierarchy level that preserves spatial containment.
 pub fn extent_xz_code(
   full_extent: Extent2D,
   feature_extent: Extent2D,
@@ -75,6 +93,10 @@ pub fn extent_xz_code(
   )
 }
 
+/// Encode a point's path through the XZ hierarchy.
+///
+/// `insert_level` truncates the path for extent indexing. Without it, the code reaches
+/// `max_depth`.
 pub fn point_xz_code(
   full_extent: Extent2D,
   point_x: f64,

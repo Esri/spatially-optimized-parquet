@@ -1,3 +1,15 @@
+//! Builds the DataFusion execution environment used by analysis, sorting, and Parquet output.
+//!
+//! [`new_datafusion_session`] creates a session-scoped spill directory, applies a bounded
+//! memory pool, enables sort repartitioning and disk spilling, and preserves existing sort
+//! order where possible. File-scan repartitioning stays disabled because input providers
+//! either expose their own partitions or rely on DataFusion's native Parquet planning.
+//!
+//! Memory limits, spill reservations, and target partition counts can be tuned through the
+//! documented `OPT_PARQUET_DF_*` environment variables. Invalid or zero values fall back to
+//! conservative defaults. [`DataFusionSession`] owns the temporary directory so spill files
+//! cannot disappear while a physical plan still references them.
+
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -14,17 +26,25 @@ const MEMORY_LIMIT_ENV: &str = "OPT_PARQUET_DF_MEMORY_LIMIT_BYTES";
 const SORT_SPILL_RESERVATION_ENV: &str = "OPT_PARQUET_DF_SORT_SPILL_RESERVATION_BYTES";
 const TARGET_PARTITIONS_ENV: &str = "OPT_PARQUET_DF_TARGET_PARTITIONS";
 
+/// Owns a DataFusion context and the temporary spill directory required by its runtime.
+///
+/// Keeping the directory in this value preserves spill files for the full session lifetime.
 pub struct DataFusionSession {
   ctx: SessionContext,
   _spill_dir: TempDir,
 }
 
 impl DataFusionSession {
+  /// Return the configured DataFusion context.
   pub fn context(&self) -> &SessionContext {
     &self.ctx
   }
 }
 
+/// Build the DataFusion session used by spatial analysis and output execution.
+///
+/// File-scan repartitioning stays disabled because input providers define their own
+/// partition behavior, while sort repartitioning and disk spilling remain enabled.
 pub fn new_datafusion_session() -> Result<DataFusionSession> {
   let spill_dir = tempfile::Builder::new()
     .prefix("opt-parquet-datafusion-spill-")
@@ -62,6 +82,7 @@ fn configured_sort_spill_reservation_bytes() -> usize {
   env_usize(SORT_SPILL_RESERVATION_ENV).unwrap_or(DEFAULT_SORT_SPILL_RESERVATION_BYTES)
 }
 
+/// Resolve the configured execution partition count.
 pub fn configured_target_partitions() -> usize {
   env_usize(TARGET_PARTITIONS_ENV).unwrap_or(SORT_TARGET_PARTITIONS)
 }

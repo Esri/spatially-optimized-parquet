@@ -1,3 +1,17 @@
+//! Exposes geometry computation as typed DataFusion scalar expressions.
+//!
+//! Public builders construct expressions for point coordinates, feature bounds, reprojection,
+//! Z/XZ codes, GeoParquet covering structs, and complete non-point geodisplay payloads. They hide
+//! UDF names, signatures, aliases, and temporary-column conventions from the job planner.
+//! Stateless UDFs register once per session, while transform- and encoding-specific UDF values
+//! embed their parameters directly in the expression tree.
+//!
+//! Implementations accept Arrow `Binary`, `LargeBinary`, and `BinaryView` arrays, preserve null
+//! semantics, and translate geometry failures into DataFusion execution errors. Non-point display
+//! encoding decodes each WKB row once, reuses scratch storage across levels, and constructs a
+//! nested Arrow struct matching output metadata. UDF equality and hashing include all semantic
+//! parameters so DataFusion cannot incorrectly merge distinct transforms or encoding plans.
+
 use std::any::Any;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -32,6 +46,9 @@ use crate::pbf::{
 };
 use crate::reprojection::{PreparedTransform, TransformSpec};
 
+/// Register reusable stateless geometry UDFs in a DataFusion session.
+///
+/// Parameterized reprojection and multiscale UDFs are embedded directly in expressions.
 pub fn register_display_udfs(ctx: &SessionContext) {
   for udf in [
     point_zcode_udf(),
@@ -47,6 +64,7 @@ pub fn register_display_udfs(ctx: &SessionContext) {
   }
 }
 
+/// Build a point Z-order expression from a WKB geometry column.
 pub fn point_zcode_expr(geometry_column: &str, full_extent: Extent2D) -> Expr {
   point_zcode_udf()
     .call(vec![
@@ -59,22 +77,26 @@ pub fn point_zcode_expr(geometry_column: &str, full_extent: Extent2D) -> Expr {
     .alias(POINT_Z_CODE_COLUMN)
 }
 
+/// Build an expression that extracts point x coordinates from WKB.
 pub fn point_x_expr(geometry_column: &str) -> Expr {
   point_x_udf()
     .call(vec![col(geometry_column)])
     .alias(POINT_X_COLUMN)
 }
 
+/// Build an expression that extracts point y coordinates from WKB.
 pub fn point_y_expr(geometry_column: &str) -> Expr {
   point_y_udf()
     .call(vec![col(geometry_column)])
     .alias(POINT_Y_COLUMN)
 }
 
+/// Build a struct expression containing target-CRS point coordinates.
 pub fn transformed_point_coords_expr(geometry_column: &str, transform: &TransformSpec) -> Expr {
   transformed_point_coords_udf(transform.clone()).call(vec![col(geometry_column)])
 }
 
+/// Build a point Z-order expression from precomputed x/y columns.
 pub fn point_zcode_from_xy_expr(x_column: &str, y_column: &str, full_extent: Extent2D) -> Expr {
   point_zcode_from_xy_udf()
     .call(vec![
@@ -88,6 +110,7 @@ pub fn point_zcode_from_xy_expr(x_column: &str, y_column: &str, full_extent: Ext
     .alias(POINT_Z_CODE_COLUMN)
 }
 
+/// Build a non-point XZ-order expression by decoding WKB bounds.
 pub fn non_point_xzcode_expr(geometry_column: &str, full_extent: Extent2D) -> Expr {
   non_point_xzcode_udf()
     .call(vec![
@@ -100,6 +123,7 @@ pub fn non_point_xzcode_expr(geometry_column: &str, full_extent: Extent2D) -> Ex
     .alias(TEMP_XZ_CODE_COLUMN)
 }
 
+/// Build the non-point geodisplay struct containing code, bounds, and encoded LOD columns.
 pub fn non_point_geodisplay_expr(
   geometry_column: &str,
   geometry_type: DisplayGeometryType,
@@ -117,30 +141,35 @@ pub fn non_point_geodisplay_expr(
     .alias(DISPLAY_COLUMN)
 }
 
+/// Build an expression that extracts geometry minimum x.
 pub fn bounds_xmin_expr(geometry_column: &str) -> Expr {
   bounds_xmin_udf()
     .call(vec![col(geometry_column)])
     .alias(TEMP_XMIN_COLUMN)
 }
 
+/// Build an expression that extracts geometry minimum y.
 pub fn bounds_ymin_expr(geometry_column: &str) -> Expr {
   bounds_ymin_udf()
     .call(vec![col(geometry_column)])
     .alias(TEMP_YMIN_COLUMN)
 }
 
+/// Build an expression that extracts geometry maximum x.
 pub fn bounds_xmax_expr(geometry_column: &str) -> Expr {
   bounds_xmax_udf()
     .call(vec![col(geometry_column)])
     .alias(TEMP_XMAX_COLUMN)
 }
 
+/// Build an expression that extracts geometry maximum y.
 pub fn bounds_ymax_expr(geometry_column: &str) -> Expr {
   bounds_ymax_udf()
     .call(vec![col(geometry_column)])
     .alias(TEMP_YMAX_COLUMN)
 }
 
+/// Build a struct expression containing geometry bounds in the target CRS.
 pub fn transformed_bounds_expr(
   geometry_column: &str,
   geometry_type: DisplayGeometryType,
@@ -149,6 +178,7 @@ pub fn transformed_bounds_expr(
   transformed_bounds_udf(transform.clone(), geometry_type).call(vec![col(geometry_column)])
 }
 
+/// Build a non-point XZ-order expression from precomputed bound columns.
 pub fn non_point_xzcode_from_bounds_expr(
   xmin_column: &str,
   ymin_column: &str,
@@ -170,6 +200,7 @@ pub fn non_point_xzcode_from_bounds_expr(
     .alias(TEMP_XZ_CODE_COLUMN)
 }
 
+/// Build the GeoParquet covering bbox struct while preserving geometry nullability.
 pub fn feature_bbox_expr(
   geometry_column: &str,
   xmin_column: &str,
@@ -188,11 +219,13 @@ pub fn feature_bbox_expr(
     .alias(COVERING_BBOX_COLUMN)
 }
 
+/// Build an expression that reprojects one WKB geometry column.
 pub fn reproject_geometry_expr(geometry_column: &str, transform: &TransformSpec) -> Expr {
   reproject_geometry_udf(transform.clone()).call(vec![col(geometry_column)])
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Selects the scalar extracted by a unary WKB-to-f64 UDF.
 enum FloatUdfKind {
   PointX,
   PointY,
@@ -203,6 +236,7 @@ enum FloatUdfKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Implements point-coordinate and geometry-bound scalar extraction.
 struct GeometryFloatUdf {
   name: &'static str,
   kind: FloatUdfKind,
@@ -287,24 +321,28 @@ impl ScalarUDFImpl for GeometryFloatUdf {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Selects direct WKB spatial-code calculation.
 enum CodeUdfKind {
   PointZCode,
   NonPointXzCode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Selects spatial-code calculation from precomputed scalar columns.
 enum CodeFromColumnsUdfKind {
   PointZCode,
   NonPointXzCode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Implements spatial-code calculation from coordinate or bound columns.
 struct CodeFromColumnsUdf {
   name: &'static str,
   kind: CodeFromColumnsUdfKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Implements spatial-code calculation directly from WKB.
 struct GeometryCodeUdf {
   name: &'static str,
   kind: CodeUdfKind,
@@ -353,22 +391,26 @@ impl ScalarUDFImpl for GeometryCodeUdf {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Transforms WKB points and returns one x/y struct per row.
 struct TransformedPointCoordsUdf {
   transform: TransformSpec,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Transforms WKB geometry and returns one bounds struct per row.
 struct TransformedBoundsUdf {
   transform: TransformSpec,
   geometry_type: DisplayGeometryType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Reprojects WKB values while preserving binary array representation.
 struct ReprojectGeometryUdf {
   transform: TransformSpec,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Builds a nullable GeoParquet covering bbox struct from scalar bounds.
 struct FeatureBboxUdf;
 
 impl ScalarUDFImpl for TransformedPointCoordsUdf {
@@ -637,6 +679,10 @@ impl ScalarUDFImpl for CodeFromColumnsUdf {
 }
 
 #[derive(Debug, Clone)]
+/// Encodes non-point WKB into the complete geodisplay struct for each row.
+///
+/// Equality and hashing include every encoding parameter because DataFusion uses UDF
+/// identity when comparing and optimizing logical expressions.
 struct NonPointGeodisplayUdf {
   geometry_type: DisplayGeometryType,
   encodings: Vec<GeometryEncoding>,
@@ -645,6 +691,7 @@ struct NonPointGeodisplayUdf {
 }
 
 impl NonPointGeodisplayUdf {
+  /// Build stable output fields for the selected geometry type and LOD encodings.
   fn new(geometry_type: DisplayGeometryType, encodings: Vec<GeometryEncoding>) -> Self {
     let bounds_fields = Fields::from(vec![
       Arc::new(Field::new("xmin", DataType::Float64, true)),
@@ -675,6 +722,7 @@ impl NonPointGeodisplayUdf {
     }
   }
 
+  /// Decode each non-null WKB value once and encode every configured display level.
   fn build_display<T: BinaryValueAccess>(
     &self,
     geometry: &T,
@@ -1133,6 +1181,7 @@ fn bounds_struct_fields() -> Fields {
     .clone()
 }
 
+/// Map nullable WKB values from any supported binary array into f64 output.
 fn map_geometry_to_f64(
   geometry: &ArrayRef,
   evaluator: impl FnMut(Option<&[u8]>) -> DataFusionResult<Option<f64>>,
@@ -1151,6 +1200,7 @@ fn map_geometry_to_f64(
   }
 }
 
+/// Apply an f64-producing callback to a concrete Arrow binary representation.
 fn map_binary_like_to_f64<T>(
   array: &T,
   mut evaluator: impl FnMut(Option<&[u8]>) -> DataFusionResult<Option<f64>>,
@@ -1165,6 +1215,7 @@ where
   Ok(Float64Array::from(values))
 }
 
+/// Map nullable WKB values from any supported binary array into u64 output.
 fn map_geometry_to_u64(
   geometry: &ArrayRef,
   evaluator: impl FnMut(Option<&[u8]>) -> DataFusionResult<u64>,
@@ -1183,6 +1234,7 @@ fn map_geometry_to_u64(
   }
 }
 
+/// Apply a u64-producing callback to a concrete Arrow binary representation.
 fn map_binary_like_to_u64<T>(
   array: &T,
   mut evaluator: impl FnMut(Option<&[u8]>) -> DataFusionResult<u64>,
@@ -1197,6 +1249,7 @@ where
   Ok(UInt64Array::from(values))
 }
 
+/// Map nullable WKB values while preserving their concrete Arrow binary representation.
 fn map_geometry_to_binary(
   geometry: &ArrayRef,
   evaluator: impl FnMut(Option<&[u8]>) -> DataFusionResult<Option<Vec<u8>>>,
@@ -1215,6 +1268,7 @@ fn map_geometry_to_binary(
   }
 }
 
+/// Apply a binary-producing callback to a concrete Arrow binary representation.
 fn map_binary_like_to_binary<T>(
   array: &T,
   mut evaluator: impl FnMut(Option<&[u8]>) -> DataFusionResult<Option<Vec<u8>>>,
@@ -1335,6 +1389,7 @@ where
   .map_err(to_datafusion_error)
 }
 
+/// Abstracts zero-copy value access across Arrow binary, large-binary, and binary-view arrays.
 trait BinaryValueAccess {
   fn len(&self) -> usize;
   fn value_opt(&self, index: usize) -> Option<&[u8]>;

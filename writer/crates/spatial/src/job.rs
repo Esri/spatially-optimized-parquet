@@ -1,3 +1,23 @@
+//! Orchestrates one complete input-to-optimized-GeoParquet execution.
+//!
+//! [`run_optimize_job`] validates input/output options, opens a format-neutral source, configures
+//! DataFusion, resolves geometry and CRS metadata, analyzes the output extent, generates spatial
+//! helper expressions, and writes GeoParquet plus geodisplay metadata. Point features receive
+//! coordinate columns and Morton Z order. Non-point features receive transformed bounds, XZ order,
+//! and multiscale PBF payloads. Optional covering output adds the GeoParquet 1.1 bbox structure.
+//!
+//! The pipeline can execute the source more than once. Missing or invalidated metadata requires an
+//! analysis plan. Multi-file output adds a percentile aggregate that estimates balanced spatial
+//! code ranges. The final plan repeats source reading, applies UDFs, sorts or repartitions rows,
+//! compresses them, and commits output. Small bounded HTTP ranges can be materialized to avoid
+//! repeated remote scans.
+//!
+//! Single-file output uses DataFusion's copy-to plan through a tracking Parquet format. Multi-file
+//! output rewrites the physical plan to hash-partition range identifiers, preserve a spatial sort
+//! inside each partition, and execute partition writes concurrently. Custom sink wrappers expose
+//! live row metrics and remove partially written objects after failures. Explain mode prints
+//! logical plans, physical plans, spill activity, operator hotspots, and stage timings.
+
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt;
@@ -55,7 +75,7 @@ use datafusion::physical_plan::{
 };
 use datafusion::prelude::lit;
 use engine::plan::{OutputPlan, output_paths, target_rows_per_file, validate_output};
-use engine::session::new_datafusion_session;
+use engine::session::{DataFusionSession, new_datafusion_session};
 use engine::write::{
   create_datafusion_parquet_options, create_output_writer, finalize_writers, parse_compression,
   write_batches,
@@ -101,23 +121,98 @@ const NON_POINT_RANGE_COLUMN: &str = "xz_order";
 const SINK_ROWS_METRIC: &str = "sink_rows";
 const MAX_HTTP_RANGE_ROWS: usize = 100;
 
+/// Configures one complete optimization or pass-through execution.
 pub struct OptimizeJobOptions {
+  /// Stores the local path or HTTP URL to read.
   pub input: String,
+  /// Stores the output file or directory.
   pub output: PathBuf,
+  /// Selects the number of generated files for directory output.
   pub output_files: Option<usize>,
+  /// Selects the Parquet compression codec by name.
   pub compression: Option<String>,
+  /// Selects the contiguous input row range.
   pub row_range: RowRange,
+  /// Selects one layer from a multi-layer input.
   pub layer: Option<String>,
+  /// Overrides geometry-column inference.
   pub geometry_column: Option<String>,
+  /// Enables a GeoParquet 1.1 covering bbox column.
   pub covering: bool,
+  /// Allows replacement of a compatible existing output.
   pub overwrite: bool,
+  /// Enables interactive progress reporting.
   pub progress: bool,
+  /// Enables verbose DataFusion plans, metrics, and timing diagnostics.
   pub explain: bool,
+  /// Bypasses spatial analysis, generated columns, sorting, and metadata changes.
   pub no_optimization: bool,
 }
 
+/// Owns validated source, destination, and execution resources for one job.
+struct OpenedOptimizeJob {
+  input: Arc<dyn InputSource>,
+  output_plan: OutputPlan,
+  source_schema: SchemaRef,
+  total_input_rows: u64,
+  session: DataFusionSession,
+}
+
+/// Stores spatial metadata and transform decisions shared by optimization stages.
+struct SpatialPlanningContext {
+  source_metadata: SourceDatasetMetadata,
+  geometry_spec: GeometrySpec,
+  reprojection: ReprojectionPlan,
+  geometry_type: DisplayGeometryType,
+}
+
+/// Carries the final DataFrame and physical output controls into the writer stage.
+struct PreparedOptimizeOutput {
+  dataframe: engine::DataFrame,
+  analysis: DisplayJobAnalysis,
+  kv_metadata: Vec<KeyValue>,
+  partition_column: Option<&'static str>,
+  retained_sort_column: Option<&'static str>,
+}
+
+/// Execute one spatial optimization job from provider selection through durable output.
+///
+/// Metadata can remove the analysis scan. Multi-file output adds a percentile scan to
+/// estimate spatial range boundaries before the final transform and write scan.
 pub async fn run_optimize_job(options: OptimizeJobOptions) -> Result<()> {
   let job_start = Instant::now();
+  let job = open_optimize_job(&options).await?;
+  let materialized_row_range = materialize_selected_http_range(&job, &options).await?;
+
+  if options.no_optimization {
+    let rows_written = run_passthrough_job(
+      job.input.as_ref(),
+      job.session.context(),
+      &job.output_plan,
+      &options,
+      job.total_input_rows,
+      materialized_row_range.as_deref(),
+    )
+    .await?;
+    explain_stage_note(
+      options.explain,
+      "Pass-through",
+      &format!("wrote {rows_written} selected rows without display optimization"),
+    );
+  } else {
+    let planning = build_spatial_planning_context(&job, &options)?;
+    let prepared =
+      prepare_optimized_output(&job, &options, &planning, materialized_row_range.as_deref())
+        .await?;
+    write_optimized_output(&job, &options, prepared).await?;
+  }
+
+  report_job_completion(&options, job_start);
+  Ok(())
+}
+
+/// Open and validate source, destination, and DataFusion resources for one job.
+async fn open_optimize_job(options: &OptimizeJobOptions) -> Result<OpenedOptimizeJob> {
   validate_http_row_range(&options.input, options.row_range)?;
   let providers: Vec<Box<dyn InputProvider>> = vec![
     Box::new(ParquetInputProvider::new()),
@@ -143,7 +238,7 @@ pub async fn run_optimize_job(options: OptimizeJobOptions) -> Result<()> {
   explain_run_configuration(
     options.explain,
     input.format_name(),
-    &options,
+    options,
     discovered_rows,
     total_input_rows,
     output_plan.parts,
@@ -152,60 +247,61 @@ pub async fn run_optimize_job(options: OptimizeJobOptions) -> Result<()> {
   let session = new_datafusion_session()?;
   configure_explain_session(session.context(), options.explain);
   register_display_udfs(session.context());
-  let materialized_row_range =
-    if should_materialize_bounded_http_range(input.as_ref(), options.row_range) {
-      let range_bar = row_bar(
-        options.progress,
-        "Reading selected row range",
-        total_input_rows,
-      );
-      let range_start = Instant::now();
-      let batches =
-        materialize_input_row_range(input.as_ref(), options.row_range, &range_bar).await?;
-      finish_row_bar(
-        &range_bar,
-        total_input_rows,
-        "Read selected row range".to_string(),
-      );
-      explain_timing(
-        options.explain,
-        "Reading selected row range",
-        range_start.elapsed(),
-      );
-      Some(batches)
-    } else {
-      None
-    };
-  if options.no_optimization {
-    let rows_written = run_passthrough_job(
-      input.as_ref(),
-      session.context(),
-      &output_plan,
-      &options,
-      total_input_rows,
-      materialized_row_range.as_deref(),
-    )
-    .await?;
-    if options.progress && std::io::stderr().is_terminal() {
-      eprintln!("Completed in {}", format_elapsed(job_start.elapsed()));
-    }
-    explain_timing(options.explain, "Total job", job_start.elapsed());
-    explain_stage_note(
-      options.explain,
-      "Pass-through",
-      &format!("wrote {rows_written} selected rows without display optimization"),
-    );
-    return Ok(());
+  Ok(OpenedOptimizeJob {
+    input,
+    output_plan,
+    source_schema,
+    total_input_rows,
+    session,
+  })
+}
+
+/// Materialize a small selected HTTP range once for reuse by independent job plans.
+async fn materialize_selected_http_range(
+  job: &OpenedOptimizeJob,
+  options: &OptimizeJobOptions,
+) -> Result<Option<Vec<RecordBatch>>> {
+  if !should_materialize_bounded_http_range(job.input.as_ref(), options.row_range) {
+    return Ok(None);
   }
-  let source_metadata = input.source_metadata()?;
+
+  let range_bar = row_bar(
+    options.progress,
+    "Reading selected row range",
+    job.total_input_rows,
+  );
+  let range_start = Instant::now();
+  let batches =
+    materialize_input_row_range(job.input.as_ref(), options.row_range, &range_bar).await?;
+  finish_row_bar(
+    &range_bar,
+    job.total_input_rows,
+    "Read selected row range".to_string(),
+  );
+  explain_timing(
+    options.explain,
+    "Reading selected row range",
+    range_start.elapsed(),
+  );
+  Ok(Some(batches))
+}
+
+/// Resolve source geometry, CRS, and reprojection decisions before executing analysis.
+fn build_spatial_planning_context(
+  job: &OpenedOptimizeJob,
+  options: &OptimizeJobOptions,
+) -> Result<SpatialPlanningContext> {
+  let source_metadata = job.input.source_metadata()?;
   let geometry_spec = resolve_input_geometry_spec(
-    source_schema.as_ref(),
-    input.inferred_geometry_spec()?,
+    job.source_schema.as_ref(),
+    job.input.inferred_geometry_spec()?,
     options.geometry_column.as_deref(),
   )?;
-  let output_wkid = DISPLAY_OUTPUT_WKID;
-  let reprojection =
-    ReprojectionPlan::from_source_metadata(&source_metadata, &geometry_spec.column, output_wkid)?;
+  let reprojection = ReprojectionPlan::from_source_metadata(
+    &source_metadata,
+    &geometry_spec.column,
+    DISPLAY_OUTPUT_WKID,
+  )?;
   let geometry_type = source_display_geometry_type(&source_metadata, &geometry_spec.column)
     .with_context(|| {
       format!(
@@ -214,15 +310,83 @@ pub async fn run_optimize_job(options: OptimizeJobOptions) -> Result<()> {
         geometry_spec.column
       )
     })?;
-  let execution_input_schema = source_schema.clone();
-  let multi_file_output = output_plan.parts > 1;
-  let analysis_bar = row_bar(options.progress, "Analyzing geometry", total_input_rows);
-  let analysis = if let Some(analysis) = metadata_display_analysis(
-    &geometry_spec,
-    &source_metadata,
+  Ok(SpatialPlanningContext {
+    source_metadata,
+    geometry_spec,
+    reprojection,
     geometry_type,
-    reprojection.target_spatial_reference().clone(),
-    options.row_range.is_full() && !reprojection.requires_reprojection(),
+  })
+}
+
+/// Analyze geometry, construct helper expressions, and build the final output DataFrame.
+async fn prepare_optimized_output(
+  job: &OpenedOptimizeJob,
+  options: &OptimizeJobOptions,
+  planning: &SpatialPlanningContext,
+  materialized_batches: Option<&[RecordBatch]>,
+) -> Result<PreparedOptimizeOutput> {
+  let analysis = analyze_optimized_geometry(job, options, planning, materialized_batches).await?;
+  ensure_supported(&analysis)?;
+
+  let encodings = match analysis.geometry_family {
+    GeometryFamily::Point => Vec::new(),
+    GeometryFamily::NonPoint => {
+      create_geometry_encodings(DISPLAY_OUTPUT_WKID, analysis.geometry_type)?
+    }
+  };
+  let partition_column = (job.output_plan.parts > 1).then_some(partition_column_name(&analysis));
+  validate_partition_column(job.source_schema.as_ref(), partition_column)?;
+  let prepared_df =
+    prepare_spatially_ordered_dataframe(job, options, planning, &analysis, materialized_batches)
+      .await?;
+  let retained_sort_column =
+    if partition_column.is_some() && matches!(analysis.geometry_family, GeometryFamily::NonPoint) {
+      Some(sort_column_name(&analysis))
+    } else {
+      None
+    };
+  let dataframe = prepared_df.select(build_final_projection_exprs(
+    job.source_schema.as_ref(),
+    &analysis,
+    &encodings,
+    partition_column,
+    retained_sort_column,
+    planning
+      .reprojection
+      .requires_reprojection()
+      .then_some(TEMP_REPROJECTED_GEOMETRY_COLUMN),
+    options.covering,
+  ))?;
+  let kv_metadata = build_output_metadata(
+    &planning.source_metadata,
+    &analysis,
+    &encodings,
+    options.covering,
+  )?;
+
+  Ok(PreparedOptimizeOutput {
+    dataframe,
+    analysis,
+    kv_metadata,
+    partition_column,
+    retained_sort_column,
+  })
+}
+
+/// Analyze geometry from complete metadata or an executed helper DataFrame.
+async fn analyze_optimized_geometry(
+  job: &OpenedOptimizeJob,
+  options: &OptimizeJobOptions,
+  planning: &SpatialPlanningContext,
+  materialized_batches: Option<&[RecordBatch]>,
+) -> Result<DisplayJobAnalysis> {
+  let analysis_bar = row_bar(options.progress, "Analyzing geometry", job.total_input_rows);
+  let analysis = if let Some(analysis) = metadata_display_analysis(
+    &planning.geometry_spec,
+    &planning.source_metadata,
+    planning.geometry_type,
+    planning.reprojection.target_spatial_reference().clone(),
+    options.row_range.is_full() && !planning.reprojection.requires_reprojection(),
   ) {
     explain_stage_note(
       options.explain,
@@ -230,190 +394,189 @@ pub async fn run_optimize_job(options: OptimizeJobOptions) -> Result<()> {
       "using metadata fast path from source metadata",
     );
     explain_timing(options.explain, "Analyzing geometry", Duration::ZERO);
-    analysis_bar.inc(total_input_rows);
+    analysis_bar.inc(job.total_input_rows);
     analysis
-  } else if multi_file_output {
+  } else if job.output_plan.parts > 1 {
     let helper_df = build_narrow_helper_projection_df(
       input_dataframe_for_job(
-        input.as_ref(),
-        session.context(),
+        job.input.as_ref(),
+        job.session.context(),
         options.row_range,
-        materialized_row_range.as_deref(),
+        materialized_batches,
       )
       .await?,
-      &geometry_spec,
-      geometry_type,
-      reprojection.transform(),
+      &planning.geometry_spec,
+      planning.geometry_type,
+      planning.reprojection.transform(),
     )?;
     analyze_base_helper_df_with_metric_polling(
       helper_df,
-      &geometry_spec,
-      &source_metadata,
-      geometry_type,
-      reprojection.target_spatial_reference().clone(),
+      &planning.geometry_spec,
+      &planning.source_metadata,
+      planning.geometry_type,
+      planning.reprojection.target_spatial_reference().clone(),
       &analysis_bar,
-      total_input_rows,
+      job.total_input_rows,
       options.explain,
     )
     .await?
   } else {
     let df = input_dataframe_for_job(
-      input.as_ref(),
-      session.context(),
+      job.input.as_ref(),
+      job.session.context(),
       options.row_range,
-      materialized_row_range.as_deref(),
+      materialized_batches,
     )
     .await?;
     analyze_display_df_with_metric_polling(
       df,
-      &geometry_spec,
-      &source_metadata,
-      geometry_type,
-      reprojection.transform(),
-      reprojection.target_spatial_reference().clone(),
+      &planning.geometry_spec,
+      &planning.source_metadata,
+      planning.geometry_type,
+      planning.reprojection.transform(),
+      planning.reprojection.target_spatial_reference().clone(),
       &analysis_bar,
-      total_input_rows,
+      job.total_input_rows,
       options.explain,
     )
     .await?
   };
-  ensure_supported(&analysis)?;
   finish_row_bar(
     &analysis_bar,
-    total_input_rows,
+    job.total_input_rows,
     format!("Analyzed {} geometry", analysis.geometry_type.as_str()),
   );
+  Ok(analysis)
+}
 
-  let encodings = match analysis.geometry_family {
-    GeometryFamily::Point => Vec::new(),
-    GeometryFamily::NonPoint => create_geometry_encodings(output_wkid, analysis.geometry_type)?,
-  };
-  let partition_column = multi_file_output.then_some(partition_column_name(&analysis));
+/// Reject an internal partition column that would overwrite source data.
+fn validate_partition_column(
+  source_schema: &arrow_schema::Schema,
+  partition_column: Option<&str>,
+) -> Result<()> {
   if let Some(partition_column) = partition_column
-    && execution_input_schema
-      .field_with_name(partition_column)
-      .is_ok()
+    && source_schema.field_with_name(partition_column).is_ok()
   {
     bail!("output partition column '{partition_column}' conflicts with an existing input column");
   }
-  let prepared_df = if let Some(partition_column) = partition_column {
+  Ok(())
+}
+
+/// Build either a globally sorted DataFrame or a range-partitioned multi-file DataFrame.
+async fn prepare_spatially_ordered_dataframe(
+  job: &OpenedOptimizeJob,
+  options: &OptimizeJobOptions,
+  planning: &SpatialPlanningContext,
+  analysis: &DisplayJobAnalysis,
+  materialized_batches: Option<&[RecordBatch]>,
+) -> Result<engine::DataFrame> {
+  if job.output_plan.parts > 1 {
+    let partition_column = partition_column_name(analysis);
     let range_bar = row_bar(
       options.progress,
       "Computing partition ranges",
-      total_input_rows,
+      job.total_input_rows,
     );
     let range_source_df = add_sort_columns_df(
       build_narrow_helper_projection_df(
         input_dataframe_for_job(
-          input.as_ref(),
-          session.context(),
+          job.input.as_ref(),
+          job.session.context(),
           options.row_range,
-          materialized_row_range.as_deref(),
+          materialized_batches,
         )
         .await?,
-        &geometry_spec,
-        geometry_type,
-        reprojection.transform(),
+        &planning.geometry_spec,
+        planning.geometry_type,
+        planning.reprojection.transform(),
       )?,
-      &analysis,
+      analysis,
     )?;
     let boundaries = compute_range_partition_boundaries(
       range_source_df,
-      sort_column_name(&analysis),
-      output_plan.parts,
+      sort_column_name(analysis),
+      job.output_plan.parts,
       &range_bar,
-      total_input_rows,
+      job.total_input_rows,
       options.explain,
     )
     .await?;
     finish_row_bar(
       &range_bar,
-      total_input_rows,
+      job.total_input_rows,
       "Computed partition ranges".to_string(),
     );
-    build_helper_projection_df(
-      input_dataframe_for_job(
-        input.as_ref(),
-        session.context(),
-        options.row_range,
-        materialized_row_range.as_deref(),
-      )
-      .await?,
-      execution_input_schema.as_ref(),
-      &analysis,
-      reprojection.transform(),
-    )?
-    .with_column(
-      partition_column,
-      build_range_partition_expr(
-        sort_column_name(&analysis),
-        boundaries.min_value,
-        &boundaries.boundaries,
+    return Ok(
+      build_helper_projection_df(
+        input_dataframe_for_job(
+          job.input.as_ref(),
+          job.session.context(),
+          options.row_range,
+          materialized_batches,
+        )
+        .await?,
+        job.source_schema.as_ref(),
+        analysis,
+        planning.reprojection.transform(),
+      )?
+      .with_column(
+        partition_column,
+        build_range_partition_expr(
+          sort_column_name(analysis),
+          boundaries.min_value,
+          &boundaries.boundaries,
+        )?,
       )?,
-    )?
-  } else {
-    build_helper_projection_df(
-      input_dataframe_for_job(
-        input.as_ref(),
-        session.context(),
-        options.row_range,
-        materialized_row_range.as_deref(),
-      )
-      .await?,
-      execution_input_schema.as_ref(),
-      &analysis,
-      reprojection.transform(),
-    )?
-    .sort(vec![sort_expr(&analysis)])?
-  };
-  let retained_sort_column =
-    if multi_file_output && matches!(analysis.geometry_family, GeometryFamily::NonPoint) {
-      Some(sort_column_name(&analysis))
-    } else {
-      None
-    };
-  let final_df = prepared_df.select(build_final_projection_exprs(
-    execution_input_schema.as_ref(),
-    &analysis,
-    &encodings,
-    partition_column,
-    retained_sort_column,
-    reprojection
-      .requires_reprojection()
-      .then_some(TEMP_REPROJECTED_GEOMETRY_COLUMN),
-    options.covering,
-  ))?;
-  let kv_metadata =
-    build_output_metadata(&source_metadata, &analysis, &encodings, options.covering)?;
+    );
+  }
 
+  build_helper_projection_df(
+    input_dataframe_for_job(
+      job.input.as_ref(),
+      job.session.context(),
+      options.row_range,
+      materialized_batches,
+    )
+    .await?,
+    job.source_schema.as_ref(),
+    analysis,
+    planning.reprojection.transform(),
+  )?
+  .sort(vec![sort_expr(analysis)])
+  .map_err(Into::into)
+}
+
+/// Configure the final Parquet sink and execute the prepared output DataFrame.
+async fn write_optimized_output(
+  job: &OpenedOptimizeJob,
+  options: &OptimizeJobOptions,
+  prepared: PreparedOptimizeOutput,
+) -> Result<u64> {
   let compression = parse_compression(options.compression.as_deref().unwrap_or("snappy"))?;
-  let writer_options = create_datafusion_parquet_options(compression, &kv_metadata);
-  let multi_file_output = output_plan.parts > 1;
+  let writer_options = create_datafusion_parquet_options(compression, &prepared.kv_metadata);
+  let multi_file_output = job.output_plan.parts > 1;
   let write_bar = row_bar(
     options.progress,
     write_stage_message(WriteStagePhase::Reading, multi_file_output),
-    total_input_rows,
+    job.total_input_rows,
   );
   let (write_path, partition_by, partitioned_write) = if multi_file_output {
+    let partition_column = prepared
+      .partition_column
+      .context("partition column should exist for multi-file output")?;
     (
-      output_plan.path.to_string_lossy().into_owned(),
-      vec![
-        partition_column
-          .expect("partition column should exist")
-          .to_string(),
-      ],
+      job.output_plan.path.to_string_lossy().into_owned(),
+      vec![partition_column.to_string()],
       Some(PartitionedWriteConfig {
-        partition_column: partition_column
-          .expect("partition column should exist")
-          .to_string(),
-        sort_column: sort_column_name(&analysis).to_string(),
-        bucket_count: output_plan.parts,
-        drop_sort_column_after_sort: retained_sort_column.is_some(),
+        partition_column: partition_column.to_string(),
+        sort_column: sort_column_name(&prepared.analysis).to_string(),
+        bucket_count: job.output_plan.parts,
+        drop_sort_column_after_sort: prepared.retained_sort_column.is_some(),
       }),
     )
   } else {
     (
-      output_paths(&output_plan)?
+      output_paths(&job.output_plan)?
         .into_iter()
         .next()
         .context("missing output path")?
@@ -424,13 +587,13 @@ pub async fn run_optimize_job(options: OptimizeJobOptions) -> Result<()> {
     )
   };
   let rows_written = write_parquet_with_metric_polling(
-    final_df,
+    prepared.dataframe,
     &write_path,
     partition_by,
     partitioned_write,
     writer_options,
     &write_bar,
-    total_input_rows,
+    job.total_input_rows,
     options.explain,
   )
   .await?;
@@ -438,13 +601,18 @@ pub async fn run_optimize_job(options: OptimizeJobOptions) -> Result<()> {
     &write_bar,
     format!("Completed write pipeline ({rows_written} rows)"),
   );
+  Ok(rows_written)
+}
+
+/// Report terminal timing after either pass-through or optimized execution.
+fn report_job_completion(options: &OptimizeJobOptions, job_start: Instant) {
   if options.progress && std::io::stderr().is_terminal() {
     eprintln!("Completed in {}", format_elapsed(job_start.elapsed()));
   }
   explain_timing(options.explain, "Total job", job_start.elapsed());
-  Ok(())
 }
 
+/// Build analysis from source metadata when it describes the exact output coordinate space.
 fn metadata_display_analysis(
   geometry_spec: &GeometrySpec,
   source_metadata: &SourceDatasetMetadata,
@@ -471,6 +639,7 @@ fn metadata_display_analysis(
   })
 }
 
+/// Write selected input rows without generated display columns or spatial ordering.
 async fn run_passthrough_job(
   input: &dyn InputSource,
   ctx: &engine::SessionContext,
@@ -515,12 +684,21 @@ async fn run_passthrough_job(
   Ok(rows_written)
 }
 
+/// Decide whether to cache a selected HTTP range before building DataFusion plans.
+///
+/// Analysis, range estimation, and writing can execute independent source scans. Materializing
+/// at most [`MAX_HTTP_RANGE_ROWS`] rows converts those repeated network range requests into
+/// in-memory batch scans while keeping memory use explicitly bounded.
 fn should_materialize_bounded_http_range(input: &dyn InputSource, row_range: RowRange) -> bool {
   matches!(row_range.num, Some(num) if num <= MAX_HTTP_RANGE_ROWS)
     && !row_range.is_full()
     && is_http_url(input.source_location())
 }
 
+/// Validate bounded-read requirements for direct HTTP Parquet input.
+///
+/// HTTP offsets must include a small limit because the materialization path intentionally
+/// avoids unbounded downloads and repeated remote scans.
 fn validate_http_row_range(input_location: &str, row_range: RowRange) -> Result<()> {
   if !is_http_url(input_location) {
     return Ok(());
@@ -536,6 +714,7 @@ fn validate_http_row_range(input_location: &str, row_range: RowRange) -> Result<
   Ok(())
 }
 
+/// Materialize a small HTTP row range once to avoid repeated remote scans.
 async fn materialize_input_row_range(
   input: &dyn InputSource,
   row_range: RowRange,
@@ -554,6 +733,7 @@ async fn materialize_input_row_range(
   Ok(batches)
 }
 
+/// Build a source DataFrame or reuse previously materialized batches.
 async fn input_dataframe_for_job(
   input: &dyn InputSource,
   ctx: &engine::SessionContext,
@@ -566,6 +746,7 @@ async fn input_dataframe_for_job(
   input.to_dataframe(ctx, row_range).await
 }
 
+/// Build full-width helper columns while preserving every source field.
 fn build_base_helper_projection_df(
   df: engine::DataFrame,
   source_schema: &arrow_schema::Schema,
@@ -583,6 +764,7 @@ fn build_base_helper_projection_df(
   add_geometry_helper_columns_df(projected, geometry_spec, geometry_type, transform)
 }
 
+/// Build a geometry-only helper projection for analysis and range estimation.
 fn build_narrow_helper_projection_df(
   df: engine::DataFrame,
   geometry_spec: &GeometrySpec,
@@ -593,6 +775,7 @@ fn build_narrow_helper_projection_df(
   add_geometry_helper_columns_df(projected, geometry_spec, geometry_type, transform)
 }
 
+/// Add reprojection and point-coordinate or non-point-bound helper columns.
 fn add_geometry_helper_columns_df(
   mut projected: engine::DataFrame,
   geometry_spec: &GeometrySpec,
@@ -623,6 +806,7 @@ fn add_geometry_helper_columns_df(
   Ok(projected)
 }
 
+/// Add the Z-order or XZ-order column used for sorting and range partitioning.
 fn add_sort_columns_df(
   df: engine::DataFrame,
   analysis: &DisplayJobAnalysis,
@@ -645,6 +829,7 @@ fn add_sort_columns_df(
   }
 }
 
+/// Compose source, helper, sort, reprojection, and optional covering expressions.
 fn build_helper_projection_df(
   df: engine::DataFrame,
   source_schema: &arrow_schema::Schema,
@@ -661,6 +846,7 @@ fn build_helper_projection_df(
   add_sort_columns_df(projected, analysis)
 }
 
+/// Build the final public projection and remove temporary planning columns.
 fn build_final_projection_exprs(
   source_schema: &arrow_schema::Schema,
   analysis: &DisplayJobAnalysis,
@@ -723,6 +909,7 @@ fn build_final_projection_exprs(
   exprs
 }
 
+/// Return whether a source column should be replaced by newly generated display output.
 fn is_generated_display_output_column(name: &str, geometry_family: GeometryFamily) -> bool {
   match geometry_family {
     GeometryFamily::Point => {
@@ -732,6 +919,7 @@ fn is_generated_display_output_column(name: &str, geometry_family: GeometryFamil
   }
 }
 
+/// Analyze a source DataFrame by decoding geometry expressions and collecting aggregates.
 async fn analyze_display_df_with_metric_polling(
   df: engine::DataFrame,
   geometry_spec: &GeometrySpec,
@@ -839,6 +1027,7 @@ async fn analyze_display_df_with_metric_polling(
   })
 }
 
+/// Analyze a helper DataFrame whose transformed coordinates or bounds already exist.
 async fn analyze_base_helper_df_with_metric_polling(
   df: engine::DataFrame,
   geometry_spec: &GeometrySpec,
@@ -895,14 +1084,17 @@ async fn analyze_base_helper_df_with_metric_polling(
   })
 }
 
+/// Select one field from the temporary transformed point-coordinate struct.
 fn point_coords_field_expr(field: &str) -> Expr {
   ident(TEMP_POINT_COORDS_COLUMN).field(field)
 }
 
+/// Select one field from the temporary transformed geometry-bounds struct.
 fn bounds_field_expr(field: &str) -> Expr {
   ident(TEMP_BOUNDS_COLUMN).field(field)
 }
 
+/// Build the ascending, nulls-last spatial ordering required by output.
 fn sort_expr(analysis: &DisplayJobAnalysis) -> SortExpr {
   match analysis.geometry_family {
     GeometryFamily::Point => ident(POINT_Z_CODE_COLUMN).sort(true, false),
@@ -910,6 +1102,7 @@ fn sort_expr(analysis: &DisplayJobAnalysis) -> SortExpr {
   }
 }
 
+/// Return the physical sort column selected by the geometry family.
 fn sort_column_name(analysis: &DisplayJobAnalysis) -> &'static str {
   match analysis.geometry_family {
     GeometryFamily::Point => POINT_Z_CODE_COLUMN,
@@ -917,6 +1110,7 @@ fn sort_column_name(analysis: &DisplayJobAnalysis) -> &'static str {
   }
 }
 
+/// Derive the internal range-partition column selected by the geometry family.
 fn partition_column_name(analysis: &DisplayJobAnalysis) -> &'static str {
   match analysis.geometry_family {
     GeometryFamily::Point => POINT_RANGE_COLUMN,
@@ -924,6 +1118,7 @@ fn partition_column_name(analysis: &DisplayJobAnalysis) -> &'static str {
   }
 }
 
+/// Scale sort parallelism above the requested output bucket count.
 #[allow(dead_code)]
 fn multi_file_sort_partition_count(bucket_count: usize) -> usize {
   bucket_count.saturating_mul(2).max(8)
@@ -931,6 +1126,7 @@ fn multi_file_sort_partition_count(bucket_count: usize) -> usize {
 
 #[allow(dead_code)]
 #[derive(Clone)]
+/// Describes the columns and fan-out needed for ordered multi-file writing.
 struct PartitionedWriteConfig {
   partition_column: String,
   sort_column: String,
@@ -938,11 +1134,13 @@ struct PartitionedWriteConfig {
   drop_sort_column_after_sort: bool,
 }
 
+/// Stores the minimum code and percentile-derived lower boundaries for output ranges.
 struct RangePartitionBoundaries {
   min_value: u64,
   boundaries: Vec<u64>,
 }
 
+/// Estimate balanced spatial-code ranges with one minimum and approximate percentiles.
 async fn compute_range_partition_boundaries(
   df: engine::DataFrame,
   sort_column: &str,
@@ -1020,6 +1218,7 @@ async fn compute_range_partition_boundaries(
   })
 }
 
+/// Build a scalar expression that maps spatial codes to range lower-bound identifiers.
 fn build_range_partition_expr(
   sort_column: &str,
   min_value: u64,
@@ -1041,11 +1240,13 @@ fn build_range_partition_expr(
 }
 
 #[derive(Debug, Clone)]
+/// Produces Parquet formats whose sinks expose repository-specific progress metrics.
 struct TrackingParquetFormatFactory {
   options: TableParquetOptions,
 }
 
 impl TrackingParquetFormatFactory {
+  /// Store the baseline Parquet options applied to every format instance.
   fn new(options: TableParquetOptions) -> Self {
     Self { options }
   }
@@ -1080,15 +1281,18 @@ impl FileFormatFactory for TrackingParquetFormatFactory {
 }
 
 #[derive(Debug, Clone)]
+/// Wraps DataFusion's Parquet format to inject a tracking sink at physical planning time.
 struct TrackingParquetFormat {
   options: TableParquetOptions,
 }
 
 impl TrackingParquetFormat {
+  /// Store the Parquet options used when constructing DataFusion's inner format.
   fn new(options: TableParquetOptions) -> Self {
     Self { options }
   }
 
+  /// Rebuild DataFusion's Parquet format while retaining the configured writer options.
   fn inner_format(&self) -> ParquetFormat {
     ParquetFormat::default().with_options(self.options.clone())
   }
@@ -1167,6 +1371,7 @@ impl FileFormat for TrackingParquetFormat {
 }
 
 #[derive(Debug)]
+/// Wraps DataFusion's Parquet sink with row metrics and failed-write cleanup support.
 struct TrackingParquetSink {
   config: FileSinkConfig,
   // Wrap DataFusion's Parquet sink so we can surface live sink-side row counts
@@ -1177,6 +1382,7 @@ struct TrackingParquetSink {
 }
 
 impl TrackingParquetSink {
+  /// Build a sink and register its global row counter.
   fn new(conf: FileSinkConfig, parquet_options: TableParquetOptions) -> Self {
     let metrics = ExecutionPlanMetricsSet::new();
     let sink_rows = MetricBuilder::new(&metrics).global_counter(SINK_ROWS_METRIC);
@@ -1188,6 +1394,7 @@ impl TrackingParquetSink {
     }
   }
 
+  /// Delete every object recorded by the inner sink after a failed write.
   async fn cleanup_written_files(&self, context: &Arc<TaskContext>) -> DataFusionResult<()> {
     let written_files = self.inner.written();
     if written_files.is_empty() {
@@ -1258,6 +1465,9 @@ impl DataSink for TrackingParquetSink {
 }
 
 #[derive(Clone, Debug)]
+/// Executes every sorted input partition as a concurrent Parquet write task.
+///
+/// The node exposes one output partition containing the combined written-row count.
 struct ConcurrentPartitionedParquetSinkExec {
   input: Arc<dyn ExecutionPlan>,
   sink: Arc<TrackingParquetSink>,
@@ -1267,6 +1477,7 @@ struct ConcurrentPartitionedParquetSinkExec {
 }
 
 impl ConcurrentPartitionedParquetSinkExec {
+  /// Build an eager cooperative sink node around a partitioned input plan.
   fn new(
     input: Arc<dyn ExecutionPlan>,
     sink: Arc<TrackingParquetSink>,
@@ -1377,6 +1588,7 @@ impl ExecutionPlan for ConcurrentPartitionedParquetSinkExec {
   }
 }
 
+/// Execute and join all input partitions, cleaning partial files when any task fails.
 async fn run_concurrent_partitioned_parquet_writes(
   input: Arc<dyn ExecutionPlan>,
   sink: Arc<TrackingParquetSink>,
@@ -1431,6 +1643,7 @@ async fn run_concurrent_partitioned_parquet_writes(
   Ok(rows_written)
 }
 
+/// Build the one-column schema returned by custom sink execution plans.
 fn count_schema() -> SchemaRef {
   Arc::new(Schema::new(vec![Field::new(
     "count",
@@ -1439,6 +1652,7 @@ fn count_schema() -> SchemaRef {
   )]))
 }
 
+/// Wrap a written-row count in the custom sink execution plan's output batch.
 fn make_count_batch(count: u64) -> RecordBatch {
   RecordBatch::try_new(
     count_schema(),
@@ -1448,6 +1662,7 @@ fn make_count_batch(count: u64) -> RecordBatch {
 }
 
 #[derive(Default, Clone, Copy)]
+/// Aggregates row, spill, and compute metrics across a physical-plan tree.
 struct PlanProgressMetrics {
   rows_read: u64,
   rows_written: u64,
@@ -1456,6 +1671,7 @@ struct PlanProgressMetrics {
   elapsed_compute_nanos: u64,
 }
 
+/// Execute an aggregate DataFrame while polling physical-plan metrics for progress.
 async fn collect_df_with_metric_polling(
   df: engine::DataFrame,
   progress_bar: &ProgressBar,
@@ -1508,6 +1724,7 @@ async fn collect_df_with_metric_polling(
   result.map_err(Into::into)
 }
 
+/// Build and execute the single-file or concurrent partitioned Parquet sink plan.
 async fn write_parquet_with_metric_polling(
   df: engine::DataFrame,
   write_path: &str,
@@ -1610,6 +1827,10 @@ async fn write_parquet_with_metric_polling(
 }
 
 #[allow(dead_code)]
+/// Write one ordered stream into sequential files using direct Arrow writers.
+///
+/// This retained fallback preserves global input order but cannot write files concurrently.
+/// The active multi-file path instead uses partition-local sorts and concurrent DataFusion sinks.
 async fn write_ordered_multi_file_parquet_with_metric_polling(
   df: engine::DataFrame,
   output_plan: &OutputPlan,
@@ -1696,6 +1917,7 @@ async fn write_ordered_multi_file_parquet_with_metric_polling(
 }
 
 #[allow(dead_code)]
+/// Preserve custom range-partition sorting when partitioned output is configured.
 fn preserve_partitioned_sort_execs(
   plan: Arc<dyn ExecutionPlan>,
   partitioned_write: Option<&PartitionedWriteConfig>,
@@ -1706,6 +1928,7 @@ fn preserve_partitioned_sort_execs(
   insert_partitioned_sort_exec(plan, partitioned_write)
 }
 
+/// Recursively insert the repartition-and-sort node where both control columns exist.
 fn insert_partitioned_sort_exec(
   plan: Arc<dyn ExecutionPlan>,
   partitioned_write: &PartitionedWriteConfig,
@@ -1745,6 +1968,7 @@ fn insert_partitioned_sort_exec(
   plan.with_new_children(rewritten_children)
 }
 
+/// Hash by output range and sort each resulting partition by spatial code.
 fn build_partitioned_sort_exec(
   plan: Arc<dyn ExecutionPlan>,
   partitioned_write: &PartitionedWriteConfig,
@@ -1795,12 +2019,14 @@ fn build_partitioned_sort_exec(
   }
 }
 
+/// Collect progress metrics from a complete physical-plan tree.
 fn collect_plan_progress(plan: &dyn ExecutionPlan) -> PlanProgressMetrics {
   let mut metrics = PlanProgressMetrics::default();
   accumulate_plan_progress(plan, &mut metrics);
   metrics
 }
 
+/// Recursively aggregate progress metrics without double-counting parent output rows.
 fn accumulate_plan_progress(plan: &dyn ExecutionPlan, metrics: &mut PlanProgressMetrics) -> bool {
   let mut child_has_row_metric = false;
   for child in plan.children() {
@@ -1826,12 +2052,14 @@ fn accumulate_plan_progress(plan: &dyn ExecutionPlan, metrics: &mut PlanProgress
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+/// Identifies the observable phase of the final physical write plan.
 enum WriteStagePhase {
   Reading,
   Sorting,
   Writing,
 }
 
+/// Update aggregate-stage progress from physical-plan row and spill metrics.
 fn update_metric_count_bar(
   progress_bar: &ProgressBar,
   base_message: &str,
@@ -1854,6 +2082,7 @@ fn update_metric_count_bar(
   ));
 }
 
+/// Derive and render the read, sort, or write phase of the final sink plan.
 fn update_write_stage_bar(
   progress_bar: &ProgressBar,
   metrics: PlanProgressMetrics,
@@ -1901,6 +2130,7 @@ fn update_write_stage_bar(
   }
 }
 
+/// Return the user-facing progress label for one output phase and layout.
 fn write_stage_message(phase: WriteStagePhase, partitioned_write: bool) -> &'static str {
   match (phase, partitioned_write) {
     (WriteStagePhase::Reading, false) => "Preparing output — reading rows into sort buffers",
@@ -1914,6 +2144,7 @@ fn write_stage_message(phase: WriteStagePhase, partitioned_write: bool) -> &'sta
   }
 }
 
+/// Format live row, spill, and post-read activity for a progress bar.
 fn format_metric_progress_message(
   base_message: &str,
   post_read_message: &str,
@@ -1964,6 +2195,7 @@ fn format_metric_progress_message(
   message
 }
 
+/// Format aggregate or sort activity after all source rows have entered the plan.
 fn format_post_read_activity(post_read_message: &str, metrics: PlanProgressMetrics) -> String {
   let mut message = if metrics.spill_count > 0 || metrics.spilled_bytes > 0 {
     format!(
@@ -1984,6 +2216,7 @@ fn format_post_read_activity(post_read_message: &str, metrics: PlanProgressMetri
   message
 }
 
+/// Calculate an integer progress percentage without overflowing intermediate multiplication.
 fn format_progress_percent(rows: u64, total_rows: u64) -> u64 {
   if total_rows == 0 {
     return 0;
@@ -1991,6 +2224,7 @@ fn format_progress_percent(rows: u64, total_rows: u64) -> u64 {
   (((rows as u128) * 100) / total_rows as u128) as u64
 }
 
+/// Extract a dataset extent from one-row aggregate output.
 fn extract_extent_from_aggregate_batches(
   batches: &[RecordBatch],
 ) -> Result<crate::analysis::Extent2D> {
@@ -2012,6 +2246,7 @@ fn extract_extent_from_aggregate_batches(
   })
 }
 
+/// Extract one non-null f64 value from a one-row aggregate batch.
 fn extract_float_aggregate_value(
   batch: &RecordBatch,
   column_index: usize,
@@ -2028,6 +2263,7 @@ fn extract_float_aggregate_value(
   Ok(values.value(0))
 }
 
+/// Convert sink output batches into the single total row count.
 fn extract_written_row_count(batches: &[RecordBatch]) -> Result<u64> {
   let Some(batch) = batches.first() else {
     return Ok(0);
@@ -2044,6 +2280,10 @@ fn extract_written_row_count(batches: &[RecordBatch]) -> Result<u64> {
 }
 
 #[allow(dead_code)]
+/// Remove direct-writer output files after a failed sequential write.
+///
+/// Missing files do not count as cleanup failures because another failure path may have
+/// removed them already.
 fn cleanup_output_paths(paths: &[PathBuf]) -> Result<()> {
   let mut cleanup_error = None;
   for path in paths {
@@ -2060,6 +2300,7 @@ fn cleanup_output_paths(paths: &[PathBuf]) -> Result<()> {
   Ok(())
 }
 
+/// Resolve an explicit geometry column or require provider inference.
 fn resolve_input_geometry_spec(
   schema: &arrow_schema::Schema,
   inferred_geometry_spec: Option<GeometrySpec>,
@@ -2079,6 +2320,7 @@ fn resolve_input_geometry_spec(
   inferred_geometry_spec.context("unable to resolve geometry spec")
 }
 
+/// Reject covering configurations that would conflict with pass-through or source columns.
 fn validate_covering_configuration(
   covering: bool,
   no_optimization: bool,
@@ -2096,6 +2338,7 @@ fn validate_covering_configuration(
   Ok(())
 }
 
+/// Reject geometry categories and dimensions not implemented by display encoding.
 fn ensure_supported(analysis: &DisplayJobAnalysis) -> Result<()> {
   if analysis.has_z || analysis.has_m {
     bail!("display optimization does not yet support Z/M geometries")
@@ -2106,6 +2349,7 @@ fn ensure_supported(analysis: &DisplayJobAnalysis) -> Result<()> {
   Ok(())
 }
 
+/// Build GeoParquet and geodisplay key-value metadata for the final file set.
 fn build_output_metadata(
   source_metadata: &SourceDatasetMetadata,
   analysis: &DisplayJobAnalysis,
@@ -2154,6 +2398,7 @@ fn build_output_metadata(
   Ok(metadata)
 }
 
+/// Serialize GeoParquet 1.1 metadata for the optimized geometry column.
 fn build_geo_metadata(
   source_metadata: &SourceDatasetMetadata,
   analysis: &DisplayJobAnalysis,
@@ -2219,6 +2464,7 @@ fn build_geo_metadata(
   }))?)
 }
 
+/// Build GeoParquet 1.1 covering metadata that points into the generated bbox struct.
 fn geo_covering_bbox_metadata() -> Value {
   serde_json::json!({
     "bbox": {
@@ -2230,6 +2476,7 @@ fn geo_covering_bbox_metadata() -> Value {
   })
 }
 
+/// Map a display category back to a valid GeoParquet geometry kind when source types are absent.
 fn fallback_geometry_kind(geometry_type: DisplayGeometryType) -> GeometryKind {
   match geometry_type {
     DisplayGeometryType::Point => GeometryKind::Point,
@@ -2239,6 +2486,7 @@ fn fallback_geometry_kind(geometry_type: DisplayGeometryType) -> GeometryKind {
   }
 }
 
+/// Format a GeoParquet geometry type name with its declared Z/M dimensional suffix.
 fn geoparquet_geometry_type_name(
   geometry_kind: GeometryKind,
   has_z: bool,
@@ -2263,10 +2511,12 @@ fn geoparquet_geometry_type_name(
   Ok(format!("{base}{suffix}"))
 }
 
+/// Build a row-count progress bar with the standard row unit.
 fn row_bar(enabled: bool, message: &str, total_rows: u64) -> ProgressBar {
   count_bar(enabled, message, total_rows, "rows")
 }
 
+/// Build a standalone count progress bar for an arbitrary unit.
 fn count_bar(enabled: bool, message: &str, total: u64, unit: &str) -> ProgressBar {
   if !enabled || !std::io::stderr().is_terminal() {
     return ProgressBar::hidden();
@@ -2274,6 +2524,7 @@ fn count_bar(enabled: bool, message: &str, total: u64, unit: &str) -> ProgressBa
   count_bar_with_parent(None, message, total, unit)
 }
 
+/// Build a count progress bar and register it beneath a shared multi-progress owner.
 fn count_bar_with_parent(
   parent: Option<&MultiProgress>,
   message: &str,
@@ -2290,6 +2541,7 @@ fn count_bar_with_parent(
   bar
 }
 
+/// Build the standard progress style for count-based stages.
 fn count_bar_style(unit: &str) -> ProgressStyle {
   ProgressStyle::with_template(&format!(
     "{{msg:20}} [{{bar:40.cyan/blue}}] {{pos}}/{{len}} {unit} ({{percent}}%)"
@@ -2298,10 +2550,12 @@ fn count_bar_style(unit: &str) -> ProgressStyle {
   .progress_chars("=>-")
 }
 
+/// Build the spinner-free style used while row progress cannot advance during sorting.
 fn message_only_style() -> ProgressStyle {
   ProgressStyle::with_template("{msg}").expect("valid message template")
 }
 
+/// Finish a spinner or message-only progress indicator with a terminal message.
 fn finish_spinner(bar: &ProgressBar, message: String) {
   if bar.is_hidden() {
     return;
@@ -2310,10 +2564,12 @@ fn finish_spinner(bar: &ProgressBar, message: String) {
   bar.finish_with_message(format!("{message} in {}", format_elapsed(bar.elapsed())));
 }
 
+/// Complete a row progress bar at the known input count.
 fn finish_row_bar(bar: &ProgressBar, total_rows: u64, message: String) {
   finish_count_bar(bar, total_rows, message);
 }
 
+/// Complete a generic count progress bar at its known total.
 fn finish_count_bar(bar: &ProgressBar, total: u64, message: String) {
   if bar.is_hidden() {
     return;
@@ -2323,6 +2579,7 @@ fn finish_count_bar(bar: &ProgressBar, total: u64, message: String) {
   bar.finish_with_message(format!("{message} in {}", format_elapsed(bar.elapsed())));
 }
 
+/// Print the resolved source, row-range, output, and execution configuration in explain mode.
 fn explain_run_configuration(
   explain: bool,
   input_format: &str,
@@ -2351,6 +2608,7 @@ fn explain_run_configuration(
   );
 }
 
+/// Print a stage-level planning note only when explain mode is enabled.
 fn explain_stage_note(explain: bool, stage: &str, note: &str) {
   if !explain {
     return;
@@ -2358,6 +2616,7 @@ fn explain_stage_note(explain: bool, stage: &str, note: &str) {
   eprintln!("[explain] {stage}: {note}");
 }
 
+/// Configure DataFusion explain verbosity and disable optimizer shortcuts that hide diagnostics.
 fn configure_explain_session(ctx: &engine::SessionContext, explain: bool) {
   if !explain {
     return;
@@ -2374,6 +2633,10 @@ fn configure_explain_session(ctx: &engine::SessionContext, explain: bool) {
   explain_options.analyze_level = ExplainAnalyzeLevel::Dev;
 }
 
+/// Print a logical plan and optionally execute DataFusion's verbose analyzed explain plan.
+///
+/// Aggregate stages request analyzed output to expose runtime metrics. Write input plans avoid
+/// analyzed execution because that would perform the expensive source and transform work twice.
 async fn explain_dataframe_verbose(
   explain: bool,
   stage: &str,
@@ -2418,6 +2681,7 @@ async fn explain_dataframe_verbose(
   Ok(())
 }
 
+/// Print one physical plan before execution when explain mode is enabled.
 fn explain_physical_plan(explain: bool, stage: &str, plan: &Arc<dyn ExecutionPlan>) {
   if !explain {
     return;
@@ -2434,6 +2698,7 @@ fn explain_physical_plan(explain: bool, stage: &str, plan: &Arc<dyn ExecutionPla
   );
 }
 
+/// Print elapsed time, final metrics, and operator hotspots for a completed stage.
 fn explain_stage_completion(
   explain: bool,
   stage: &str,
@@ -2457,6 +2722,7 @@ fn explain_stage_completion(
   explain_operator_hotspots(explain, stage, plan);
 }
 
+/// Print a physical plan annotated with its complete DataFusion metric set.
 fn explain_physical_plan_with_metrics(explain: bool, stage: &str, plan: &Arc<dyn ExecutionPlan>) {
   if !explain {
     return;
@@ -2484,6 +2750,7 @@ fn explain_physical_plan_with_metrics(explain: bool, stage: &str, plan: &Arc<dyn
 }
 
 #[derive(Clone, Debug)]
+/// Captures one physical operator's metrics for explain-mode hotspot ranking.
 struct OperatorMetricSnapshot {
   operator: String,
   depth: usize,
@@ -2495,6 +2762,7 @@ struct OperatorMetricSnapshot {
   elapsed_compute_nanos: u64,
 }
 
+/// Rank physical operators by measured compute, spill, and row metrics.
 fn explain_operator_hotspots(explain: bool, stage: &str, plan: &Arc<dyn ExecutionPlan>) {
   if !explain {
     return;
@@ -2541,6 +2809,7 @@ fn explain_operator_hotspots(explain: bool, stage: &str, plan: &Arc<dyn Executio
   }
 }
 
+/// Traverse a physical plan and snapshot metrics for each operator.
 fn collect_operator_metric_snapshots(
   plan: &dyn ExecutionPlan,
   depth: usize,
@@ -2579,6 +2848,7 @@ fn collect_operator_metric_snapshots(
   }
 }
 
+/// Print one stage duration when explain mode is enabled.
 fn explain_timing(explain: bool, label: &str, elapsed: Duration) {
   if !explain {
     return;
@@ -2586,6 +2856,7 @@ fn explain_timing(explain: bool, label: &str, elapsed: Duration) {
   eprintln!("[timing] {label}: {}", format_elapsed_debug(elapsed));
 }
 
+/// Format a user-facing duration with units selected for its magnitude.
 fn format_elapsed(duration: Duration) -> String {
   let total_seconds = duration.as_secs();
   let hours = total_seconds / 3600;
@@ -2598,6 +2869,7 @@ fn format_elapsed(duration: Duration) -> String {
   }
 }
 
+/// Format a high-precision duration for explain-mode operator metrics.
 fn format_elapsed_debug(duration: Duration) -> String {
   if duration >= Duration::from_secs(1) {
     return format_elapsed(duration);
@@ -2614,6 +2886,7 @@ fn format_elapsed_debug(duration: Duration) -> String {
   format!("{}ns", duration.as_nanos())
 }
 
+/// Format byte counts with binary units for spill diagnostics.
 fn format_bytes(bytes: u64) -> String {
   const KIB: u64 = 1024;
   const MIB: u64 = 1024 * KIB;
