@@ -1,28 +1,35 @@
-//! Orchestrates source opening and selects plain or optimized GeoParquet output.
+//! Opens validated resources and selects one concrete spatial pipeline.
 
-use std::io::IsTerminal;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::Result;
-use arrow_schema::SchemaRef;
-use engine::output_layout::{OutputLayout, resolve_output_layout};
-use engine::session::{DataFusionSession, new_datafusion_session};
+use anyhow::{Result, bail};
+use engine::output_layout::resolve_output_layout;
+use engine::session::new_datafusion_session;
 
-use crate::diagnostics::{configure_explain_session, explain_stage_note, explain_timing};
-use crate::geoparquet::{PlainGeoParquet, validate_covering_configuration};
+use crate::diagnostics::{configure_explain_session, explain_timing};
+use crate::geoparquet::validate_covering_configuration;
 use crate::input::{
   InputOpenOptions, InputSource, RowRange, SourceFormat, open_input, resolve_source_format,
 };
-use crate::optimized::OptimizedGeoParquet;
 use crate::optimized::multiscale::validate_internal_projection_columns;
-use crate::output::stage::{OutputStage, OutputStageContext};
 use crate::output::{GeoParquetOutputMode, validate_output_wkid};
-use crate::progress::{finish_row_bar, format_elapsed, row_bar};
+use crate::progress::{finish_row_bar, row_bar};
 
-/// Configures one complete optimization or pass-through execution.
-pub struct OptimizeJobOptions {
+use super::{
+  OptimizedPartitionedPipeline, OptimizedSingleFilePipeline, PlainPipeline, SpatialPipeline,
+  SpatialPipelineState,
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PipelineKind {
+  Plain,
+  OptimizedSingleFile,
+  OptimizedPartitioned,
+}
+
+/// Configures one complete spatial pipeline.
+pub struct SpatialPipelineOptions {
   /// Stores the local path or HTTP URL to read.
   pub input: String,
   /// Overrides source-format inference for extensionless or unconventional locations.
@@ -55,59 +62,9 @@ pub struct OptimizeJobOptions {
   pub output_mode: GeoParquetOutputMode,
 }
 
-/// Owns validated source, destination, and execution resources for one job.
-struct OpenedOptimizeJob {
-  _session: DataFusionSession,
-  input: Arc<dyn InputSource>,
-  output_layout: OutputLayout,
-  source_schema: SchemaRef,
-  total_input_rows: u64,
-  input_dataframe: engine::DataFrame,
-}
-
-/// Execute one spatial optimization job from provider selection through durable output.
-pub async fn run_optimize_job(options: OptimizeJobOptions) -> Result<()> {
+pub(super) async fn build_pipeline(options: SpatialPipelineOptions) -> Result<SpatialPipeline> {
   validate_output_wkid(options.output_wkid);
-  let job_start = Instant::now();
-  let job = open_optimize_job(&options).await?;
-
-  let output_context = OutputStageContext {
-    input: job.input.as_ref(),
-    input_dataframe: job.input_dataframe.clone(),
-    output_layout: &job.output_layout,
-    source_schema: job.source_schema.as_ref(),
-    total_input_rows: job.total_input_rows,
-    row_range: options.row_range,
-    geometry_column: options.geometry_column.as_deref(),
-    input_wkid: options.input_wkid,
-    output_wkid: options.output_wkid,
-    covering: options.covering,
-    compression: options.compression.as_deref(),
-    progress: options.progress,
-    explain: options.explain,
-  };
-  let output_result = match options.output_mode {
-    GeoParquetOutputMode::Plain => PlainGeoParquet.execute(output_context).await?,
-    GeoParquetOutputMode::Optimized => OptimizedGeoParquet.execute(output_context).await?,
-  };
-
-  if options.output_mode == GeoParquetOutputMode::Plain {
-    explain_stage_note(
-      options.explain,
-      "Plain GeoParquet",
-      &format!(
-        "wrote {} selected rows without optimized clustering",
-        output_result.rows_written
-      ),
-    );
-  }
-
-  report_job_completion(&options, job_start);
-  Ok(())
-}
-
-/// Open and validate source, destination, and DataFusion resources for one job.
-async fn open_optimize_job(options: &OptimizeJobOptions) -> Result<OpenedOptimizeJob> {
+  let started_at = Instant::now();
   let input_format = resolve_source_format(&options.input, options.input_format)?;
   let input = open_input(
     input_format,
@@ -127,7 +84,7 @@ async fn open_optimize_job(options: &OptimizeJobOptions) -> Result<OpenedOptimiz
   explain_run_configuration(
     options.explain,
     input.format_name(),
-    options,
+    &options,
     discovered_rows,
     total_input_rows,
     output_layout.parts,
@@ -135,22 +92,58 @@ async fn open_optimize_job(options: &OptimizeJobOptions) -> Result<OpenedOptimiz
 
   let session = new_datafusion_session()?;
   configure_explain_session(session.context(), options.explain);
-  let input_dataframe =
-    prepare_input_dataframe(input.as_ref(), session.context(), options, total_input_rows).await?;
-  Ok(OpenedOptimizeJob {
+  let input_dataframe = prepare_input_dataframe(
+    input.as_ref(),
+    session.context(),
+    &options,
+    total_input_rows,
+  )
+  .await?;
+  let output_mode = options.output_mode;
+  let state = SpatialPipelineState {
+    started_at,
     _session: session,
     input,
+    input_dataframe,
     output_layout,
     source_schema,
     total_input_rows,
-    input_dataframe,
-  })
+    row_range: options.row_range,
+    geometry_column: options.geometry_column,
+    input_wkid: options.input_wkid,
+    output_wkid: options.output_wkid,
+    covering: options.covering,
+    compression: options.compression,
+    progress: options.progress,
+    explain: options.explain,
+  };
+
+  match pipeline_kind(output_mode, state.output_layout.parts)? {
+    PipelineKind::Plain => Ok(SpatialPipeline::Plain(PlainPipeline::new(state))),
+    PipelineKind::OptimizedSingleFile => Ok(SpatialPipeline::OptimizedSingleFile(
+      OptimizedSingleFilePipeline::new(state),
+    )),
+    PipelineKind::OptimizedPartitioned => Ok(SpatialPipeline::OptimizedPartitioned(
+      OptimizedPartitionedPipeline::new(state),
+    )),
+  }
+}
+
+fn pipeline_kind(output_mode: GeoParquetOutputMode, output_parts: usize) -> Result<PipelineKind> {
+  match (output_mode, output_parts) {
+    (GeoParquetOutputMode::Plain, 1) => Ok(PipelineKind::Plain),
+    (GeoParquetOutputMode::Plain, _) => {
+      bail!("plain GeoParquet output does not support --output-files")
+    }
+    (GeoParquetOutputMode::Optimized, 1) => Ok(PipelineKind::OptimizedSingleFile),
+    (GeoParquetOutputMode::Optimized, _) => Ok(PipelineKind::OptimizedPartitioned),
+  }
 }
 
 async fn prepare_input_dataframe(
   input: &dyn InputSource,
   session: &engine::SessionContext,
-  options: &OptimizeJobOptions,
+  options: &SpatialPipelineOptions,
   total_input_rows: u64,
 ) -> Result<engine::DataFrame> {
   let dataframe = input.to_dataframe(session, options.row_range).await?;
@@ -179,17 +172,10 @@ fn should_cache_input_dataframe(row_range: RowRange) -> bool {
   row_range.num.is_some()
 }
 
-fn report_job_completion(options: &OptimizeJobOptions, job_start: Instant) {
-  if options.progress && std::io::stderr().is_terminal() {
-    eprintln!("Completed in {}", format_elapsed(job_start.elapsed()));
-  }
-  explain_timing(options.explain, "Total job", job_start.elapsed());
-}
-
 fn explain_run_configuration(
   explain: bool,
   input_format: &str,
-  options: &OptimizeJobOptions,
+  options: &SpatialPipelineOptions,
   discovered_rows: u64,
   effective_rows: u64,
   output_parts: usize,
@@ -217,8 +203,9 @@ fn explain_run_configuration(
 
 #[cfg(test)]
 mod tests {
-  use super::should_cache_input_dataframe;
+  use super::{PipelineKind, pipeline_kind, should_cache_input_dataframe};
   use crate::input::RowRange;
+  use crate::output::GeoParquetOutputMode;
 
   #[test]
   fn caches_only_explicitly_bounded_selections() {
@@ -231,5 +218,22 @@ mod tests {
       start: 10,
       num: Some(25),
     }));
+  }
+
+  #[test]
+  fn selects_one_concrete_pipeline_kind() {
+    assert_eq!(
+      pipeline_kind(GeoParquetOutputMode::Plain, 1).unwrap(),
+      PipelineKind::Plain
+    );
+    assert_eq!(
+      pipeline_kind(GeoParquetOutputMode::Optimized, 1).unwrap(),
+      PipelineKind::OptimizedSingleFile
+    );
+    assert_eq!(
+      pipeline_kind(GeoParquetOutputMode::Optimized, 4).unwrap(),
+      PipelineKind::OptimizedPartitioned
+    );
+    assert!(pipeline_kind(GeoParquetOutputMode::Plain, 4).is_err());
   }
 }

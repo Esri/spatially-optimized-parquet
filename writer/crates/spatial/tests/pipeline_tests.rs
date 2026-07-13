@@ -16,9 +16,9 @@ use tokio::runtime::Runtime;
 
 use spatial::geometry::Extent2D;
 use spatial::input::RowRange;
-use spatial::job::{OptimizeJobOptions, run_optimize_job};
 use spatial::optimized::multiscale::{geometry_extent_from_wkb, point_xy_from_wkb};
 use spatial::output::GeoParquetOutputMode;
+use spatial::pipeline::{SpatialPipeline, SpatialPipelineOptions};
 use wkb::writer::WriteOptions;
 
 mod common;
@@ -140,7 +140,7 @@ fn parquet_files(path: &Path) -> Vec<std::path::PathBuf> {
 }
 
 #[test]
-fn optimize_job_preserves_same_crs_wkb_and_writes_sorted_metadata() {
+fn spatial_pipeline_preserves_same_crs_wkb_and_writes_sorted_metadata() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("points.parquet");
   let output = temp.path().join("points-optimized.parquet");
@@ -171,7 +171,7 @@ fn optimize_job_preserves_same_crs_wkb_and_writes_sorted_metadata() {
   );
 
   runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -228,7 +228,7 @@ fn optimize_job_preserves_same_crs_wkb_and_writes_sorted_metadata() {
 }
 
 #[test]
-fn optimize_job_writes_covering_bbox_for_reprojected_points() {
+fn spatial_pipeline_writes_covering_bbox_for_reprojected_points() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("points-3857.parquet");
   let output = temp.path().join("points-covering.parquet");
@@ -256,7 +256,7 @@ fn optimize_job_writes_covering_bbox_for_reprojected_points() {
   );
 
   runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -300,7 +300,7 @@ fn optimize_job_writes_covering_bbox_for_reprojected_points() {
 }
 
 #[test]
-fn optimize_job_reprojects_geoparquet_point_output_to_wgs84() {
+fn spatial_pipeline_reprojects_geoparquet_point_output_to_wgs84() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("points-3857.parquet");
   let output = temp.path().join("points-optimized.parquet");
@@ -333,7 +333,7 @@ fn optimize_job_reprojects_geoparquet_point_output_to_wgs84() {
   );
 
   runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -408,7 +408,7 @@ fn optimize_job_reprojects_geoparquet_point_output_to_wgs84() {
 }
 
 #[test]
-fn optimize_job_writes_non_point_geodisplay_struct_and_metadata() {
+fn spatial_pipeline_writes_non_point_geodisplay_struct_and_metadata() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("polygons.parquet");
   let output = temp.path().join("polygons-optimized.parquet");
@@ -439,7 +439,7 @@ fn optimize_job_writes_non_point_geodisplay_struct_and_metadata() {
   );
 
   runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -519,7 +519,7 @@ fn non_wgs84_output_panics_before_filesystem_mutation_in_both_modes() {
       let input = temp.path().join("missing-input.parquet");
       let output = temp.path().join("must-not-exist.parquet");
       let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        runtime().block_on(run_optimize_job(OptimizeJobOptions {
+        runtime().block_on(SpatialPipeline::run(SpatialPipelineOptions {
           input: input.to_string_lossy().into_owned(),
           input_format: None,
           output: output.clone(),
@@ -546,7 +546,7 @@ fn non_wgs84_output_panics_before_filesystem_mutation_in_both_modes() {
 }
 
 #[test]
-fn optimize_job_writes_covering_bbox_for_non_point_output() {
+fn spatial_pipeline_writes_covering_bbox_for_non_point_output() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("polygons.parquet");
   let output = temp.path().join("polygons-covering.parquet");
@@ -573,7 +573,7 @@ fn optimize_job_writes_covering_bbox_for_non_point_output() {
   );
 
   runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -617,7 +617,7 @@ fn optimize_job_writes_covering_bbox_for_non_point_output() {
 }
 
 #[test]
-fn optimize_job_replaces_existing_non_point_geodisplay_column() {
+fn spatial_pipeline_replaces_existing_non_point_geodisplay_column() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("polygons-with-geodisplay.parquet");
   let output = temp.path().join("polygons-regenerated.parquet");
@@ -646,7 +646,7 @@ fn optimize_job_replaces_existing_non_point_geodisplay_column() {
   );
 
   runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -688,7 +688,7 @@ fn optimize_job_replaces_existing_non_point_geodisplay_column() {
 }
 
 #[test]
-fn optimize_job_sorts_non_point_rows_across_multiple_input_batches() {
+fn spatial_pipeline_sorts_non_point_rows_across_multiple_input_batches() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("polygons-multi-batch.parquet");
   let output = temp.path().join("polygons-multi-batch-optimized.parquet");
@@ -732,7 +732,7 @@ fn optimize_job_sorts_non_point_rows_across_multiple_input_batches() {
   );
 
   runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -777,7 +777,7 @@ fn optimize_job_sorts_non_point_rows_across_multiple_input_batches() {
 }
 
 #[test]
-fn optimize_job_writes_range_partitioned_multi_file_output() {
+fn spatial_pipeline_writes_range_partitioned_multi_file_output() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("points.parquet");
   let output_dir = temp.path().join("out");
@@ -813,7 +813,7 @@ fn optimize_job_writes_range_partitioned_multi_file_output() {
   );
 
   runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output_dir.clone(),
@@ -934,7 +934,7 @@ fn optimize_job_writes_range_partitioned_multi_file_output() {
 }
 
 #[test]
-fn optimize_job_row_range_writes_requested_input_rows() {
+fn spatial_pipeline_row_range_writes_requested_input_rows() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("points.parquet");
   let output = temp.path().join("points-limited.parquet");
@@ -967,7 +967,7 @@ fn optimize_job_row_range_writes_requested_input_rows() {
   );
 
   runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -1054,7 +1054,7 @@ fn plain_geoparquet_preserves_same_crs_wkb_and_rows_without_sop_metadata() {
   );
 
   runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -1133,7 +1133,7 @@ fn plain_geoparquet_writes_covering_bbox() {
   );
 
   runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -1198,7 +1198,7 @@ fn plain_geoparquet_reprojects_wkb_covering_extent_and_crs() {
   );
 
   runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -1261,7 +1261,7 @@ fn plain_geoparquet_reprojects_wkb_covering_extent_and_crs() {
 }
 
 #[test]
-fn optimize_job_rejects_covering_when_bbox_column_exists() {
+fn spatial_pipeline_rejects_covering_when_bbox_column_exists() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("points-with-bbox.parquet");
   let output = temp.path().join("points-covering.parquet");
@@ -1290,7 +1290,7 @@ fn optimize_job_rejects_covering_when_bbox_column_exists() {
   );
 
   let err = runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -1317,7 +1317,7 @@ fn optimize_job_rejects_covering_when_bbox_column_exists() {
 }
 
 #[test]
-fn optimize_job_errors_when_explicit_geometry_column_lacks_crs_metadata() {
+fn spatial_pipeline_errors_when_explicit_geometry_column_lacks_crs_metadata() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("points.parquet");
   let output = temp.path().join("points-optimized.parquet");
@@ -1348,7 +1348,7 @@ fn optimize_job_errors_when_explicit_geometry_column_lacks_crs_metadata() {
   );
 
   let err = runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -1369,7 +1369,7 @@ fn optimize_job_errors_when_explicit_geometry_column_lacks_crs_metadata() {
   assert!(err.to_string().contains("pass --in-sr"), "{err:#}");
 
   runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -1395,7 +1395,7 @@ fn optimize_job_errors_when_explicit_geometry_column_lacks_crs_metadata() {
 }
 
 #[test]
-fn optimize_job_scans_when_geometry_type_metadata_is_missing() {
+fn spatial_pipeline_scans_when_geometry_type_metadata_is_missing() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("points.parquet");
   let output = temp.path().join("points-optimized.parquet");
@@ -1426,7 +1426,7 @@ fn optimize_job_scans_when_geometry_type_metadata_is_missing() {
   );
 
   runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -1453,7 +1453,7 @@ fn optimize_job_scans_when_geometry_type_metadata_is_missing() {
 }
 
 #[test]
-fn optimize_job_rejects_input_wkid_when_crs_metadata_exists() {
+fn spatial_pipeline_rejects_input_wkid_when_crs_metadata_exists() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("points.parquet");
   let output = temp.path().join("points-optimized.parquet");
@@ -1477,7 +1477,7 @@ fn optimize_job_rejects_input_wkid_when_crs_metadata_exists() {
   );
 
   let error = runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output,
@@ -1499,7 +1499,7 @@ fn optimize_job_rejects_input_wkid_when_crs_metadata_exists() {
 }
 
 #[test]
-fn optimize_job_accepts_single_layer_geopackage_input() {
+fn spatial_pipeline_accepts_single_layer_geopackage_input() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("points.gpkg");
   let output = temp.path().join("points-optimized.parquet");
@@ -1527,7 +1527,7 @@ fn optimize_job_accepts_single_layer_geopackage_input() {
   );
 
   runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -1569,7 +1569,7 @@ fn optimize_job_accepts_single_layer_geopackage_input() {
 }
 
 #[test]
-fn optimize_job_reprojects_geopackage_polygon_output_to_wgs84() {
+fn spatial_pipeline_reprojects_geopackage_polygon_output_to_wgs84() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("polygons-3857.gpkg");
   let output = temp.path().join("polygons-optimized.parquet");
@@ -1598,7 +1598,7 @@ fn optimize_job_reprojects_geopackage_polygon_output_to_wgs84() {
   );
 
   runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -1717,7 +1717,7 @@ fn optimize_job_reprojects_geopackage_polygon_output_to_wgs84() {
 }
 
 #[test]
-fn optimize_job_selects_requested_geopackage_layer() {
+fn spatial_pipeline_selects_requested_geopackage_layer() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("multi.gpkg");
   let output = temp.path().join("polygons-optimized.parquet");
@@ -1758,7 +1758,7 @@ fn optimize_job_selects_requested_geopackage_layer() {
   );
 
   runtime()
-    .block_on(run_optimize_job(OptimizeJobOptions {
+    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),

@@ -2,100 +2,24 @@
 
 use anyhow::{Context, Result, bail};
 use arrow_array::{Array, Float64Array, RecordBatch};
-use async_trait::async_trait;
 use datafusion::functions::core::expr_ext::FieldAccessor;
 use datafusion::functions_aggregate::expr_fn::{max, min};
 use datafusion::logical_expr::Expr;
 use datafusion::logical_expr::expr_fn::ident;
-use engine::output_layout::resolved_output_paths;
-use engine::parquet_write::{
-  create_datafusion_parquet_options, parse_compression, write_single_file,
-};
 
 use crate::geometry::{Extent2D, GeometryCategory};
-use crate::geoparquet::{
-  GeoMetadataInput, build_geo_key_values, build_geo_metadata, feature_bbox_expr, resolve_source,
-  validate_covering_configuration,
-};
+use crate::geoparquet::feature_bbox_expr;
 use crate::optimized::clustering::{bounds_expr, point_expr};
 use crate::optimized::multiscale::{
-  COVERING_BBOX_COLUMN, TEMP_BOUNDS_COLUMN, TEMP_POINT_COORDS_COLUMN,
-  TEMP_REPROJECTED_GEOMETRY_COLUMN, TEMP_XMAX_COLUMN, TEMP_XMIN_COLUMN, TEMP_YMAX_COLUMN,
-  TEMP_YMIN_COLUMN,
+  TEMP_BOUNDS_COLUMN, TEMP_POINT_COORDS_COLUMN, TEMP_REPROJECTED_GEOMETRY_COLUMN, TEMP_XMAX_COLUMN,
+  TEMP_XMIN_COLUMN, TEMP_YMAX_COLUMN, TEMP_YMIN_COLUMN,
 };
 use crate::output::reprojection::{
-  CoordinateTransformSpec, ReprojectionSpec, reproject_geometry_expr, transformed_bounds_expr,
+  CoordinateTransformSpec, reproject_geometry_expr, transformed_bounds_expr,
   transformed_point_coords_expr,
 };
-use crate::output::stage::{OutputStage, OutputStageContext, OutputStageResult};
 
-/// Provides normalized, unsorted GeoParquet through the shared output-stage boundary.
-pub(crate) struct PlainGeoParquet;
-
-#[async_trait]
-impl OutputStage for PlainGeoParquet {
-  async fn execute(&self, context: OutputStageContext<'_>) -> Result<OutputStageResult> {
-    if context.output_layout.parts != 1 {
-      bail!("plain GeoParquet output does not support --output-files");
-    }
-    validate_covering_configuration(context.covering, context.source_schema)?;
-    let source_context = resolve_source(
-      context.input,
-      context.input_dataframe.clone(),
-      context.source_schema,
-      context.geometry_column,
-      context.input_wkid,
-      context.row_range,
-    )
-    .await?;
-    let source_dataframe = context.input_dataframe.clone();
-    let source_projjson = source_context
-      .source_spatial_reference
-      .projjson
-      .as_ref()
-      .context("missing resolved source CRS PROJJSON")?;
-    let reprojection_spec =
-      ReprojectionSpec::from_source_projjson(source_projjson, context.output_wkid)?;
-    let target_extent = analyze_target_extent(
-      source_dataframe.clone(),
-      &source_context.geometry_spec.column,
-      source_context.geometry_shape.category(),
-      reprojection_spec.transform(),
-    )
-    .await?;
-    let dataframe = build_output_dataframe(
-      source_dataframe,
-      context.source_schema,
-      &source_context.geometry_spec.column,
-      source_context.geometry_shape.category(),
-      reprojection_spec.transform(),
-      context.covering,
-    )?;
-    let geo_metadata = build_geo_metadata(GeoMetadataInput {
-      geometry_column: &source_context.geometry_spec.column,
-      geometry_types: &source_context.geometry_types,
-      output_extent: target_extent,
-      output_spatial_reference: reprojection_spec.target_spatial_reference(),
-      has_z: source_context.has_z,
-      has_m: source_context.has_m,
-      covering: context.covering,
-      covering_column: COVERING_BBOX_COLUMN,
-    })?;
-    let metadata = build_geo_key_values(&source_context.source_metadata, geo_metadata);
-    let compression = parse_compression(context.compression.unwrap_or("snappy"))?;
-    let writer_options = create_datafusion_parquet_options(compression, &metadata);
-    let output_path = resolved_output_paths(context.output_layout)?
-      .into_iter()
-      .next()
-      .context("missing output path")?
-      .to_string_lossy()
-      .into_owned();
-    let rows_written = write_single_file(dataframe, &output_path, writer_options).await?;
-    Ok(OutputStageResult { rows_written })
-  }
-}
-
-async fn analyze_target_extent(
+pub(crate) async fn analyze_plain_target_extent(
   dataframe: engine::DataFrame,
   geometry_column: &str,
   geometry_category: GeometryCategory,
@@ -116,7 +40,7 @@ async fn analyze_target_extent(
   extract_extent(&batches)
 }
 
-fn build_output_dataframe(
+pub(crate) fn build_plain_output_dataframe(
   mut dataframe: engine::DataFrame,
   source_schema: &arrow_schema::Schema,
   geometry_column: &str,

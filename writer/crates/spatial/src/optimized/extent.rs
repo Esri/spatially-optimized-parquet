@@ -11,6 +11,7 @@ use datafusion::logical_expr::{Expr, expr_fn::ident};
 use crate::diagnostics::{explain_stage_note, explain_timing};
 use crate::geometry::Extent2D;
 use crate::geoparquet::ResolvedGeoParquetSource;
+use crate::input::{InputSource, RowRange};
 use crate::optimized::aggregate::collect_aggregate_with_progress;
 use crate::optimized::clustering::{bounds_expr, point_expr};
 use crate::optimized::multiscale::{
@@ -21,23 +22,23 @@ use crate::optimized::{ClusteringFamily, OptimizedGeometry};
 use crate::output::reprojection::{
   ReprojectionSpec, transformed_bounds_expr, transformed_point_coords_expr,
 };
-use crate::output::stage::OutputStageContext;
 use crate::progress::{finish_row_bar, row_bar};
 
 /// Resolve the selected-row extent in the output coordinate reference system.
 pub(crate) async fn resolve_target_extent(
-  request: &OutputStageContext<'_>,
+  input: &dyn InputSource,
+  input_dataframe: engine::DataFrame,
+  total_input_rows: u64,
+  row_range: RowRange,
+  progress: bool,
+  explain: bool,
   source: &ResolvedGeoParquetSource,
   geometry: &OptimizedGeometry,
   reprojection: &ReprojectionSpec,
 ) -> Result<Extent2D> {
-  let progress_bar = row_bar(
-    request.progress,
-    "Analyzing geometry",
-    request.total_input_rows,
-  );
-  let source_metadata = request.input.source_metadata()?;
-  let metadata_fast_path = request.row_range.is_full()
+  let progress_bar = row_bar(progress, "Analyzing geometry", total_input_rows);
+  let source_metadata = input.source_metadata()?;
+  let metadata_fast_path = row_range.is_full()
     && !reprojection.requires_reprojection()
     && source_metadata
       .geometry
@@ -47,29 +48,29 @@ pub(crate) async fn resolve_target_extent(
       .is_some();
   let target_extent = if metadata_fast_path {
     explain_stage_note(
-      request.explain,
+      explain,
       "Analyzing geometry",
       "using metadata fast path from resolved source metadata",
     );
-    explain_timing(request.explain, "Analyzing geometry", Duration::ZERO);
-    progress_bar.inc(request.total_input_rows);
+    explain_timing(explain, "Analyzing geometry", Duration::ZERO);
+    progress_bar.inc(total_input_rows);
     source.source_extent
   } else {
-    let dataframe = request.input_dataframe.clone();
-    let aggregate_dataframe = build_target_extent_aggregate(dataframe, geometry, reprojection)?;
+    let aggregate_dataframe =
+      build_target_extent_aggregate(input_dataframe, geometry, reprojection)?;
     let batches = collect_aggregate_with_progress(
       aggregate_dataframe,
       &progress_bar,
-      request.total_input_rows,
+      total_input_rows,
       "Analyzing geometry",
-      request.explain,
+      explain,
     )
     .await?;
     extract_target_extent(&batches)?
   };
   finish_row_bar(
     &progress_bar,
-    request.total_input_rows,
+    total_input_rows,
     format!("Analyzed {} geometry", geometry.geometry_type.as_str()),
   );
   Ok(target_extent)

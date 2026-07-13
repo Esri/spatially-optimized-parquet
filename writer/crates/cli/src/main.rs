@@ -1,5 +1,5 @@
 //! Defines the `parquet-opt` process boundary and translates command-line arguments into
-//! one [`OptimizeJobOptions`] request.
+//! one [`SpatialPipelineOptions`] request.
 //!
 //! This module deliberately contains no storage-format or geometry logic. Clap validates
 //! argument shape, the local parsers enforce row-range constraints, and [`run`] maps the
@@ -7,16 +7,16 @@
 //! metadata discovery, DataFusion planning, geometry transformation, progress reporting,
 //! and durable output.
 //!
-//! Keeping this layer thin prevents CLI concerns from leaking into reusable job code. A
-//! failure returned by the job propagates through `main`, producing a non-zero process exit.
+//! Keeping this layer thin prevents CLI concerns from leaking into reusable pipeline code. A
+//! failure returned by the pipeline propagates through `main`, producing a non-zero process exit.
 
 use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
 use spatial::input::{RowRange, SourceFormat};
-use spatial::job::{OptimizeJobOptions, run_optimize_job};
 use spatial::output::{DEFAULT_OUTPUT_WKID, GeoParquetOutputMode};
+use spatial::pipeline::{SpatialPipeline, SpatialPipelineOptions};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -90,7 +90,7 @@ async fn main() -> Result<()> {
 }
 
 async fn run(cli: Cli) -> Result<()> {
-  let options = OptimizeJobOptions {
+  let options = SpatialPipelineOptions {
     input: cli.input,
     input_format: cli.input_format,
     output: cli.output,
@@ -114,7 +114,8 @@ async fn run(cli: Cli) -> Result<()> {
       GeoParquetOutputMode::Optimized
     },
   };
-  run_optimize_job(options).await
+  SpatialPipeline::run(options).await?;
+  Ok(())
 }
 
 /// Parse a zero-based input row offset.

@@ -1,4 +1,4 @@
-//! Executes the Spatially Optimized GeoParquet stage behind one output boundary.
+//! Implements optimized spatial analysis, projection, and physical output mechanics.
 
 pub(crate) mod aggregate;
 pub(crate) mod clustering;
@@ -6,7 +6,6 @@ pub(crate) mod extent;
 pub mod geometry;
 pub mod metadata;
 pub mod multiscale;
-mod output;
 pub(crate) mod partitioned_sink;
 pub(crate) mod partitioned_sort;
 pub(crate) mod projection;
@@ -15,5 +14,4 @@ mod state;
 pub(crate) mod write;
 
 pub use geometry::{ClusteringFamily, OptimizedGeometry, OptimizedGeometryType};
-pub(crate) use output::OptimizedGeoParquet;
 pub use state::ResolvedOptimization;
