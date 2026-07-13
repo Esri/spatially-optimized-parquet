@@ -12,7 +12,7 @@ use datafusion::datasource::file_format::options::ParquetReadOptions;
 use datafusion::execution::context::SessionContext;
 use datafusion_execution::config::SessionConfig;
 
-/// Build a DataFrame over a local Parquet file or directory.
+/// Create a DataFrame over a local Parquet file or directory.
 pub async fn scan_parquet(input_path: &str) -> Result<DataFrame> {
   let session_config = SessionConfig::new().with_collect_statistics(false);
   let ctx = SessionContext::new_with_config(session_config);

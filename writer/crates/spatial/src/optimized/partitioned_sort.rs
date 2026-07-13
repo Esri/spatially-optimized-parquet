@@ -22,18 +22,35 @@ use datafusion::physical_plan::{
 /// Describes range partitioning and partition-local ordering for multi-file SOP output.
 #[derive(Clone)]
 pub(crate) struct PartitionedSortConfig {
-  pub(crate) partition_column: String,
-  pub(crate) cluster_key_column: String,
-  pub(crate) bucket_count: usize,
-  pub(crate) drop_cluster_key_after_sort: bool,
+  partition_column: String,
+  cluster_key_column: String,
+  bucket_count: usize,
+  drop_cluster_key_after_sort: bool,
 }
 
-/// Insert range repartitioning and spatial sorting where both control columns are available.
-pub(crate) fn insert_partitioned_sort(
-  plan: Arc<dyn ExecutionPlan>,
-  config: &PartitionedSortConfig,
-) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-  insert_partitioned_sort_exec(plan, config)
+impl PartitionedSortConfig {
+  /// Construct range partitioning and partition-local ordering configuration.
+  pub(crate) fn new(
+    partition_column: impl Into<String>,
+    cluster_key_column: impl Into<String>,
+    bucket_count: usize,
+    drop_cluster_key_after_sort: bool,
+  ) -> Self {
+    Self {
+      partition_column: partition_column.into(),
+      cluster_key_column: cluster_key_column.into(),
+      bucket_count,
+      drop_cluster_key_after_sort,
+    }
+  }
+
+  /// Insert range repartitioning and spatial sorting into one physical plan.
+  pub(crate) fn insert_into(
+    &self,
+    plan: Arc<dyn ExecutionPlan>,
+  ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
+    insert_partitioned_sort_exec(plan, self)
+  }
 }
 
 fn insert_partitioned_sort_exec(
@@ -46,7 +63,7 @@ fn insert_partitioned_sort_exec(
   if let (Ok(partition_column_index), Ok(cluster_key_column_index)) =
     (partition_column_index, cluster_key_column_index)
   {
-    return build_partitioned_sort_exec(
+    return partitioned_sort_exec(
       plan,
       config,
       partition_column_index,
@@ -73,7 +90,7 @@ fn insert_partitioned_sort_exec(
   plan.with_new_children(rewritten_children)
 }
 
-fn build_partitioned_sort_exec(
+fn partitioned_sort_exec(
   plan: Arc<dyn ExecutionPlan>,
   config: &PartitionedSortConfig,
   partition_column_index: usize,
@@ -155,16 +172,9 @@ mod tests {
       let session = new_datafusion_session().unwrap();
       let dataframe = session.context().read_batch(batch).unwrap();
       let physical_plan = dataframe.create_physical_plan().await.unwrap();
-      let rewritten = insert_partitioned_sort(
-        physical_plan,
-        &PartitionedSortConfig {
-          partition_column: POINT_RANGE_COLUMN.to_string(),
-          cluster_key_column: POINT_Z_CODE_COLUMN.to_string(),
-          bucket_count: 2,
-          drop_cluster_key_after_sort: false,
-        },
-      )
-      .unwrap();
+      let rewritten = PartitionedSortConfig::new(POINT_RANGE_COLUMN, POINT_Z_CODE_COLUMN, 2, false)
+        .insert_into(physical_plan)
+        .unwrap();
 
       let mut saw_sort = false;
       let mut saw_repartition = false;

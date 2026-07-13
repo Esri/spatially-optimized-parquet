@@ -11,11 +11,11 @@ use futures_util::future::BoxFuture;
 use gdal::vector::LayerAccess;
 
 use crate::geometry::{GeometryEncoding, GeometrySpec};
-use crate::geoparquet::metadata::source::SourceDatasetMetadata;
+use crate::geoparquet::metadata::source::{SourceDatasetMetadata, SourceGeometryMetadata};
 use crate::input::{InputBatchStream, InputOpenOptions, InputSource, RowRange};
 
 use super::batch_reader::{batch_stream, load_schema, open_gpkg_batch_reader};
-use super::metadata::{build_geometry_metadata, collect_layer_summaries, select_layer_name};
+use super::metadata::{collect_layer_summaries, select_layer_name};
 use super::open::{is_gpkg_path, open_gpkg_dataset};
 use super::partition::{GpkgPartitionStream, plan_gpkg_scan_partitions};
 
@@ -46,7 +46,7 @@ pub async fn open_source(options: &InputOpenOptions) -> Result<Arc<dyn InputSour
   let mut layer = dataset
     .layer_by_name(&layer_name)
     .with_context(|| format!("failed to open GeoPackage layer {layer_name}"))?;
-  let geometry_metadata = build_geometry_metadata(&mut layer, &layer_name)?;
+  let geometry_metadata = SourceGeometryMetadata::from_gpkg_layer(&mut layer, &layer_name)?;
   let schema = load_schema(path, &layer_name, &geometry_metadata.column)?;
   let total_rows = layer
     .try_feature_count()

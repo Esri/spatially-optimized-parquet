@@ -16,10 +16,10 @@ pub struct PreparedTransform {
 }
 
 impl PreparedTransform {
-  /// Build a coordinate operation backed by source and target spatial references.
+  /// Construct a coordinate operation backed by source and target spatial references.
   pub(super) fn new(source: SpatialRef, target: SpatialRef) -> Result<Self> {
     let coord_transform =
-      CoordTransform::new(&source, &target).context("build coordinate transform")?;
+      CoordTransform::new(&source, &target).context("create coordinate transform")?;
     Ok(Self {
       _source: source,
       _target: target,

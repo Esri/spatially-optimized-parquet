@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 
 use crate::geoparquet::{resolve_source, validate_covering_configuration};
-use crate::optimized::extent::resolve_target_extent;
+use crate::optimized::extent::TargetExtentResolver;
 use crate::optimized::multiscale::create_geometry_encodings;
 use crate::optimized::{ClusteringFamily, OptimizedGeometry, ResolvedOptimization};
 use crate::output::reprojection::ReprojectionSpec;
@@ -30,17 +30,15 @@ pub(super) async fn resolve_optimization(
     .as_ref()
     .context("missing resolved source CRS PROJJSON")?;
   let reprojection = ReprojectionSpec::from_source_projjson(source_projjson, state.output_wkid)?;
-  let target_extent = resolve_target_extent(
+  let target_extent = TargetExtentResolver::new(
     state.input.as_ref(),
     state.input_dataframe.clone(),
     state.total_input_rows,
     state.row_range,
     state.progress,
     state.explain,
-    &source,
-    &geometry,
-    &reprojection,
   )
+  .resolve(&source, &geometry, &reprojection)
   .await?;
   let encodings = match geometry.clustering_family {
     ClusteringFamily::Point => Vec::new(),

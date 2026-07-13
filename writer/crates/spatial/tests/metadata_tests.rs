@@ -67,7 +67,7 @@ impl InputSource for MetadataInputSource {
     _ctx: &'a SessionContext,
     _row_range: RowRange,
   ) -> BoxFuture<'a, Result<DataFrame>> {
-    Box::pin(async { panic!("source context should not build a DataFrame") })
+    Box::pin(async { panic!("source context should not create a DataFrame") })
   }
 }
 

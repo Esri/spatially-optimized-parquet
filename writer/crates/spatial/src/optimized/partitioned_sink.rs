@@ -39,7 +39,7 @@ use crate::diagnostics::{
 };
 use crate::progress::{SINK_ROWS_METRIC, collect_plan_progress, update_write_stage_bar};
 
-use super::partitioned_sort::{PartitionedSortConfig, insert_partitioned_sort};
+use super::partitioned_sort::PartitionedSortConfig;
 
 #[derive(Debug)]
 /// Wraps DataFusion's Parquet sink with row metrics and failed-write cleanup support.
@@ -346,8 +346,10 @@ pub(crate) async fn write_partitioned_parquet(
   .await?;
   let task_context = Arc::new(TaskContext::from(&state));
   let input_plan = state.create_physical_plan(&logical_plan).await?;
-  let rewritten_input =
-    insert_partitioned_sort(input_plan, &request.partitioned_sort).map_err(anyhow::Error::from)?;
+  let rewritten_input = request
+    .partitioned_sort
+    .insert_into(input_plan)
+    .map_err(anyhow::Error::from)?;
   let parsed_url = ListingTableUrl::parse(&request.write_path)?;
   let sink_config = FileSinkConfig {
     original_url: request.write_path.clone(),

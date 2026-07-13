@@ -59,7 +59,7 @@ pub struct InputOpenOptions {
 }
 
 impl InputOpenOptions {
-  /// Build options for a local path without an explicit layer.
+  /// Construct options for a local path without an explicit layer.
   pub fn new(path: PathBuf) -> Self {
     Self {
       location: path.to_string_lossy().into_owned(),
@@ -122,7 +122,7 @@ pub trait InputSource: Send + Sync {
   }
   /// Stream a selected row range directly as Arrow batches.
   fn read_batches(&self, row_range: RowRange) -> BoxFuture<'_, Result<InputBatchStream>>;
-  /// Build a lazy DataFusion DataFrame for a selected row range.
+  /// Create a lazy DataFusion DataFrame for a selected row range.
   fn to_dataframe<'a>(
     &'a self,
     ctx: &'a SessionContext,

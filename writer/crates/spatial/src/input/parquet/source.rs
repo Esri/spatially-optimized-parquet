@@ -13,12 +13,11 @@ use parquet::file::metadata::KeyValue;
 use url::Url;
 
 use crate::geometry::{GeometryEncoding, GeometrySpec};
-use crate::geoparquet::metadata::source::SourceDatasetMetadata;
+use crate::geoparquet::metadata::source::{SourceDatasetMetadata, SourceGeometryMetadata};
 use crate::input::{InputBatchStream, InputSource, RowRange};
 
 use super::metadata::{
-  build_source_geometry_metadata, file_metadata, load_geo_metadata, map_geo_geometry_type,
-  passthrough_metadata,
+  file_metadata, load_geo_metadata, map_geo_geometry_type, passthrough_metadata,
 };
 
 /// Stores Parquet footer metadata and the location needed to construct future scans.
@@ -115,7 +114,7 @@ impl InputSource for ParquetInputSource {
 
   fn source_metadata(&self) -> Result<SourceDatasetMetadata> {
     let geometry = match load_geo_metadata(&self.metadata)? {
-      Some(geo_meta) => build_source_geometry_metadata(&geo_meta)?,
+      Some(geo_meta) => SourceGeometryMetadata::from_geoparquet(&geo_meta)?,
       None => None,
     };
 

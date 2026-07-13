@@ -1,4 +1,4 @@
-//! Builds the DataFusion execution environment used by analysis, sorting, and Parquet output.
+//! Creates the DataFusion execution environment used by analysis, sorting, and Parquet output.
 //!
 //! [`new_datafusion_session`] creates a session-scoped spill directory, applies a bounded
 //! memory pool, enables sort repartitioning and disk spilling, and preserves existing sort
@@ -41,7 +41,7 @@ impl DataFusionSession {
   }
 }
 
-/// Build the DataFusion session used by spatial analysis and output execution.
+/// Create the DataFusion session used by spatial analysis and output execution.
 ///
 /// File-scan repartitioning stays disabled because input providers define their own
 /// partition behavior, while sort repartitioning and disk spilling remain enabled.
@@ -49,7 +49,7 @@ pub fn new_datafusion_session() -> Result<DataFusionSession> {
   let spill_dir = tempfile::Builder::new()
     .prefix("opt-parquet-datafusion-spill-")
     .tempdir()?;
-  let runtime = Arc::new(build_runtime_env(spill_dir.path())?);
+  let runtime = Arc::new(new_runtime_env(spill_dir.path())?);
   let session_config = SessionConfig::new()
     .with_collect_statistics(false)
     .with_target_partitions(configured_target_partitions())
@@ -65,7 +65,7 @@ pub fn new_datafusion_session() -> Result<DataFusionSession> {
   })
 }
 
-fn build_runtime_env(spill_dir: &std::path::Path) -> Result<RuntimeEnv> {
+fn new_runtime_env(spill_dir: &std::path::Path) -> Result<RuntimeEnv> {
   Ok(
     RuntimeEnvBuilder::new()
       .with_memory_limit(configured_memory_limit_bytes(), 1.0)

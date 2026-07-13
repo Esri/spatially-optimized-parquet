@@ -57,7 +57,7 @@ pub struct GeometryEncoding {
   pub min_length: usize,
 }
 
-/// Build the supported even-numbered multiscale encodings for the target spatial reference.
+/// Create the supported even-numbered multiscale encodings for the target spatial reference.
 pub fn create_geometry_encodings(
   output_wkid: u32,
   geometry_type: OptimizedGeometryType,

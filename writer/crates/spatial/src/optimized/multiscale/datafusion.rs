@@ -40,7 +40,7 @@ pub(crate) struct NonPointGeodisplayUdf {
 }
 
 impl NonPointGeodisplayUdf {
-  /// Build stable output fields for the selected geometry type and LOD encodings.
+  /// Construct stable output fields for the selected geometry type and LOD encodings.
   fn new(geometry_type: OptimizedGeometryType, encodings: Vec<GeometryEncoding>) -> Self {
     let bounds_fields = Fields::from(vec![
       Arc::new(Field::new("xmin", DataType::Float64, true)),
@@ -72,7 +72,7 @@ impl NonPointGeodisplayUdf {
   }
 
   /// Decode each non-null WKB value once and encode every configured multiscale level.
-  fn build_display<T: BinaryValueAccess>(
+  fn encode_geodisplay<T: BinaryValueAccess>(
     &self,
     geometry: &T,
     xz_code: &UInt64Array,
@@ -222,7 +222,7 @@ impl ScalarUDFImpl for NonPointGeodisplayUdf {
     let ymax = as_float64_array(arrays[5].as_ref())?;
 
     let output = match geometry.data_type() {
-      DataType::Binary => self.build_display(
+      DataType::Binary => self.encode_geodisplay(
         as_binary_array(geometry.as_ref())?,
         xz_code,
         xmin,
@@ -230,7 +230,7 @@ impl ScalarUDFImpl for NonPointGeodisplayUdf {
         xmax,
         ymax,
       )?,
-      DataType::LargeBinary => self.build_display(
+      DataType::LargeBinary => self.encode_geodisplay(
         as_large_binary_array(geometry.as_ref())?,
         xz_code,
         xmin,
@@ -238,7 +238,7 @@ impl ScalarUDFImpl for NonPointGeodisplayUdf {
         xmax,
         ymax,
       )?,
-      DataType::BinaryView => self.build_display(
+      DataType::BinaryView => self.encode_geodisplay(
         as_binary_view_array(geometry.as_ref())?,
         xz_code,
         xmin,

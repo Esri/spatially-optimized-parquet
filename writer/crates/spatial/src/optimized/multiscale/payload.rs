@@ -1,4 +1,4 @@
-//! Builds reusable flat coordinate payloads through shared geometry traversal.
+//! Creates reusable flat coordinate payloads through shared geometry traversal.
 
 use anyhow::Result;
 use geo_traits::GeometryTrait;

@@ -81,32 +81,34 @@ fn sanitize_geo_metadata_json(json: &mut Value) {
   }
 }
 
-/// Convert GeoParquet metadata into the format-neutral source geometry model.
-pub(super) fn build_source_geometry_metadata(
-  geo_meta: &GeoParquetMetadata,
-) -> Result<Option<SourceGeometryMetadata>> {
-  let Some(column_meta) = geo_meta.columns.get(&geo_meta.primary_column) else {
-    return Ok(None);
-  };
-  if column_meta.encoding != GeoParquetColumnEncoding::WKB {
-    return Ok(None);
+impl SourceGeometryMetadata {
+  /// Construct normalized source geometry metadata from a GeoParquet contract.
+  pub(super) fn from_geoparquet(
+    geo_meta: &GeoParquetMetadata,
+  ) -> Result<Option<SourceGeometryMetadata>> {
+    let Some(column_meta) = geo_meta.columns.get(&geo_meta.primary_column) else {
+      return Ok(None);
+    };
+    if column_meta.encoding != GeoParquetColumnEncoding::WKB {
+      return Ok(None);
+    }
+
+    let geometry_types = column_meta
+      .geometry_types
+      .iter()
+      .map(|geometry_type| map_geo_geometry_type(geometry_type.geometry_type()))
+      .collect();
+
+    Ok(Some(SourceGeometryMetadata {
+      column: geo_meta.primary_column.clone(),
+      encoding: GeometryEncoding::Wkb,
+      geometry_types,
+      bbox: bbox_to_extent(column_meta.bbox.as_deref()),
+      projjson: column_meta.crs.clone(),
+      has_z: has_dimension_suffix(column_meta, "Z"),
+      has_m: has_dimension_suffix(column_meta, "M"),
+    }))
   }
-
-  let geometry_types = column_meta
-    .geometry_types
-    .iter()
-    .map(|geometry_type| map_geo_geometry_type(geometry_type.geometry_type()))
-    .collect();
-
-  Ok(Some(SourceGeometryMetadata {
-    column: geo_meta.primary_column.clone(),
-    encoding: GeometryEncoding::Wkb,
-    geometry_types,
-    bbox: bbox_to_extent(column_meta.bbox.as_deref()),
-    projjson: column_meta.crs.clone(),
-    has_z: has_dimension_suffix(column_meta, "Z"),
-    has_m: has_dimension_suffix(column_meta, "M"),
-  }))
 }
 
 pub(super) fn map_geo_geometry_type(geometry_type: GeoParquetGeometryType) -> GeometryKind {

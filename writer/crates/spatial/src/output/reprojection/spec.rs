@@ -69,7 +69,7 @@ impl ReprojectionSpec {
 }
 
 impl CoordinateTransformSpec {
-  /// Build reusable transformation state from the stored CRS definitions.
+  /// Construct reusable transformation state from the stored CRS definitions.
   pub fn prepare(&self) -> Result<PreparedTransform> {
     PreparedTransform::new(
       spatial_ref_from_definition(&self.source_definition)?,

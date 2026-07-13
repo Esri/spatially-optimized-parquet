@@ -24,59 +24,85 @@ use crate::output::reprojection::{
 };
 use crate::progress::{finish_row_bar, row_bar};
 
-/// Resolve the selected-row extent in the output coordinate reference system.
-pub(crate) async fn resolve_target_extent(
-  input: &dyn InputSource,
+/// Resolves one selected dataset extent in the output coordinate reference system.
+pub(crate) struct TargetExtentResolver<'a> {
+  input: &'a dyn InputSource,
   input_dataframe: engine::DataFrame,
   total_input_rows: u64,
   row_range: RowRange,
   progress: bool,
   explain: bool,
-  source: &ResolvedGeoParquetSource,
-  geometry: &OptimizedGeometry,
-  reprojection: &ReprojectionSpec,
-) -> Result<Extent2D> {
-  let progress_bar = row_bar(progress, "Analyzing geometry", total_input_rows);
-  let source_metadata = input.source_metadata()?;
-  let metadata_fast_path = row_range.is_full()
-    && !reprojection.requires_reprojection()
-    && source_metadata
-      .geometry
-      .as_ref()
-      .filter(|metadata| metadata.column == geometry.geometry_spec.column)
-      .and_then(|metadata| metadata.bbox)
-      .is_some();
-  let target_extent = if metadata_fast_path {
-    explain_stage_note(
-      explain,
-      "Analyzing geometry",
-      "using metadata fast path from resolved source metadata",
-    );
-    explain_timing(explain, "Analyzing geometry", Duration::ZERO);
-    progress_bar.inc(total_input_rows);
-    source.source_extent
-  } else {
-    let aggregate_dataframe =
-      build_target_extent_aggregate(input_dataframe, geometry, reprojection)?;
-    let batches = collect_aggregate_with_progress(
-      aggregate_dataframe,
-      &progress_bar,
-      total_input_rows,
-      "Analyzing geometry",
-      explain,
-    )
-    .await?;
-    extract_target_extent(&batches)?
-  };
-  finish_row_bar(
-    &progress_bar,
-    total_input_rows,
-    format!("Analyzed {} geometry", geometry.geometry_type.as_str()),
-  );
-  Ok(target_extent)
 }
 
-fn build_target_extent_aggregate(
+impl<'a> TargetExtentResolver<'a> {
+  /// Construct target-extent resolution for one prepared input selection.
+  pub(crate) fn new(
+    input: &'a dyn InputSource,
+    input_dataframe: engine::DataFrame,
+    total_input_rows: u64,
+    row_range: RowRange,
+    progress: bool,
+    explain: bool,
+  ) -> Self {
+    Self {
+      input,
+      input_dataframe,
+      total_input_rows,
+      row_range,
+      progress,
+      explain,
+    }
+  }
+
+  /// Resolve the selected-row extent in the output coordinate reference system.
+  pub(crate) async fn resolve(
+    self,
+    source: &ResolvedGeoParquetSource,
+    geometry: &OptimizedGeometry,
+    reprojection: &ReprojectionSpec,
+  ) -> Result<Extent2D> {
+    let progress_bar = row_bar(self.progress, "Analyzing geometry", self.total_input_rows);
+    let source_metadata = self.input.source_metadata()?;
+    let metadata_fast_path = self.row_range.is_full()
+      && !reprojection.requires_reprojection()
+      && source_metadata
+        .geometry
+        .as_ref()
+        .filter(|metadata| metadata.column == geometry.geometry_spec.column)
+        .and_then(|metadata| metadata.bbox)
+        .is_some();
+    let target_extent = if metadata_fast_path {
+      explain_stage_note(
+        self.explain,
+        "Analyzing geometry",
+        "using metadata fast path from resolved source metadata",
+      );
+      explain_timing(self.explain, "Analyzing geometry", Duration::ZERO);
+      progress_bar.inc(self.total_input_rows);
+      source.source_extent
+    } else {
+      let aggregate_dataframe =
+        target_extent_aggregate(self.input_dataframe, geometry, reprojection)?;
+      let batches = collect_aggregate_with_progress(
+        aggregate_dataframe,
+        &progress_bar,
+        self.total_input_rows,
+        "Analyzing geometry",
+        self.explain,
+      )
+      .await?;
+      extract_target_extent(&batches)?
+    };
+    finish_row_bar(
+      &progress_bar,
+      self.total_input_rows,
+      format!("Analyzed {} geometry", geometry.geometry_type.as_str()),
+    );
+    Ok(target_extent)
+  }
+}
+
+fn target_extent_aggregate(
   dataframe: engine::DataFrame,
   geometry: &OptimizedGeometry,
   reprojection: &ReprojectionSpec,

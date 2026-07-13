@@ -5,7 +5,7 @@
 pub(crate) struct ClusterKey(u64);
 
 impl ClusterKey {
-  /// Build a clustering key from its encoded value.
+  /// Construct a clustering key from its encoded value.
   pub(crate) const fn new(value: u64) -> Self {
     Self(value)
   }

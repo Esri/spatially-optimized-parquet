@@ -1,6 +1,6 @@
 //! Connects one spatial request to its complete DataFusion execution path.
 
-mod build;
+mod new;
 mod optimized;
 mod optimized_partitioned;
 mod optimized_single_file;
@@ -19,7 +19,7 @@ use crate::diagnostics::explain_timing;
 use crate::input::{InputSource, RowRange};
 use crate::progress::format_elapsed;
 
-pub use build::SpatialPipelineOptions;
+pub use new::SpatialPipelineOptions;
 
 /// Represents one complete spatial execution path from opened input through durable output.
 pub enum SpatialPipeline {
@@ -72,14 +72,9 @@ pub(crate) struct SpatialPipelineState {
 }
 
 impl SpatialPipeline {
-  /// Build and execute one complete spatial pipeline.
+  /// Construct and execute one complete spatial pipeline.
   pub async fn run(options: SpatialPipelineOptions) -> Result<SpatialPipelineResult> {
-    Self::build(options).await?.execute().await
-  }
-
-  /// Build one concrete pipeline while preserving existing input preparation behavior.
-  pub async fn build(options: SpatialPipelineOptions) -> Result<Self> {
-    build::build_pipeline(options).await
+    Self::new(options).await?.execute().await
   }
 
   /// Execute the selected spatial and DataFusion pipeline.

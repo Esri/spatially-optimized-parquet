@@ -8,10 +8,11 @@ use engine::parquet_write::{
 
 use crate::diagnostics::explain_stage_note;
 use crate::geoparquet::{
-  GeoMetadataInput, analyze_plain_target_extent, build_geo_key_values, build_geo_metadata,
-  build_plain_output_dataframe, resolve_source, validate_covering_configuration,
+  GeoMetadata, GeoMetadataInput, analyze_plain_target_extent, plain_output_dataframe,
+  resolve_source, validate_covering_configuration,
 };
 use crate::optimized::multiscale::COVERING_BBOX_COLUMN;
+use crate::output::ParquetMetadataSet;
 use crate::output::reprojection::ReprojectionSpec;
 
 use super::{PlainPipeline, SpatialPipelineResult};
@@ -42,7 +43,7 @@ impl PlainPipeline {
       reprojection.transform(),
     )
     .await?;
-    let dataframe = build_plain_output_dataframe(
+    let dataframe = plain_output_dataframe(
       state.input_dataframe.clone(),
       state.source_schema.as_ref(),
       &source.geometry_spec.column,
@@ -50,7 +51,7 @@ impl PlainPipeline {
       reprojection.transform(),
       state.covering,
     )?;
-    let geo_metadata = build_geo_metadata(GeoMetadataInput {
+    let geo_metadata = GeoMetadata::new(GeoMetadataInput {
       geometry_column: &source.geometry_spec.column,
       geometry_types: &source.geometry_types,
       output_extent: target_extent,
@@ -60,7 +61,9 @@ impl PlainPipeline {
       covering: state.covering,
       covering_column: COVERING_BBOX_COLUMN,
     })?;
-    let metadata = build_geo_key_values(&source.source_metadata, geo_metadata);
+    let mut metadata = ParquetMetadataSet::new(source.source_metadata.passthrough_kv);
+    metadata.insert(&geo_metadata)?;
+    let metadata = metadata.into_entries();
     let compression = parse_compression(state.compression.as_deref().unwrap_or("snappy"))?;
     let writer_options = create_datafusion_parquet_options(compression, &metadata);
     let output_path = resolved_output_paths(&state.output_layout)?

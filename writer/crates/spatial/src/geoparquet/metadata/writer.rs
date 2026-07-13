@@ -1,14 +1,14 @@
-//! Builds the GeoParquet JSON contract and Parquet key-value metadata.
+//! Defines the GeoParquet JSON contract and Parquet key-value metadata.
+
+use std::collections::BTreeMap;
 
 use anyhow::{Context, Result};
-use parquet::file::metadata::KeyValue;
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::geometry::Extent2D;
 use crate::geometry::GeometryKind;
-use crate::output::SpatialReferenceInfo;
-
-use super::source::SourceDatasetMetadata;
+use crate::output::{ParquetMetadata, SpatialReferenceInfo};
 
 /// Stores values serialized into one GeoParquet geometry-column contract.
 pub struct GeoMetadataInput<'a> {
@@ -30,83 +30,87 @@ pub struct GeoMetadataInput<'a> {
   pub covering_column: &'a str,
 }
 
-/// Build GeoParquet 1.1 metadata for one geometry column and optional covering bbox.
-pub fn build_geo_metadata(input: GeoMetadataInput<'_>) -> Result<String> {
-  let mut column = serde_json::Map::new();
-  column.insert("encoding".to_string(), Value::String("WKB".to_string()));
-  column.insert(
-    "geometry_types".to_string(),
-    Value::Array(
-      input
-        .geometry_types
-        .iter()
-        .copied()
-        .map(|geometry_kind| {
-          Ok(Value::String(geoparquet_geometry_type_name(
-            geometry_kind,
-            input.has_z,
-            input.has_m,
-          )?))
-        })
-        .collect::<Result<Vec<_>>>()?,
-    ),
-  );
-  column.insert(
-    "bbox".to_string(),
-    serde_json::json!([
-      input.output_extent.xmin,
-      input.output_extent.ymin,
-      input.output_extent.xmax,
-      input.output_extent.ymax
-    ]),
-  );
-  column.insert(
-    "crs".to_string(),
-    input
-      .output_spatial_reference
-      .projjson
-      .clone()
-      .context("missing output CRS PROJJSON")?,
-  );
-  if input.covering {
-    column.insert(
-      "covering".to_string(),
-      geo_covering_bbox_metadata(input.covering_column),
-    );
+/// Represents the GeoParquet 1.1 file metadata contract.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct GeoMetadata {
+  version: &'static str,
+  primary_column: String,
+  columns: BTreeMap<String, GeoColumnMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+struct GeoColumnMetadata {
+  encoding: &'static str,
+  geometry_types: Vec<String>,
+  bbox: [f64; 4],
+  crs: Value,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  covering: Option<GeoCovering>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct GeoCovering {
+  bbox: GeoCoveringBbox,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct GeoCoveringBbox {
+  xmin: [String; 2],
+  ymin: [String; 2],
+  xmax: [String; 2],
+  ymax: [String; 2],
+}
+
+impl GeoMetadata {
+  /// Construct GeoParquet metadata for one geometry column and optional covering bbox.
+  pub fn new(input: GeoMetadataInput<'_>) -> Result<Self> {
+    let geometry_types = input
+      .geometry_types
+      .iter()
+      .copied()
+      .map(|geometry_kind| geoparquet_geometry_type_name(geometry_kind, input.has_z, input.has_m))
+      .collect::<Result<Vec<_>>>()?;
+    let column = GeoColumnMetadata {
+      encoding: "WKB",
+      geometry_types,
+      bbox: [
+        input.output_extent.xmin,
+        input.output_extent.ymin,
+        input.output_extent.xmax,
+        input.output_extent.ymax,
+      ],
+      crs: input
+        .output_spatial_reference
+        .projjson
+        .clone()
+        .context("missing output CRS PROJJSON")?,
+      covering: input
+        .covering
+        .then(|| GeoCovering::new(input.covering_column)),
+    };
+    Ok(Self {
+      version: "1.1.0",
+      primary_column: input.geometry_column.to_string(),
+      columns: BTreeMap::from([(input.geometry_column.to_string(), column)]),
+    })
   }
-
-  let mut columns = serde_json::Map::new();
-  columns.insert(input.geometry_column.to_string(), Value::Object(column));
-  Ok(serde_json::to_string(&serde_json::json!({
-    "version": "1.1.0",
-    "primary_column": input.geometry_column,
-    "columns": columns,
-  }))?)
 }
 
-/// Replace reserved GeoParquet metadata while preserving safe source key-value entries.
-pub fn build_geo_key_values(
-  source_metadata: &SourceDatasetMetadata,
-  geo_metadata: String,
-) -> Vec<KeyValue> {
-  let mut metadata = source_metadata.passthrough_kv.clone();
-  metadata.retain(|item| item.key != "geo");
-  metadata.push(KeyValue {
-    key: "geo".to_string(),
-    value: Some(geo_metadata),
-  });
-  metadata
+impl ParquetMetadata for GeoMetadata {
+  const KEY: &'static str = "geo";
 }
 
-fn geo_covering_bbox_metadata(covering_column: &str) -> Value {
-  serde_json::json!({
-    "bbox": {
-      "xmin": [covering_column, "xmin"],
-      "ymin": [covering_column, "ymin"],
-      "xmax": [covering_column, "xmax"],
-      "ymax": [covering_column, "ymax"],
+impl GeoCovering {
+  fn new(column: &str) -> Self {
+    Self {
+      bbox: GeoCoveringBbox {
+        xmin: [column.to_string(), "xmin".to_string()],
+        ymin: [column.to_string(), "ymin".to_string()],
+        xmax: [column.to_string(), "xmax".to_string()],
+        ymax: [column.to_string(), "ymax".to_string()],
+      },
     }
-  })
+  }
 }
 
 fn geoparquet_geometry_type_name(

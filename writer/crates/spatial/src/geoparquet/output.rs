@@ -40,7 +40,7 @@ pub(crate) async fn analyze_plain_target_extent(
   extract_extent(&batches)
 }
 
-pub(crate) fn build_plain_output_dataframe(
+pub(crate) fn plain_output_dataframe(
   mut dataframe: engine::DataFrame,
   source_schema: &arrow_schema::Schema,
   geometry_column: &str,

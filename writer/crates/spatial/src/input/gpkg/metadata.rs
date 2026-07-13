@@ -164,54 +164,56 @@ fn format_feature_count(feature_count: u64) -> String {
   reversed.chars().rev().collect()
 }
 
-/// Normalize geometry type, dimensions, extent, and CRS from a GDAL layer.
-pub(super) fn build_geometry_metadata(
-  layer: &mut impl LayerAccess,
-  layer_name: &str,
-) -> Result<SourceGeometryMetadata> {
-  let (column_name, geometry_type, field_spatial_ref) = {
-    let geom_field = layer
-      .defn()
-      .geom_fields()
-      .next()
-      .ok_or_else(|| anyhow!("GeoPackage layer {layer_name} has no geometry column"))?;
-    (
-      geom_field.name(),
-      geom_field.field_type(),
-      geom_field.spatial_ref().ok(),
-    )
-  };
-  let (mut geometry_kind, mut has_z, mut has_m) = map_geometry_type(geometry_type);
-  if geometry_kind.is_none()
-    && let Some(SampledGeometryType::Concrete {
-      geometry_kind: sampled_kind,
-      has_z: sampled_has_z,
-      has_m: sampled_has_m,
-    }) = sample_geometry_type(layer)
-  {
-    geometry_kind = Some(sampled_kind);
-    has_z = sampled_has_z;
-    has_m = sampled_has_m;
-  }
-  let projjson = field_spatial_ref
-    .or_else(|| layer.spatial_ref())
-    .and_then(|spatial_ref| spatial_ref_to_projjson(&spatial_ref));
-  let bbox = layer.try_get_extent()?.map(|extent| Extent2D {
-    xmin: extent.MinX,
-    ymin: extent.MinY,
-    xmax: extent.MaxX,
-    ymax: extent.MaxY,
-  });
+impl SourceGeometryMetadata {
+  /// Construct normalized source geometry metadata from a GDAL layer.
+  pub(super) fn from_gpkg_layer(
+    layer: &mut impl LayerAccess,
+    layer_name: &str,
+  ) -> Result<SourceGeometryMetadata> {
+    let (column_name, geometry_type, field_spatial_ref) = {
+      let geom_field = layer
+        .defn()
+        .geom_fields()
+        .next()
+        .ok_or_else(|| anyhow!("GeoPackage layer {layer_name} has no geometry column"))?;
+      (
+        geom_field.name(),
+        geom_field.field_type(),
+        geom_field.spatial_ref().ok(),
+      )
+    };
+    let (mut geometry_kind, mut has_z, mut has_m) = map_geometry_type(geometry_type);
+    if geometry_kind.is_none()
+      && let Some(SampledGeometryType::Concrete {
+        geometry_kind: sampled_kind,
+        has_z: sampled_has_z,
+        has_m: sampled_has_m,
+      }) = sample_geometry_type(layer)
+    {
+      geometry_kind = Some(sampled_kind);
+      has_z = sampled_has_z;
+      has_m = sampled_has_m;
+    }
+    let projjson = field_spatial_ref
+      .or_else(|| layer.spatial_ref())
+      .and_then(|spatial_ref| spatial_ref_to_projjson(&spatial_ref));
+    let bbox = layer.try_get_extent()?.map(|extent| Extent2D {
+      xmin: extent.MinX,
+      ymin: extent.MinY,
+      xmax: extent.MaxX,
+      ymax: extent.MaxY,
+    });
 
-  Ok(SourceGeometryMetadata {
-    column: column_name,
-    encoding: GeometryEncoding::Wkb,
-    geometry_types: geometry_kind.into_iter().collect(),
-    bbox,
-    projjson,
-    has_z,
-    has_m,
-  })
+    Ok(SourceGeometryMetadata {
+      column: column_name,
+      encoding: GeometryEncoding::Wkb,
+      geometry_types: geometry_kind.into_iter().collect(),
+      bbox,
+      projjson,
+      has_z,
+      has_m,
+    })
+  }
 }
 
 fn spatial_ref_to_projjson(spatial_ref: &SpatialRef) -> Option<serde_json::Value> {

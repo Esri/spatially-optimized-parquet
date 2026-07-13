@@ -1,4 +1,4 @@
-//! Builds GeoParquet covering bbox structs through typed DataFusion expressions.
+//! Creates GeoParquet covering bbox structs through typed DataFusion expressions.
 
 use std::any::Any;
 use std::sync::{Arc, OnceLock};

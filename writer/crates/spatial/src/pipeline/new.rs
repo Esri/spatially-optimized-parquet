@@ -62,70 +62,73 @@ pub struct SpatialPipelineOptions {
   pub output_mode: GeoParquetOutputMode,
 }
 
-pub(super) async fn build_pipeline(options: SpatialPipelineOptions) -> Result<SpatialPipeline> {
-  validate_output_wkid(options.output_wkid);
-  let started_at = Instant::now();
-  let input_format = resolve_source_format(&options.input, options.input_format)?;
-  let input = open_input(
-    input_format,
-    &InputOpenOptions {
-      location: options.input.clone(),
-      layer: options.layer.clone(),
-    },
-  )
-  .await?;
-  let output_layout =
-    resolve_output_layout(&options.output, options.output_files, options.overwrite)?;
-  let source_schema = input.schema()?;
-  validate_covering_configuration(options.covering, source_schema.as_ref())?;
-  validate_internal_projection_columns(source_schema.as_ref())?;
-  let discovered_rows = input.total_rows()?;
-  let total_input_rows = options.row_range.effective_rows(discovered_rows);
-  explain_run_configuration(
-    options.explain,
-    input.format_name(),
-    &options,
-    discovered_rows,
-    total_input_rows,
-    output_layout.parts,
-  );
+impl SpatialPipeline {
+  /// Construct one concrete pipeline with validated input and execution resources.
+  pub async fn new(options: SpatialPipelineOptions) -> Result<Self> {
+    validate_output_wkid(options.output_wkid);
+    let started_at = Instant::now();
+    let input_format = resolve_source_format(&options.input, options.input_format)?;
+    let input = open_input(
+      input_format,
+      &InputOpenOptions {
+        location: options.input.clone(),
+        layer: options.layer.clone(),
+      },
+    )
+    .await?;
+    let output_layout =
+      resolve_output_layout(&options.output, options.output_files, options.overwrite)?;
+    let source_schema = input.schema()?;
+    validate_covering_configuration(options.covering, source_schema.as_ref())?;
+    validate_internal_projection_columns(source_schema.as_ref())?;
+    let discovered_rows = input.total_rows()?;
+    let total_input_rows = options.row_range.effective_rows(discovered_rows);
+    explain_run_configuration(
+      options.explain,
+      input.format_name(),
+      &options,
+      discovered_rows,
+      total_input_rows,
+      output_layout.parts,
+    );
 
-  let session = new_datafusion_session()?;
-  configure_explain_session(session.context(), options.explain);
-  let input_dataframe = prepare_input_dataframe(
-    input.as_ref(),
-    session.context(),
-    &options,
-    total_input_rows,
-  )
-  .await?;
-  let output_mode = options.output_mode;
-  let state = SpatialPipelineState {
-    started_at,
-    _session: session,
-    input,
-    input_dataframe,
-    output_layout,
-    source_schema,
-    total_input_rows,
-    row_range: options.row_range,
-    geometry_column: options.geometry_column,
-    input_wkid: options.input_wkid,
-    output_wkid: options.output_wkid,
-    covering: options.covering,
-    compression: options.compression,
-    progress: options.progress,
-    explain: options.explain,
-  };
+    let session = new_datafusion_session()?;
+    configure_explain_session(session.context(), options.explain);
+    let input_dataframe = prepare_input_dataframe(
+      input.as_ref(),
+      session.context(),
+      &options,
+      total_input_rows,
+    )
+    .await?;
+    let output_mode = options.output_mode;
+    let state = SpatialPipelineState {
+      started_at,
+      _session: session,
+      input,
+      input_dataframe,
+      output_layout,
+      source_schema,
+      total_input_rows,
+      row_range: options.row_range,
+      geometry_column: options.geometry_column,
+      input_wkid: options.input_wkid,
+      output_wkid: options.output_wkid,
+      covering: options.covering,
+      compression: options.compression,
+      progress: options.progress,
+      explain: options.explain,
+    };
 
-  match pipeline_kind(output_mode, state.output_layout.parts)? {
-    PipelineKind::Plain => Ok(SpatialPipeline::Plain(PlainPipeline::new(state))),
-    PipelineKind::OptimizedSingleFile => Ok(SpatialPipeline::OptimizedSingleFile(
-      OptimizedSingleFilePipeline::new(state),
-    )),
-    PipelineKind::OptimizedPartitioned => Ok(SpatialPipeline::OptimizedPartitioned(
-      OptimizedPartitionedPipeline::new(state),
-    )),
+    match pipeline_kind(output_mode, state.output_layout.parts)? {
+      PipelineKind::Plain => Ok(Self::Plain(PlainPipeline::new(state))),
+      PipelineKind::OptimizedSingleFile => Ok(Self::OptimizedSingleFile(
+        OptimizedSingleFilePipeline::new(state),
+      )),
+      PipelineKind::OptimizedPartitioned => Ok(Self::OptimizedPartitioned(
+        OptimizedPartitionedPipeline::new(state),
+      )),
+    }
   }
 }
 

@@ -11,6 +11,7 @@
 
 use crate::geometry::Extent2D;
 use crate::optimized::multiscale::MultiscaleLevel;
+use crate::output::ParquetMetadata;
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -155,7 +156,7 @@ pub struct XzClusteringIndexInput {
 }
 
 impl GeodisplayMetadata {
-  /// Build metadata for a point Z-order index.
+  /// Construct metadata for a point Z-order index.
   pub fn point(index: ZClusteringIndex) -> Self {
     Self {
       parent_column: None,
@@ -163,7 +164,7 @@ impl GeodisplayMetadata {
     }
   }
 
-  /// Build root metadata for a non-point XZ-order index.
+  /// Construct root metadata for a non-point XZ-order index.
   pub fn xz(index: XzClusteringIndex) -> Self {
     Self {
       parent_column: None,
@@ -171,7 +172,7 @@ impl GeodisplayMetadata {
     }
   }
 
-  /// Build nested metadata for an XZ-order representation derived from a parent column.
+  /// Construct nested metadata for an XZ-order representation derived from a parent column.
   pub fn xz_with_parent(parent_column: impl Into<String>, index: XzClusteringIndex) -> Self {
     Self {
       parent_column: Some(parent_column.into()),
@@ -180,8 +181,12 @@ impl GeodisplayMetadata {
   }
 }
 
+impl ParquetMetadata for GeodisplayMetadata {
+  const KEY: &'static str = "geodisplay";
+}
+
 impl ZClusteringIndex {
-  /// Build point-index metadata with fixed `z` index semantics.
+  /// Construct point-index metadata with fixed `z` index semantics.
   pub fn new(input: ZClusteringIndexInput) -> Self {
     Self {
       index_type: "z",
@@ -201,7 +206,7 @@ impl ZClusteringIndex {
 }
 
 impl XzClusteringIndex {
-  /// Build non-point index metadata with fixed `xz` index semantics.
+  /// Construct non-point index metadata with fixed `xz` index semantics.
   pub fn new(input: XzClusteringIndexInput) -> Self {
     Self {
       index_type: "xz",

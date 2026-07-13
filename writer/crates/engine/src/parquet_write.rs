@@ -42,7 +42,7 @@ pub fn parse_compression(compression: &str) -> Result<Compression> {
   Ok(codec)
 }
 
-/// Build repository-wide DataFusion Parquet options.
+/// Create repository-wide DataFusion Parquet options.
 pub fn create_datafusion_parquet_options(
   compression: Compression,
   kv_metadata: &[KeyValue],

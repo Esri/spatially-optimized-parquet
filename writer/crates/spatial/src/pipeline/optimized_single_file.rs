@@ -2,8 +2,6 @@
 
 use anyhow::Result;
 
-use crate::optimized::metadata::build_optimized_metadata;
-use crate::optimized::projection::build_single_file_projection;
 use crate::optimized::write::write_optimized_single_file;
 
 use super::optimized::resolve_optimization;
@@ -13,13 +11,12 @@ impl OptimizedSingleFilePipeline {
   pub(super) async fn execute(self) -> Result<SpatialPipelineResult> {
     let state = self.state;
     let optimization = resolve_optimization(&state).await?;
-    let dataframe = build_single_file_projection(
+    let dataframe = optimization.single_file_projection(
       state.input_dataframe.clone(),
       state.source_schema.as_ref(),
-      &optimization,
       state.covering,
     )?;
-    let metadata = build_optimized_metadata(&optimization, state.covering)?;
+    let metadata = optimization.parquet_metadata(state.covering)?;
     let rows_written = write_optimized_single_file(
       dataframe,
       &state.output_layout,
