@@ -72,7 +72,7 @@ impl InputOpenOptions {
   }
 }
 
-/// Defines the normalized input contract consumed by output planning.
+/// Defines the normalized input contract consumed by output layout resolution.
 pub trait InputSource: Send + Sync {
   /// Return a stable display name for diagnostics.
   fn format_name(&self) -> &'static str;

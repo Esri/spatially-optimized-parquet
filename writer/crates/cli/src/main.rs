@@ -16,7 +16,7 @@ use anyhow::Result;
 use clap::Parser;
 use spatial::input::{RowRange, SourceFormat};
 use spatial::job::{OptimizeJobOptions, run_optimize_job};
-use spatial::output::GeoParquetOutputMode;
+use spatial::output::{DEFAULT_OUTPUT_WKID, GeoParquetOutputMode};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -53,6 +53,13 @@ struct Cli {
     help = "Set the input CRS when source geometry metadata does not declare one"
   )]
   in_sr: Option<u32>,
+  #[arg(
+    long,
+    value_name = "LATEST_WKID",
+    default_value_t = DEFAULT_OUTPUT_WKID,
+    help = "Set the output CRS"
+  )]
+  out_sr: u32,
   #[arg(
     long,
     help = "Write a root bbox struct column and GeoParquet 1.1 covering metadata"
@@ -96,6 +103,7 @@ async fn run(cli: Cli) -> Result<()> {
     layer: cli.layer,
     geometry_column: cli.geometry_column,
     input_wkid: cli.in_sr,
+    output_wkid: cli.out_sr,
     covering: cli.covering,
     overwrite: cli.overwrite,
     progress: !cli.explain,

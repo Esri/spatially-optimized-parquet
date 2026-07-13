@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
 use parquet::file::metadata::KeyValue;
+use spatial::input::RowRange;
+use spatial::output::geoparquet::resolve_source_context;
 use tempfile::TempDir;
 
 mod common;
@@ -109,5 +111,42 @@ fn source_metadata_tolerates_null_bbox_metadata() {
   assert_eq!(
     geometry.geometry_types,
     vec![spatial::geometry::GeometryKind::Point]
+  );
+}
+
+#[test]
+fn source_context_retains_resolved_crs_and_extent_in_source_metadata() {
+  let temp = TempDir::new().unwrap();
+  let path = temp.path().join("data.parquet");
+  let schema = sample_schema_with_geometry();
+  let batch = sample_batch_with_geometry(vec![
+    Some(wkb_point(-10.0, 5.0)),
+    Some(wkb_point(20.0, 30.0)),
+    None,
+  ]);
+  write_parquet(
+    &path,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv("geometry", &["Point"])],
+  );
+
+  let input = open_parquet_input(&path);
+  let context = common::runtime()
+    .block_on(resolve_source_context(
+      input.as_ref(),
+      input.schema().unwrap().as_ref(),
+      None,
+      None,
+      RowRange::default(),
+    ))
+    .unwrap();
+  let source_geometry = context.source_metadata.geometry.unwrap();
+
+  assert_eq!(source_geometry.bbox, Some(context.source_extent));
+  assert_eq!(
+    source_geometry.projjson,
+    context.source_spatial_reference.projjson
   );
 }

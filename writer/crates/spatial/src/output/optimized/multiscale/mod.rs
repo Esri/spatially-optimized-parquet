@@ -10,10 +10,7 @@ mod wire;
 
 pub(crate) use columns::*;
 pub(crate) use datafusion::non_point_geodisplay_expr;
-pub use levels::{
-  DEFAULT_MAX_LEVEL, DISPLAY_OUTPUT_WKID, GeometryEncoding, create_geometry_encodings,
-  metadata_levels,
-};
+pub use levels::{DEFAULT_MAX_LEVEL, GeometryEncoding, create_geometry_encodings, metadata_levels};
 pub use payload::{
   FlatGeometryPayload, GeometryPayload, flat_geometry_payload_from_wkb,
   geometry_payload_from_geometry, geometry_payload_from_wkb,

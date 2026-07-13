@@ -322,8 +322,11 @@ mod tests {
   }
 
   fn assert_encoding_parameter_changes_identity(mutate: impl FnOnce(&mut GeometryEncoding)) {
-    let encodings =
-      create_geometry_encodings(4326, DisplayGeometryType::Polygon).expect("encodings");
+    let encodings = create_geometry_encodings(
+      crate::output::DEFAULT_OUTPUT_WKID,
+      DisplayGeometryType::Polygon,
+    )
+    .expect("encodings");
     let original = NonPointGeodisplayUdf::new(DisplayGeometryType::Polygon, encodings.clone());
     let mut changed_encodings = encodings;
     mutate(&mut changed_encodings[0]);
@@ -360,8 +363,11 @@ mod tests {
 
   #[test]
   fn identity_includes_geometry_type_encoding_order_and_count() {
-    let encodings =
-      create_geometry_encodings(4326, DisplayGeometryType::Polygon).expect("encodings");
+    let encodings = create_geometry_encodings(
+      crate::output::DEFAULT_OUTPUT_WKID,
+      DisplayGeometryType::Polygon,
+    )
+    .expect("encodings");
     let original = NonPointGeodisplayUdf::new(DisplayGeometryType::Polygon, encodings.clone());
     let equal = NonPointGeodisplayUdf::new(DisplayGeometryType::Polygon, encodings.clone());
     assert_eq!(original, equal);

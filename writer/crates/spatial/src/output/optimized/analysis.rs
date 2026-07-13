@@ -17,7 +17,7 @@ use crate::output::optimized::multiscale::{
   POINT_X_COLUMN, POINT_Y_COLUMN, TEMP_BOUNDS_COLUMN, TEMP_POINT_COORDS_COLUMN, TEMP_XMAX_COLUMN,
   TEMP_XMIN_COLUMN, TEMP_YMAX_COLUMN, TEMP_YMIN_COLUMN,
 };
-use crate::output::optimized::reprojection::{
+use crate::output::reprojection::{
   TransformSpec, transformed_bounds_expr, transformed_point_coords_expr,
 };
 

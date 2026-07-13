@@ -1,8 +1,9 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use arrow_array::{
-  BinaryArray, BinaryViewArray, Float64Array, Int32Array, LargeBinaryArray, RecordBatch,
+  Array, BinaryArray, BinaryViewArray, Float64Array, Int32Array, LargeBinaryArray, RecordBatch,
   StringArray, StringViewArray, StructArray, UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema};
@@ -13,6 +14,7 @@ use parquet::file::metadata::KeyValue;
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
+use spatial::analysis::Extent2D;
 use spatial::input::RowRange;
 use spatial::job::{OptimizeJobOptions, run_optimize_job};
 use spatial::output::GeoParquetOutputMode;
@@ -107,8 +109,38 @@ fn assert_covering_metadata(geo: &serde_json::Value) {
   assert_eq!(covering["ymax"], serde_json::json!(["bbox", "ymax"]));
 }
 
+fn assert_json_extent(extent: &serde_json::Value, expected: Extent2D) {
+  if let Some(values) = extent.as_array() {
+    assert_close(values[0].as_f64().unwrap(), expected.xmin);
+    assert_close(values[1].as_f64().unwrap(), expected.ymin);
+    assert_close(values[2].as_f64().unwrap(), expected.xmax);
+    assert_close(values[3].as_f64().unwrap(), expected.ymax);
+    return;
+  }
+  assert_close(extent["xmin"].as_f64().unwrap(), expected.xmin);
+  assert_close(extent["ymin"].as_f64().unwrap(), expected.ymin);
+  assert_close(extent["xmax"].as_f64().unwrap(), expected.xmax);
+  assert_close(extent["ymax"].as_f64().unwrap(), expected.ymax);
+}
+
+fn parquet_files(path: &Path) -> Vec<std::path::PathBuf> {
+  let mut files = Vec::new();
+  for entry in std::fs::read_dir(path).unwrap() {
+    let entry_path = entry.unwrap().path();
+    if entry_path.is_dir() {
+      files.extend(parquet_files(&entry_path));
+    } else if entry_path
+      .extension()
+      .is_some_and(|extension| extension == "parquet")
+    {
+      files.push(entry_path);
+    }
+  }
+  files
+}
+
 #[test]
-fn optimize_job_writes_sorted_point_output_and_metadata() {
+fn optimize_job_preserves_same_crs_wkb_and_writes_sorted_metadata() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("points.parquet");
   let output = temp.path().join("points-optimized.parquet");
@@ -149,6 +181,7 @@ fn optimize_job_writes_sorted_point_output_and_metadata() {
       layer: None,
       geometry_column: None,
       input_wkid: None,
+      output_wkid: 4326,
       covering: false,
       overwrite: true,
       progress: false,
@@ -171,6 +204,10 @@ fn optimize_job_writes_sorted_point_output_and_metadata() {
     string_value(batch.column_by_name("name").unwrap().as_ref(), 0),
     "early"
   );
+  assert_eq!(
+    binary_value(batch.column_by_name("geometry").unwrap().as_ref(), 0),
+    point_early
+  );
 
   let kv = kv_map(&output);
   assert!(kv.contains_key("geo"));
@@ -180,6 +217,12 @@ fn optimize_job_writes_sorted_point_output_and_metadata() {
   assert_eq!(geodisplay["index"]["xColumn"], "x");
   assert_eq!(geodisplay["index"]["yColumn"], "y");
   assert_eq!(geodisplay["index"]["wkid"], 4326);
+  assert!(
+    geodisplay["index"]["wkt"]
+      .as_str()
+      .unwrap()
+      .contains("WGS 84")
+  );
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["authority"], "EPSG");
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
 }
@@ -223,6 +266,7 @@ fn optimize_job_writes_covering_bbox_for_reprojected_points() {
       layer: None,
       geometry_column: None,
       input_wkid: None,
+      output_wkid: 4326,
       covering: true,
       overwrite: true,
       progress: false,
@@ -265,13 +309,18 @@ fn optimize_job_reprojects_geoparquet_point_output_to_wgs84() {
     Field::new("name", DataType::Utf8, false),
     Field::new("geometry", DataType::Binary, true),
   ]));
-  let (mx, my) = transform_point_between_epsg(1.0, 1.0, 4326, 3857);
-  let projected_point = wkb_point(mx, my);
+  let (ignored_x, ignored_y) = transform_point_between_epsg(40.0, 30.0, 4326, 3857);
+  let (selected_x, selected_y) = transform_point_between_epsg(1.0, 1.0, 4326, 3857);
+  let ignored_point = wkb_point(ignored_x, ignored_y);
+  let selected_point = wkb_point(selected_x, selected_y);
   let batch = RecordBatch::try_new(
     schema.clone(),
     vec![
-      Arc::new(StringArray::from(vec!["projected"])),
-      Arc::new(BinaryArray::from(vec![Some(projected_point.as_slice())])),
+      Arc::new(StringArray::from(vec!["ignored", "selected"])),
+      Arc::new(BinaryArray::from(vec![
+        Some(ignored_point.as_slice()),
+        Some(selected_point.as_slice()),
+      ])),
     ],
   )
   .unwrap();
@@ -290,11 +339,15 @@ fn optimize_job_reprojects_geoparquet_point_output_to_wgs84() {
       output: output.clone(),
       output_files: None,
       compression: None,
-      row_range: RowRange::default(),
+      row_range: RowRange {
+        start: 1,
+        num: Some(1),
+      },
       layer: None,
       geometry_column: None,
       input_wkid: None,
-      covering: false,
+      output_wkid: 4326,
+      covering: true,
       overwrite: true,
       progress: false,
       explain: false,
@@ -307,6 +360,10 @@ fn optimize_job_reprojects_geoparquet_point_output_to_wgs84() {
     .unwrap();
   let batches = runtime().block_on(df.collect()).unwrap();
   let batch = &batches[0];
+  assert_eq!(
+    string_value(batch.column_by_name("name").unwrap().as_ref(), 0),
+    "selected"
+  );
   let x = batch
     .column_by_name("x")
     .unwrap()
@@ -329,12 +386,25 @@ fn optimize_job_reprojects_geoparquet_point_output_to_wgs84() {
 
   let kv = kv_map(&output);
   let geo: serde_json::Value = serde_json::from_str(kv.get("geo").unwrap()).unwrap();
+  let geodisplay: serde_json::Value = serde_json::from_str(kv.get("geodisplay").unwrap()).unwrap();
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
-  let bbox = geo["columns"]["geometry"]["bbox"].as_array().unwrap();
-  assert_close(bbox[0].as_f64().unwrap(), 1.0);
-  assert_close(bbox[1].as_f64().unwrap(), 1.0);
-  assert_close(bbox[2].as_f64().unwrap(), 1.0);
-  assert_close(bbox[3].as_f64().unwrap(), 1.0);
+  let selected_extent = Extent2D {
+    xmin: 1.0,
+    ymin: 1.0,
+    xmax: 1.0,
+    ymax: 1.0,
+  };
+  assert_json_extent(&geo["columns"]["geometry"]["bbox"], selected_extent);
+  assert_json_extent(&geodisplay["index"]["fullExtent"], selected_extent);
+  assert_eq!(geodisplay["index"]["wkid"], 4326);
+  assert!(
+    geodisplay["index"]["wkt"]
+      .as_str()
+      .unwrap()
+      .contains("WGS 84")
+  );
+  assert!(!kv.get("geo").unwrap().contains("3857"));
+  assert!(!kv.get("geodisplay").unwrap().contains("3857"));
 }
 
 #[test]
@@ -379,6 +449,7 @@ fn optimize_job_writes_non_point_display_struct_and_metadata() {
       layer: None,
       geometry_column: None,
       input_wkid: None,
+      output_wkid: 4326,
       covering: false,
       overwrite: true,
       progress: false,
@@ -418,6 +489,12 @@ fn optimize_job_writes_non_point_display_struct_and_metadata() {
   assert_eq!(geodisplay["index"]["type"], "xz");
   assert_eq!(geodisplay["index"]["encoding"], "esriPBF");
   assert_eq!(geodisplay["index"]["wkid"], 4326);
+  assert!(
+    geodisplay["index"]["wkt"]
+      .as_str()
+      .unwrap()
+      .contains("WGS 84")
+  );
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["authority"], "EPSG");
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
   let levels = geodisplay["index"]["levels"].as_array().unwrap();
@@ -432,6 +509,40 @@ fn optimize_job_writes_non_point_display_struct_and_metadata() {
   assert_eq!(levels[1]["level"], 2);
   assert_eq!(levels[1]["resolution"], 0.1757808984375);
   assert_eq!(levels[1]["scale"], 73957190.94896367);
+}
+
+#[test]
+fn non_wgs84_output_panics_before_filesystem_mutation_in_both_modes() {
+  for output_wkid in [3857, 4269] {
+    for output_mode in [GeoParquetOutputMode::Plain, GeoParquetOutputMode::Optimized] {
+      let temp = TempDir::new().unwrap();
+      let input = temp.path().join("missing-input.parquet");
+      let output = temp.path().join("must-not-exist.parquet");
+      let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        runtime().block_on(run_optimize_job(OptimizeJobOptions {
+          input: input.to_string_lossy().into_owned(),
+          input_format: None,
+          output: output.clone(),
+          output_files: None,
+          compression: None,
+          row_range: RowRange::default(),
+          layer: None,
+          geometry_column: None,
+          input_wkid: None,
+          output_wkid,
+          covering: false,
+          overwrite: true,
+          progress: false,
+          explain: false,
+          output_mode,
+        }))
+      }));
+
+      assert!(panic.is_err());
+      assert!(!output.exists());
+      assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
+    }
+  }
 }
 
 #[test]
@@ -472,6 +583,7 @@ fn optimize_job_writes_covering_bbox_for_non_point_output() {
       layer: None,
       geometry_column: None,
       input_wkid: None,
+      output_wkid: 4326,
       covering: true,
       overwrite: true,
       progress: false,
@@ -544,6 +656,7 @@ fn optimize_job_replaces_existing_non_point_geodisplay_column() {
       layer: None,
       geometry_column: None,
       input_wkid: None,
+      output_wkid: 4326,
       covering: false,
       overwrite: true,
       progress: false,
@@ -629,6 +742,7 @@ fn optimize_job_sorts_non_point_rows_across_multiple_input_batches() {
       layer: None,
       geometry_column: None,
       input_wkid: None,
+      output_wkid: 4326,
       covering: false,
       overwrite: true,
       progress: false,
@@ -672,9 +786,12 @@ fn optimize_job_writes_range_partitioned_multi_file_output() {
     Field::new("name", DataType::Utf8, false),
     Field::new("geometry", DataType::Binary, true),
   ]));
-  let point_a = wkb_point(8.0, 8.0);
-  let point_b = wkb_point(1.0, 1.0);
-  let point_c = wkb_point(4.0, 4.0);
+  let point_a_xy = transform_point_between_epsg(8.0, 8.0, 4326, 3857);
+  let point_b_xy = transform_point_between_epsg(1.0, 1.0, 4326, 3857);
+  let point_c_xy = transform_point_between_epsg(4.0, 4.0, 4326, 3857);
+  let point_a = wkb_point(point_a_xy.0, point_a_xy.1);
+  let point_b = wkb_point(point_b_xy.0, point_b_xy.1);
+  let point_c = wkb_point(point_c_xy.0, point_c_xy.1);
   let batch = RecordBatch::try_new(
     schema.clone(),
     vec![
@@ -692,7 +809,7 @@ fn optimize_job_writes_range_partitioned_multi_file_output() {
     &schema,
     &[batch],
     parquet::basic::Compression::SNAPPY,
-    &[geoparquet_kv("geometry", &["Point"])],
+    &[geoparquet_kv_with_epsg("geometry", &["Point"], 3857)],
   );
 
   runtime()
@@ -706,6 +823,7 @@ fn optimize_job_writes_range_partitioned_multi_file_output() {
       layer: None,
       geometry_column: None,
       input_wkid: None,
+      output_wkid: 4326,
       covering: false,
       overwrite: true,
       progress: false,
@@ -720,6 +838,31 @@ fn optimize_job_writes_range_partitioned_multi_file_output() {
   let batches = runtime().block_on(df.collect()).unwrap();
   let total_rows: usize = batches.iter().map(|batch| batch.num_rows()).sum();
   assert_eq!(total_rows, 3);
+  for batch in &batches {
+    let x = batch
+      .column_by_name("x")
+      .unwrap()
+      .as_any()
+      .downcast_ref::<Float64Array>()
+      .unwrap();
+    let y = batch
+      .column_by_name("y")
+      .unwrap()
+      .as_any()
+      .downcast_ref::<Float64Array>()
+      .unwrap();
+    for row_index in 0..batch.num_rows() {
+      let geometry = binary_value(
+        batch.column_by_name("geometry").unwrap().as_ref(),
+        row_index,
+      );
+      let (geometry_x, geometry_y) = point_xy_from_wkb(&geometry).unwrap();
+      assert_close(geometry_x, x.value(row_index));
+      assert_close(geometry_y, y.value(row_index));
+      assert!((1.0 - 1.0e-5..=8.0 + 1.0e-5).contains(&geometry_x));
+      assert!((1.0 - 1.0e-5..=8.0 + 1.0e-5).contains(&geometry_y));
+    }
+  }
   let range_dirs = std::fs::read_dir(&output_dir)
     .unwrap()
     .map(|entry| entry.unwrap().path())
@@ -739,6 +882,28 @@ fn optimize_job_writes_range_partitioned_multi_file_output() {
     .collect::<Vec<_>>();
   lower_bounds.sort_unstable();
   assert!(lower_bounds.windows(2).all(|pair| pair[0] < pair[1]));
+
+  let files = parquet_files(&output_dir);
+  assert_eq!(files.len(), 2);
+  for file in &files {
+    let metadata = kv_map(file);
+    let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").unwrap()).unwrap();
+    let geodisplay: serde_json::Value =
+      serde_json::from_str(metadata.get("geodisplay").unwrap()).unwrap();
+    assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
+    assert_json_extent(
+      &geo["columns"]["geometry"]["bbox"],
+      Extent2D {
+        xmin: 1.0,
+        ymin: 1.0,
+        xmax: 8.0,
+        ymax: 8.0,
+      },
+    );
+    assert_eq!(geodisplay["index"]["wkid"], 4326);
+    assert!(!metadata.get("geo").unwrap().contains("3857"));
+    assert!(!metadata.get("geodisplay").unwrap().contains("3857"));
+  }
 
   for range_dir in range_dirs {
     let df = runtime()
@@ -815,6 +980,7 @@ fn optimize_job_row_range_writes_requested_input_rows() {
       layer: None,
       geometry_column: None,
       input_wkid: None,
+      output_wkid: 4326,
       covering: false,
       overwrite: true,
       progress: false,
@@ -842,7 +1008,7 @@ fn optimize_job_row_range_writes_requested_input_rows() {
 }
 
 #[test]
-fn plain_geoparquet_preserves_rows_without_sop_metadata() {
+fn plain_geoparquet_preserves_same_crs_wkb_and_rows_without_sop_metadata() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("optimized-points.parquet");
   let output = temp.path().join("passthrough.parquet");
@@ -901,6 +1067,7 @@ fn plain_geoparquet_preserves_rows_without_sop_metadata() {
       layer: None,
       geometry_column: None,
       input_wkid: None,
+      output_wkid: 4326,
       covering: false,
       overwrite: true,
       progress: false,
@@ -927,6 +1094,10 @@ fn plain_geoparquet_preserves_rows_without_sop_metadata() {
     .unwrap();
   assert_eq!(z_codes.value(0), 2);
   assert_eq!(z_codes.value(1), 1);
+  assert_eq!(
+    binary_value(batch.column_by_name("geometry").unwrap().as_ref(), 0),
+    point_a
+  );
 
   let output_metadata = kv_map(&output);
   assert_eq!(output_metadata.get("geodisplay"), None);
@@ -972,6 +1143,7 @@ fn plain_geoparquet_writes_covering_bbox() {
       layer: None,
       geometry_column: None,
       input_wkid: None,
+      output_wkid: 4326,
       covering: true,
       overwrite: true,
       progress: false,
@@ -989,6 +1161,103 @@ fn plain_geoparquet_writes_covering_bbox() {
     geo["columns"]["geometry"]["covering"]["bbox"]["xmin"],
     serde_json::json!(["bbox", "xmin"])
   );
+}
+
+#[test]
+fn plain_geoparquet_reprojects_wkb_covering_extent_and_crs() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("points-3857.parquet");
+  let output = temp.path().join("points-4326.parquet");
+
+  let schema = Arc::new(Schema::new(vec![
+    Field::new("name", DataType::Utf8, false),
+    Field::new("geometry", DataType::Binary, true),
+  ]));
+  let ignored_xy = transform_point_between_epsg(40.0, 30.0, 4326, 3857);
+  let selected_xy = transform_point_between_epsg(1.0, 1.0, 4326, 3857);
+  let ignored_point = wkb_point(ignored_xy.0, ignored_xy.1);
+  let selected_point = wkb_point(selected_xy.0, selected_xy.1);
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![
+      Arc::new(StringArray::from(vec!["ignored", "selected", "missing"])),
+      Arc::new(BinaryArray::from(vec![
+        Some(ignored_point.as_slice()),
+        Some(selected_point.as_slice()),
+        None,
+      ])),
+    ],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv_with_epsg("geometry", &["Point"], 3857)],
+  );
+
+  runtime()
+    .block_on(run_optimize_job(OptimizeJobOptions {
+      input: input.to_string_lossy().into_owned(),
+      input_format: None,
+      output: output.clone(),
+      output_files: None,
+      compression: None,
+      row_range: RowRange {
+        start: 1,
+        num: Some(2),
+      },
+      layer: None,
+      geometry_column: None,
+      input_wkid: None,
+      output_wkid: 4326,
+      covering: true,
+      overwrite: true,
+      progress: false,
+      explain: false,
+      output_mode: GeoParquetOutputMode::Plain,
+    }))
+    .unwrap();
+
+  let dataframe = runtime()
+    .block_on(read_parquet_df(output.to_str().unwrap()))
+    .unwrap();
+  let batches = runtime().block_on(dataframe.collect()).unwrap();
+  let batch = &batches[0];
+  assert_eq!(batch.num_rows(), 2);
+  assert_eq!(
+    string_value(batch.column_by_name("name").unwrap().as_ref(), 0),
+    "selected"
+  );
+  let geometry = binary_value(batch.column_by_name("geometry").unwrap().as_ref(), 0);
+  let (output_x, output_y) = point_xy_from_wkb(&geometry).unwrap();
+  assert_close(output_x, 1.0);
+  assert_close(output_y, 1.0);
+
+  let bbox = batch
+    .column_by_name("bbox")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap();
+  assert_close(struct_f64_value(bbox, "xmin", 0), 1.0);
+  assert_close(struct_f64_value(bbox, "ymin", 0), 1.0);
+  assert_close(struct_f64_value(bbox, "xmax", 0), 1.0);
+  assert_close(struct_f64_value(bbox, "ymax", 0), 1.0);
+  assert!(bbox.is_null(1));
+
+  let geo: serde_json::Value = serde_json::from_str(kv_map(&output).get("geo").unwrap()).unwrap();
+  assert_covering_metadata(&geo);
+  assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
+  let extent = geo["columns"]["geometry"]["bbox"].as_array().unwrap();
+  assert_close(extent[0].as_f64().unwrap(), 1.0);
+  assert_close(extent[1].as_f64().unwrap(), 1.0);
+  assert_close(extent[2].as_f64().unwrap(), 1.0);
+  assert_close(extent[3].as_f64().unwrap(), 1.0);
+  let geo_text = kv_map(&output).get("geo").unwrap().clone();
+  assert!(!geo_text.contains("3857"));
+  assert!(!geo_text.contains(&ignored_xy.0.to_string()));
 }
 
 #[test]
@@ -1031,6 +1300,7 @@ fn optimize_job_rejects_covering_when_bbox_column_exists() {
       layer: None,
       geometry_column: None,
       input_wkid: None,
+      output_wkid: 4326,
       covering: true,
       overwrite: true,
       progress: false,
@@ -1088,6 +1358,7 @@ fn optimize_job_errors_when_explicit_geometry_column_lacks_crs_metadata() {
       layer: None,
       geometry_column: Some("geometry".to_string()),
       input_wkid: None,
+      output_wkid: 4326,
       covering: false,
       overwrite: true,
       progress: false,
@@ -1108,6 +1379,7 @@ fn optimize_job_errors_when_explicit_geometry_column_lacks_crs_metadata() {
       layer: None,
       geometry_column: Some("geometry".to_string()),
       input_wkid: Some(3857),
+      output_wkid: 4326,
       covering: false,
       overwrite: true,
       progress: false,
@@ -1118,7 +1390,7 @@ fn optimize_job_errors_when_explicit_geometry_column_lacks_crs_metadata() {
   let geo: serde_json::Value = serde_json::from_str(kv_map(&output).get("geo").unwrap()).unwrap();
   assert_eq!(
     geo["columns"]["geometry"]["crs"]["id"]["code"],
-    serde_json::json!(3857)
+    serde_json::json!(4326)
   );
 }
 
@@ -1164,6 +1436,7 @@ fn optimize_job_scans_when_geometry_type_metadata_is_missing() {
       layer: None,
       geometry_column: None,
       input_wkid: None,
+      output_wkid: 4326,
       covering: false,
       overwrite: true,
       progress: false,
@@ -1214,6 +1487,7 @@ fn optimize_job_rejects_input_wkid_when_crs_metadata_exists() {
       layer: None,
       geometry_column: None,
       input_wkid: Some(3857),
+      output_wkid: 4326,
       covering: false,
       overwrite: true,
       progress: false,
@@ -1263,6 +1537,7 @@ fn optimize_job_accepts_single_layer_geopackage_input() {
       layer: None,
       geometry_column: None,
       input_wkid: None,
+      output_wkid: 4326,
       covering: false,
       overwrite: true,
       progress: false,
@@ -1333,7 +1608,8 @@ fn optimize_job_reprojects_geopackage_polygon_output_to_wgs84() {
       layer: None,
       geometry_column: None,
       input_wkid: None,
-      covering: false,
+      output_wkid: 4326,
+      covering: true,
       overwrite: true,
       progress: false,
       explain: false,
@@ -1393,15 +1669,51 @@ fn optimize_job_reprojects_geopackage_polygon_output_to_wgs84() {
   assert_close(ymin.value(0), 0.0);
   assert_close(xmax.value(0), 1.0);
   assert_close(ymax.value(0), 1.0);
+  let level_zero = display.column_by_name("level_0").unwrap();
+  assert!(!binary_value(level_zero.as_ref(), 0).is_empty());
+
+  let covering = batch
+    .column_by_name("bbox")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap();
+  assert_close(struct_f64_value(covering, "xmin", 0), 0.0);
+  assert_close(struct_f64_value(covering, "ymin", 0), 0.0);
+  assert_close(struct_f64_value(covering, "xmax", 0), 1.0);
+  assert_close(struct_f64_value(covering, "ymax", 0), 1.0);
 
   let kv = kv_map(&output);
   let geo: serde_json::Value = serde_json::from_str(kv.get("geo").unwrap()).unwrap();
+  let geodisplay: serde_json::Value = serde_json::from_str(kv.get("geodisplay").unwrap()).unwrap();
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
-  let bbox = geo["columns"]["geometry"]["bbox"].as_array().unwrap();
-  assert_close(bbox[0].as_f64().unwrap(), 0.0);
-  assert_close(bbox[1].as_f64().unwrap(), 0.0);
-  assert_close(bbox[2].as_f64().unwrap(), 1.0);
-  assert_close(bbox[3].as_f64().unwrap(), 1.0);
+  let target_extent = Extent2D {
+    xmin: 0.0,
+    ymin: 0.0,
+    xmax: 1.0,
+    ymax: 1.0,
+  };
+  assert_covering_metadata(&geo);
+  assert_json_extent(&geo["columns"]["geometry"]["bbox"], target_extent);
+  assert_json_extent(&geodisplay["index"]["fullExtent"], target_extent);
+  assert_eq!(geodisplay["index"]["wkid"], 4326);
+  assert!(
+    geodisplay["index"]["wkt"]
+      .as_str()
+      .unwrap()
+      .contains("WGS 84")
+  );
+  assert_eq!(geodisplay["index"]["levels"][0]["column"], "level_0");
+  assert_eq!(
+    geodisplay["index"]["levels"][0]["resolution"],
+    0.70312359375
+  );
+  assert_eq!(
+    geodisplay["index"]["levels"][0]["transform"]["scale"][0],
+    0.70312359375
+  );
+  assert!(!kv.get("geo").unwrap().contains("3857"));
+  assert!(!kv.get("geodisplay").unwrap().contains("3857"));
 }
 
 #[test]
@@ -1456,6 +1768,7 @@ fn optimize_job_selects_requested_geopackage_layer() {
       layer: Some("polygons".to_string()),
       geometry_column: None,
       input_wkid: None,
+      output_wkid: 4326,
       covering: false,
       overwrite: true,
       progress: false,

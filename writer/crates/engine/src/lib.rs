@@ -4,7 +4,7 @@
 //!
 //! - [`session`] configures DataFusion memory, partitioning, and disk spilling.
 //! - [`read`] converts lazy DataFrames into ordered or partitioned batch streams.
-//! - [`plan`] validates file-versus-directory output layouts before execution.
+//! - [`output_layout`] resolves file-versus-directory output layouts before execution.
 //! - [`mod@write`] configures DataFusion Parquet sinks.
 //!
 //! Geospatial policy intentionally remains outside this crate. The `spatial` crate decides
@@ -13,7 +13,7 @@
 
 #![warn(missing_docs)]
 
-pub mod plan;
+pub mod output_layout;
 pub mod read;
 pub mod session;
 pub mod write;

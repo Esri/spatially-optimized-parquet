@@ -50,8 +50,12 @@ datasets. Use `--input-format gpkg|parquet` for extensionless or unconventional 
 Both output modes write GeoParquet:
 
 - The default writes Spatially Optimized GeoParquet with spatial ordering and display columns.
-- `--no-optimization` writes plain GeoParquet, preserving source geometry coordinates and CRS
-  without SOP display columns or spatial sorting.
+- `--no-optimization` writes plain GeoParquet without SOP display columns or spatial sorting.
+
+Both modes default to `--out-sr 4326`. When the source uses another CRS, the writer reprojects the
+selected WKB rows and derives every output coordinate, extent, covering bbox, GeoParquet CRS/bbox,
+and optimized geodisplay field from the WGS84 result. The current command intentionally panics
+before opening input or mutating output for any `--out-sr` other than `4326`.
 
 When Parquet geometry lacks CRS metadata, pass `--geometry-column <NAME> --in-sr <LATEST_WKID>`.
 The writer scans WKB to infer geometry types and the selected-row extent. `--in-sr` fails when
@@ -67,6 +71,8 @@ The Rust workspace separates source integration, format-neutral analysis, and ou
 - `spatial::analysis` derives geometry family, extent, dimensions, and CRS after both sources
   converge on the `InputSource` boundary.
 - `spatial::job` stays thin. It validates resources and routes plain or optimized output.
+- `spatial::output::reprojection` owns the shared CRS comparison, WKB transformation, point,
+  bounds, and target-extent expressions used by both output modes.
 - `spatial::output::optimized::clustering` owns Z and XZ ordering algorithms.
 - `spatial::output::optimized::multiscale` owns level planning, quantization, traversal, payload,
   and wire encoding.

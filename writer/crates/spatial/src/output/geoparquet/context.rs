@@ -22,15 +22,15 @@ use crate::output::optimized::multiscale::geometry_extent_from_wkb;
 
 /// Stores normalized source geometry facts required by either GeoParquet output workflow.
 #[derive(Debug, Clone)]
-pub struct GeoParquetContext {
+pub struct SourceGeoParquetContext {
   /// Stores the selected WKB geometry column.
   pub geometry_spec: GeometrySpec,
   /// Stores the exact source geometry kinds.
   pub geometry_types: Vec<GeometryKind>,
   /// Stores the selected-row extent in source coordinates.
-  pub full_extent: Extent2D,
+  pub source_extent: Extent2D,
   /// Stores the source coordinate reference system.
-  pub spatial_reference: SpatialReferenceInfo,
+  pub source_spatial_reference: SpatialReferenceInfo,
   /// Stores the display category used by optional SOP processing.
   pub geometry_type: DisplayGeometryType,
   /// Stores the point or non-point processing family.
@@ -52,13 +52,13 @@ pub(crate) fn validate_covering_configuration(covering: bool, schema: &Schema) -
 }
 
 /// Resolve geometry, CRS, exact type, and extent for the selected rows.
-pub async fn resolve_context(
+pub async fn resolve_source_context(
   input: &dyn InputSource,
   schema: &Schema,
   explicit_geometry_column: Option<&str>,
   input_wkid: Option<u32>,
   row_range: RowRange,
-) -> Result<GeoParquetContext> {
+) -> Result<SourceGeoParquetContext> {
   let geometry_spec = resolve_geometry_spec(
     schema,
     input.inferred_geometry_spec()?,
@@ -75,7 +75,7 @@ pub async fn resolve_context(
   let requires_scan = !row_range.is_full()
     || source_geometry.geometry_types.is_empty()
     || source_geometry.bbox.is_none();
-  let (geometry_types, full_extent) = if requires_scan {
+  let (geometry_types, source_extent) = if requires_scan {
     scan_geometry_metadata(input, &geometry_spec.column, row_range).await?
   } else {
     (
@@ -91,7 +91,7 @@ pub async fn resolve_context(
     .projjson
     .clone()
     .context("missing input CRS metadata")?;
-  let spatial_reference = spatial_reference_info(&projjson)?;
+  let source_spatial_reference = spatial_reference_info(&projjson)?;
   let has_z = source_geometry.has_z;
   let has_m = source_geometry.has_m;
 
@@ -99,17 +99,17 @@ pub async fn resolve_context(
     column: geometry_spec.column.clone(),
     encoding: GeometryEncoding::Wkb,
     geometry_types: geometry_types.clone(),
-    bbox: Some(full_extent),
+    bbox: Some(source_extent),
     projjson: Some(projjson),
     has_z,
     has_m,
   });
 
-  Ok(GeoParquetContext {
+  Ok(SourceGeoParquetContext {
     geometry_spec,
     geometry_types,
-    full_extent,
-    spatial_reference,
+    source_extent,
+    source_spatial_reference,
     geometry_type,
     geometry_family,
     has_z,
@@ -122,8 +122,8 @@ pub async fn resolve_context(
 pub fn build_geo_metadata(
   geometry_column: &str,
   geometry_types: &[GeometryKind],
-  full_extent: Extent2D,
-  spatial_reference: &SpatialReferenceInfo,
+  output_extent: Extent2D,
+  output_spatial_reference: &SpatialReferenceInfo,
   has_z: bool,
   has_m: bool,
   covering: bool,
@@ -150,15 +150,15 @@ pub fn build_geo_metadata(
   column.insert(
     "bbox".to_string(),
     serde_json::json!([
-      full_extent.xmin,
-      full_extent.ymin,
-      full_extent.xmax,
-      full_extent.ymax
+      output_extent.xmin,
+      output_extent.ymin,
+      output_extent.xmax,
+      output_extent.ymax
     ]),
   );
   column.insert(
     "crs".to_string(),
-    spatial_reference
+    output_spatial_reference
       .projjson
       .clone()
       .context("missing output CRS PROJJSON")?,

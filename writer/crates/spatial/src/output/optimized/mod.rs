@@ -10,7 +10,6 @@ pub mod multiscale;
 pub(crate) mod partitioning;
 pub(crate) mod plan;
 pub(crate) mod prepare;
-pub(crate) mod reprojection;
 mod run;
 mod workflow;
 pub(crate) mod write;

@@ -29,7 +29,7 @@ use datafusion::physical_plan::{
   metrics::{Count, ExecutionPlanMetricsSet, MetricBuilder, MetricsSet},
   stream::RecordBatchStreamAdapter,
 };
-use engine::plan::output_paths;
+use engine::output_layout::resolved_output_paths;
 use engine::write::{create_datafusion_parquet_options, parse_compression};
 use futures_util::StreamExt;
 use indicatif::ProgressBar;
@@ -56,7 +56,7 @@ pub(crate) async fn write_optimized_output(
 ) -> Result<u64> {
   let compression = parse_compression(request.compression.unwrap_or("snappy"))?;
   let writer_options = create_datafusion_parquet_options(compression, &prepared.kv_metadata);
-  let multi_file_output = request.output_plan.parts > 1;
+  let multi_file_output = request.output_layout.parts > 1;
   let write_bar = row_bar(
     request.progress,
     write_stage_message(WriteStagePhase::Reading, multi_file_output),
@@ -68,12 +68,12 @@ pub(crate) async fn write_optimized_output(
       .context("partition column should exist for multi-file output")?;
     write_parquet_with_metric_polling(
       prepared.dataframe,
-      &request.output_plan.path.to_string_lossy(),
+      &request.output_layout.path.to_string_lossy(),
       vec![partition_column.to_string()],
       MultiFileWriteConfig {
         partition_column: partition_column.to_string(),
         sort_column: sort_column_name(&prepared.analysis).to_string(),
-        bucket_count: request.output_plan.parts,
+        bucket_count: request.output_layout.parts,
         drop_sort_column_after_sort: prepared.retained_sort_column.is_some(),
       },
       writer_options,
@@ -83,7 +83,7 @@ pub(crate) async fn write_optimized_output(
     )
     .await?
   } else {
-    let output_path = output_paths(request.output_plan)?
+    let output_path = resolved_output_paths(request.output_layout)?
       .into_iter()
       .next()
       .context("missing output path")?

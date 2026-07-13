@@ -14,7 +14,7 @@ use crate::output::optimized::multiscale::{
   TEMP_BOUNDS_COLUMN, TEMP_POINT_COORDS_COLUMN, TEMP_REPROJECTED_GEOMETRY_COLUMN, TEMP_XMAX_COLUMN,
   TEMP_XMIN_COLUMN, TEMP_XZ_CODE_COLUMN, TEMP_YMAX_COLUMN, TEMP_YMIN_COLUMN,
 };
-use crate::output::optimized::reprojection::{TransformSpec, reproject_geometry_expr};
+use crate::output::reprojection::{TransformSpec, reproject_geometry_expr};
 use crate::progress::finish_row_bar;
 use anyhow::Result;
 use datafusion::functions::core::expr_ext::FieldAccessor;

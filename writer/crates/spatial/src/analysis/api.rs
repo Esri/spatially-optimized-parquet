@@ -9,7 +9,7 @@ use super::types::{DisplayJobAnalysis, SpatialReferenceInfo};
 use crate::geometry::GeometrySpec;
 use crate::input::{InputSource, RowRange};
 use crate::metadata::source::SourceDatasetMetadata;
-use crate::output::optimized::reprojection::TransformSpec;
+use crate::output::reprojection::TransformSpec;
 
 /// Analyze the complete input without progress callbacks or reprojection.
 pub async fn analyze_display_job(

@@ -10,8 +10,8 @@ use crate::diagnostics::{explain_stage_note, explain_timing};
 use crate::geometry::GeometrySpec;
 use crate::input::materialized::input_dataframe_for_job;
 use crate::metadata::source::SourceDatasetMetadata;
-use crate::output::geoparquet::resolve_context as resolve_geoparquet_context;
-use crate::output::optimized::reprojection::ReprojectionPlan;
+use crate::output::geoparquet::resolve_source_context;
+use crate::output::reprojection::ReprojectionPlan;
 use crate::progress::{finish_row_bar, row_bar};
 
 use super::OptimizeOutputRequest;
@@ -23,9 +23,7 @@ use super::dataframe::{
   build_narrow_helper_projection_dataframe, prepare_spatially_ordered_dataframe,
 };
 use super::metadata::build_optimized_metadata;
-use super::multiscale::{
-  DISPLAY_OUTPUT_WKID, TEMP_REPROJECTED_GEOMETRY_COLUMN, create_geometry_encodings,
-};
+use super::multiscale::{TEMP_REPROJECTED_GEOMETRY_COLUMN, create_geometry_encodings};
 use super::plan::{partition_column_name, sort_column_name, validate_partition_column};
 
 /// Stores source geometry and reprojection decisions shared by optimization stages.
@@ -49,7 +47,7 @@ pub(crate) struct PreparedOptimizeOutput {
 pub(crate) async fn build_spatial_planning_context(
   request: &OptimizeOutputRequest<'_>,
 ) -> Result<SpatialPlanningContext> {
-  let geoparquet = resolve_geoparquet_context(
+  let source_context = resolve_source_context(
     request.input,
     request.source_schema,
     request.geometry_column,
@@ -58,15 +56,15 @@ pub(crate) async fn build_spatial_planning_context(
   )
   .await?;
   let reprojection = ReprojectionPlan::from_source_metadata(
-    &geoparquet.source_metadata,
-    &geoparquet.geometry_spec.column,
-    DISPLAY_OUTPUT_WKID,
+    &source_context.source_metadata,
+    &source_context.geometry_spec.column,
+    request.output_wkid,
   )?;
   Ok(SpatialPlanningContext {
-    source_metadata: geoparquet.source_metadata,
-    geometry_spec: geoparquet.geometry_spec,
+    source_metadata: source_context.source_metadata,
+    geometry_spec: source_context.geometry_spec,
     reprojection,
-    geometry_type: geoparquet.geometry_type,
+    geometry_type: source_context.geometry_type,
   })
 }
 
@@ -81,11 +79,11 @@ pub(crate) async fn prepare_optimized_output(
   let encodings = match analysis.geometry_family {
     GeometryFamily::Point => Vec::new(),
     GeometryFamily::NonPoint => {
-      create_geometry_encodings(DISPLAY_OUTPUT_WKID, analysis.geometry_type)?
+      create_geometry_encodings(request.output_wkid, analysis.geometry_type)?
     }
   };
   let partition_column =
-    (request.output_plan.parts > 1).then_some(partition_column_name(&analysis));
+    (request.output_layout.parts > 1).then_some(partition_column_name(&analysis));
   validate_partition_column(request.source_schema, partition_column)?;
   let ordered_request = OrderedDataframeRequest {
     input: request.input,
@@ -93,7 +91,7 @@ pub(crate) async fn prepare_optimized_output(
     source_schema: request.source_schema,
     row_range: request.row_range,
     materialized_batches: request.materialized_batches,
-    output_parts: request.output_plan.parts,
+    output_parts: request.output_layout.parts,
     total_input_rows: request.total_input_rows,
     progress: request.progress,
     explain: request.explain,
@@ -160,7 +158,7 @@ async fn analyze_optimized_geometry(
     explain_timing(request.explain, "Analyzing geometry", Duration::ZERO);
     analysis_bar.inc(request.total_input_rows);
     analysis
-  } else if request.output_plan.parts > 1 {
+  } else if request.output_layout.parts > 1 {
     let helper_dataframe = build_narrow_helper_projection_dataframe(
       input_dataframe_for_job(
         request.input,

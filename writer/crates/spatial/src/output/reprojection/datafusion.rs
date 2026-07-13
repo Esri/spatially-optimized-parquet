@@ -1,4 +1,4 @@
-//! Implements typed DataFusion expressions for optimized geometry reprojection.
+//! Implements typed DataFusion expressions for geometry reprojection.
 
 use std::any::Any;
 use std::sync::{Arc, OnceLock};
@@ -16,8 +16,8 @@ use crate::analysis::DisplayGeometryType;
 use crate::output::geometry::{
   BinaryValueAccess, geometry_signature, map_geometry_to_binary, to_datafusion_error,
 };
-use crate::output::optimized::multiscale::point_xy_from_wkb;
 
+use super::plan::point_xy_from_wkb;
 use super::{PreparedTransform, TransformSpec};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

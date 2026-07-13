@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 use arrow_schema::SchemaRef;
-use engine::plan::{OutputPlan, validate_output};
+use engine::output_layout::{OutputLayout, resolve_output_layout};
 use engine::session::{DataFusionSession, new_datafusion_session};
 
 use crate::diagnostics::{configure_explain_session, explain_stage_note, explain_timing};
@@ -15,10 +15,10 @@ use crate::input::materialized::{materialize_selected_http_range, validate_http_
 use crate::input::{
   InputOpenOptions, InputSource, RowRange, SourceFormat, open_input, resolve_source_format,
 };
-use crate::output::GeoParquetOutputMode;
 use crate::output::geoparquet::validate_covering_configuration;
 use crate::output::optimized::{OptimizeOutputRequest, run as run_optimized_output};
 use crate::output::plain::{PlainOutputRequest, write as write_plain_geoparquet};
+use crate::output::{GeoParquetOutputMode, validate_output_wkid};
 use crate::progress::format_elapsed;
 
 /// Configures one complete optimization or pass-through execution.
@@ -41,6 +41,8 @@ pub struct OptimizeJobOptions {
   pub geometry_column: Option<String>,
   /// Supplies an input EPSG code only when source CRS metadata is absent.
   pub input_wkid: Option<u32>,
+  /// Selects the output spatial reference.
+  pub output_wkid: u32,
   /// Enables a GeoParquet 1.1 covering bbox column.
   pub covering: bool,
   /// Allows replacement of a compatible existing output.
@@ -56,7 +58,7 @@ pub struct OptimizeJobOptions {
 /// Owns validated source, destination, and execution resources for one job.
 struct OpenedOptimizeJob {
   input: Arc<dyn InputSource>,
-  output_plan: OutputPlan,
+  output_layout: OutputLayout,
   source_schema: SchemaRef,
   total_input_rows: u64,
   session: DataFusionSession,
@@ -64,6 +66,7 @@ struct OpenedOptimizeJob {
 
 /// Execute one spatial optimization job from provider selection through durable output.
 pub async fn run_optimize_job(options: OptimizeJobOptions) -> Result<()> {
+  validate_output_wkid(options.output_wkid);
   let job_start = Instant::now();
   let job = open_optimize_job(&options).await?;
   let materialized_row_range = materialize_selected_http_range(
@@ -79,11 +82,12 @@ pub async fn run_optimize_job(options: OptimizeJobOptions) -> Result<()> {
     let rows_written = write_plain_geoparquet(PlainOutputRequest {
       input: job.input.as_ref(),
       session: job.session.context(),
-      output_plan: &job.output_plan,
+      output_layout: &job.output_layout,
       row_range: options.row_range,
       materialized_batches: materialized_row_range.as_deref(),
       geometry_column: options.geometry_column.as_deref(),
       input_wkid: options.input_wkid,
+      output_wkid: options.output_wkid,
       covering: options.covering,
       compression: options.compression.as_deref(),
     })
@@ -97,13 +101,14 @@ pub async fn run_optimize_job(options: OptimizeJobOptions) -> Result<()> {
     run_optimized_output(OptimizeOutputRequest {
       input: job.input.as_ref(),
       session: job.session.context(),
-      output_plan: &job.output_plan,
+      output_layout: &job.output_layout,
       source_schema: job.source_schema.as_ref(),
       total_input_rows: job.total_input_rows,
       row_range: options.row_range,
       materialized_batches: materialized_row_range.as_deref(),
       geometry_column: options.geometry_column.as_deref(),
       input_wkid: options.input_wkid,
+      output_wkid: options.output_wkid,
       covering: options.covering,
       compression: options.compression.as_deref(),
       progress: options.progress,
@@ -128,7 +133,8 @@ async fn open_optimize_job(options: &OptimizeJobOptions) -> Result<OpenedOptimiz
     },
   )
   .await?;
-  let output_plan = validate_output(&options.output, options.output_files, options.overwrite)?;
+  let output_layout =
+    resolve_output_layout(&options.output, options.output_files, options.overwrite)?;
   let source_schema = input.schema()?;
   validate_covering_configuration(options.covering, source_schema.as_ref())?;
   let discovered_rows = input.total_rows()?;
@@ -139,14 +145,14 @@ async fn open_optimize_job(options: &OptimizeJobOptions) -> Result<OpenedOptimiz
     options,
     discovered_rows,
     total_input_rows,
-    output_plan.parts,
+    output_layout.parts,
   );
 
   let session = new_datafusion_session()?;
   configure_explain_session(session.context(), options.explain);
   Ok(OpenedOptimizeJob {
     input,
-    output_plan,
+    output_layout,
     source_schema,
     total_input_rows,
     session,
@@ -181,8 +187,9 @@ fn explain_run_configuration(
       .unwrap_or_else(|| "all".to_string())
   );
   eprintln!(
-    "[explain] output_path={} overwrite={} progress={}",
+    "[explain] output_path={} output_wkid={} overwrite={} progress={}",
     options.output.display(),
+    options.output_wkid,
     options.overwrite,
     options.progress,
   );

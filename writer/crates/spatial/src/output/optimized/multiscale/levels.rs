@@ -1,15 +1,18 @@
 //! Plans the multiscale geometry representations emitted for non-point features.
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 
 use crate::analysis::DisplayGeometryType;
 use crate::metadata::output::{MultiscaleLevel, QuantizationTransform};
+use crate::output::{DEFAULT_OUTPUT_WKID, WEB_MERCATOR_OUTPUT_WKID};
 
 /// Stores the maximum display hierarchy level advertised in output metadata.
 pub const DEFAULT_MAX_LEVEL: u32 = 20;
-/// Stores the only coordinate system currently supported for display payload output.
-pub const DISPLAY_OUTPUT_WKID: u32 = 4326;
+/// Stores the WGS84 angular resolution used for the first multiscale level.
 const FIRST_LEVEL_RESOLUTION: f64 = 0.70312359375;
+/// Stores the Web Mercator resolution equivalent to the first WGS84 level.
+const FIRST_PROJECTED_LEVEL_RESOLUTION: f64 = 78_271.360_420_986_54;
+/// Stores the WGS84 map scale denominator used for the first multiscale level.
 const FIRST_LEVEL_SCALE: f64 = 295_828_763.795_854_7;
 const MAX_MULTISCALE_LEVEL: u16 = 16;
 
@@ -30,20 +33,17 @@ pub struct GeometryEncoding {
   pub min_length: usize,
 }
 
-/// Build the supported even-numbered display encodings for WGS84 output.
+/// Build the supported even-numbered display encodings for the target spatial reference.
 pub fn create_geometry_encodings(
   output_wkid: u32,
   geometry_type: DisplayGeometryType,
 ) -> Result<Vec<GeometryEncoding>> {
-  if output_wkid != DISPLAY_OUTPUT_WKID {
-    bail!(
-      "multiscale display optimization currently only supports output WKID {}",
-      DISPLAY_OUTPUT_WKID
-    );
-  }
-
   let min_length = min_vertex_count(geometry_type);
-  let mut resolution = FIRST_LEVEL_RESOLUTION;
+  let mut resolution = match output_wkid {
+    DEFAULT_OUTPUT_WKID => FIRST_LEVEL_RESOLUTION,
+    WEB_MERCATOR_OUTPUT_WKID => FIRST_PROJECTED_LEVEL_RESOLUTION,
+    _ => todo!("multiscale levels for output WKID {output_wkid}"),
+  };
   let mut scale = FIRST_LEVEL_SCALE;
   let mut encodings = Vec::new();
 
@@ -95,9 +95,9 @@ mod tests {
   use super::*;
 
   #[test]
-  fn creates_even_levels() {
+  fn creates_even_wgs84_levels() {
     let encodings =
-      create_geometry_encodings(DISPLAY_OUTPUT_WKID, DisplayGeometryType::Polygon).unwrap();
+      create_geometry_encodings(DEFAULT_OUTPUT_WKID, DisplayGeometryType::Polygon).unwrap();
     assert_eq!(encodings.first().unwrap().level, 0);
     assert_eq!(encodings.last().unwrap().level, 16);
     assert_eq!(encodings[0].min_length, 3);
@@ -113,12 +113,22 @@ mod tests {
   }
 
   #[test]
-  fn rejects_non_wgs84_output() {
-    let error = create_geometry_encodings(3857, DisplayGeometryType::Polygon).unwrap_err();
-    assert!(
-      error
-        .to_string()
-        .contains("currently only supports output WKID 4326")
+  fn creates_web_mercator_levels() {
+    let encodings =
+      create_geometry_encodings(WEB_MERCATOR_OUTPUT_WKID, DisplayGeometryType::Polygon).unwrap();
+    assert_eq!(encodings[0].resolution, FIRST_PROJECTED_LEVEL_RESOLUTION);
+    assert_eq!(
+      encodings[0].transform.scale,
+      [
+        FIRST_PROJECTED_LEVEL_RESOLUTION,
+        FIRST_PROJECTED_LEVEL_RESOLUTION,
+        1.0,
+        1.0
+      ]
+    );
+    assert_eq!(
+      encodings[1].resolution,
+      FIRST_PROJECTED_LEVEL_RESOLUTION / 4.0
     );
   }
 }

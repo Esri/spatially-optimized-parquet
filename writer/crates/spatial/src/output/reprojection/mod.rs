@@ -1,4 +1,4 @@
-//! Exposes optimized reprojection planning and typed DataFusion expressions.
+//! Exposes shared reprojection planning and typed DataFusion expressions.
 
 mod datafusion;
 mod plan;

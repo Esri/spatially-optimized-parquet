@@ -11,9 +11,10 @@
 //! Bounds transformations densify edges because nonlinear projections can move extrema away from
 //! the original corners.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use gdal::spatial_ref::{AxisMappingStrategy, CoordTransform, SpatialRef};
 use gdal::vector::Geometry;
+use geo_traits::{CoordTrait, GeometryTrait, GeometryType, PointTrait};
 use serde_json::Value;
 
 use crate::analysis::{DisplayGeometryType, Extent2D, SpatialReferenceInfo};
@@ -171,7 +172,7 @@ impl PreparedTransform {
     geometry_type: DisplayGeometryType,
   ) -> Result<Extent2D> {
     if matches!(geometry_type, DisplayGeometryType::Point) {
-      let (x, y) = crate::output::optimized::multiscale::point_xy_from_wkb(bytes)?;
+      let (x, y) = point_xy_from_wkb(bytes)?;
       let (x, y) = self.transform_point(x, y)?;
       return Ok(Extent2D {
         xmin: x,
@@ -234,4 +235,15 @@ fn spatial_ref_from_definition(definition: &str) -> Result<SpatialRef> {
     SpatialRef::from_definition(definition).context("load spatial reference definition")?;
   spatial_ref.set_axis_mapping_strategy(AxisMappingStrategy::TraditionalGisOrder);
   Ok(spatial_ref)
+}
+
+pub(super) fn point_xy_from_wkb(bytes: &[u8]) -> Result<(f64, f64)> {
+  let geometry = wkb::reader::read_wkb(bytes)?;
+  match geometry.as_type() {
+    GeometryType::Point(point) => point
+      .coord()
+      .map(|coord| coord.x_y())
+      .context("point missing coordinate"),
+    _ => bail!("expected point geometry"),
+  }
 }
