@@ -71,12 +71,13 @@ The Rust workspace separates source integration, format-neutral analysis, and ou
 - `spatial::analysis` derives geometry family, extent, dimensions, and CRS after both sources
   converge on the `InputSource` boundary.
 - `spatial::job` stays thin. It validates resources and routes plain or optimized output.
+- `spatial::geoparquet` owns source metadata normalization, GeoParquet JSON, covering behavior,
+  and the plain GeoParquet workflow.
+- `spatial::optimized` owns the optimized workflow, geodisplay metadata, spatial ordering, and
+  multiscale geometry encoding.
 - `spatial::output::reprojection` owns the shared CRS comparison, WKB transformation, point,
   bounds, and target-extent expressions used by both output modes.
-- `spatial::output::optimized::clustering` owns Z and XZ ordering algorithms.
-- `spatial::output::optimized::multiscale` owns level planning, quantization, traversal, payload,
-  and wire encoding.
-- `spatial::udf` exposes clustering, multiscale, and reprojection operations to DataFusion through
-  typed builders while keeping implementations and signatures private.
+- `spatial::output` retains shared writing, geometry-array, output-mode, spatial-reference, and
+  reprojection mechanics.
 
 See [architecture.md](architecture.md) for the complete execution flow and module map.

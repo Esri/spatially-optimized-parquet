@@ -11,10 +11,10 @@ use futures_util::future::BoxFuture;
 use gdal::vector::LayerAccess;
 
 use crate::geometry::{GeometryEncoding, GeometrySpec};
+use crate::geoparquet::metadata::source::SourceDatasetMetadata;
 use crate::input::{
   InputBatchStream, InputOpenOptions, InputSource, RowRange, SourceFormat, require_local_path,
 };
-use crate::metadata::source::SourceDatasetMetadata;
 
 use super::arrow::{gpkg_batch_stream, load_schema, open_gpkg_batch_state};
 use super::metadata::{build_geometry_metadata, collect_layer_summaries, select_layer_name};

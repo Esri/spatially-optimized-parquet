@@ -5,9 +5,9 @@ use serde_json::Value;
 
 use super::{DisplayGeometryType, DisplayJobAnalysis, Extent2D, SpatialReferenceInfo};
 use crate::geometry::{GeometryKind, GeometrySpec, geometry_kind_from_wkb_type};
+use crate::geoparquet::metadata::source::SourceGeometryMetadata;
 use crate::input::RowRange;
-use crate::metadata::source::SourceGeometryMetadata;
-use crate::output::optimized::multiscale::geometry_extent_from_trait;
+use crate::optimized::multiscale::geometry_extent_from_trait;
 use crate::output::reprojection::TransformSpec;
 
 const ANALYSIS_PROGRESS_MAX_CHUNK_ROWS: usize = 8_192;

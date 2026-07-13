@@ -11,13 +11,14 @@ use engine::output_layout::{OutputLayout, resolve_output_layout};
 use engine::session::{DataFusionSession, new_datafusion_session};
 
 use crate::diagnostics::{configure_explain_session, explain_stage_note, explain_timing};
+use crate::geoparquet::{
+  PlainOutputRequest, validate_covering_configuration, write as write_plain_geoparquet,
+};
 use crate::input::materialized::{materialize_selected_http_range, validate_http_row_range};
 use crate::input::{
   InputOpenOptions, InputSource, RowRange, SourceFormat, open_input, resolve_source_format,
 };
-use crate::output::geoparquet::validate_covering_configuration;
-use crate::output::optimized::{OptimizeOutputRequest, run as run_optimized_output};
-use crate::output::plain::{PlainOutputRequest, write as write_plain_geoparquet};
+use crate::optimized::{OptimizeOutputRequest, run as run_optimized_output};
 use crate::output::{GeoParquetOutputMode, validate_output_wkid};
 use crate::progress::format_elapsed;
 

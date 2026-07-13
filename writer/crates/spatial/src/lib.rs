@@ -5,17 +5,19 @@
 //! resolves geometry category, extent, dimensions, and coordinate reference system. [`job`]
 //! opens validated resources and routes execution into plain or optimized output workflows.
 //!
-//! Lower-level modules isolate the algorithms behind that flow. [`output::optimized`] owns
-//! spatial clustering, typed DataFusion expressions, reprojection, multiscale geometry encoding,
-//! and optimized planning. [`metadata`] defines normalized source and serialized output models.
+//! Lower-level modules isolate the algorithms behind that flow. [`geoparquet`] owns the
+//! GeoParquet product contract and plain workflow. [`optimized`] owns spatial clustering,
+//! multiscale geometry encoding, geodisplay metadata, and optimized planning. [`output`] retains
+//! mechanics shared by both products.
 
 #![warn(missing_docs)]
 
 pub mod analysis;
 pub mod diagnostics;
 pub mod geometry;
+pub mod geoparquet;
 pub mod input;
 pub mod job;
-pub mod metadata;
+pub mod optimized;
 pub mod output;
 pub mod progress;

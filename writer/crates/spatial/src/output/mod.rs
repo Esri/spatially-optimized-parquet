@@ -1,14 +1,9 @@
-//! Defines the two GeoParquet products emitted by the writer.
+//! Provides mechanics shared by the GeoParquet output products.
 //!
-//! [`plain`] preserves source coordinates and omits SOP display optimization. [`optimized`]
-//! adds reprojection, spatial ordering, and display payloads. Both workflows share geometry,
-//! CRS, extent, covering, and GeoParquet metadata rules through [`geoparquet`].
+//! Product contracts and workflows live in [`crate::geoparquet`] and [`crate::optimized`].
 
 pub(crate) mod geometry;
-pub mod geoparquet;
 mod mode;
-pub mod optimized;
-pub mod plain;
 pub(crate) mod reprojection;
 mod spatial_reference;
 pub(crate) mod write;

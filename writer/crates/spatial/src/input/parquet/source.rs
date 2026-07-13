@@ -16,8 +16,8 @@ use parquet::file::metadata::KeyValue;
 use url::Url;
 
 use crate::geometry::{GeometryEncoding, GeometrySpec};
+use crate::geoparquet::metadata::source::SourceDatasetMetadata;
 use crate::input::{InputBatchStream, InputSource, RowRange};
-use crate::metadata::source::SourceDatasetMetadata;
 
 use super::metadata::{
   build_source_geometry_metadata, file_metadata, load_geo_metadata, map_geo_geometry_type,

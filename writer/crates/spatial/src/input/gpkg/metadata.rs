@@ -6,8 +6,8 @@ use gdal_sys::OGRwkbGeometryType;
 
 use crate::analysis::Extent2D;
 use crate::geometry::{GeometryEncoding, GeometryKind};
+use crate::geoparquet::metadata::source::SourceGeometryMetadata;
 use crate::input::InputOpenOptions;
-use crate::metadata::source::SourceGeometryMetadata;
 
 const MAX_GEOMETRY_TYPE_SAMPLE_FEATURES: usize = 64;
 

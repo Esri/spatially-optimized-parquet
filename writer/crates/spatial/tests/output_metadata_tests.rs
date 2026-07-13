@@ -1,7 +1,6 @@
 use spatial::analysis::Extent2D;
-use spatial::metadata::output::{
-  DisplayIndexXz, DisplayIndexZ, GeodisplayMetadata, MultiscaleLevel, QuantizationTransform,
-};
+use spatial::optimized::metadata::{DisplayIndexXz, DisplayIndexZ, GeodisplayMetadata};
+use spatial::optimized::multiscale::{MultiscaleLevel, QuantizationTransform};
 
 #[test]
 fn point_metadata_serializes_spec_keys() {

@@ -17,7 +17,6 @@ use crate::output::geometry::{
   BinaryValueAccess, geometry_signature, map_geometry_to_binary, to_datafusion_error,
 };
 
-use super::plan::point_xy_from_wkb;
 use super::{PreparedTransform, TransformSpec};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -237,9 +236,8 @@ where
   for index in 0..array.len() {
     match array.value_opt(index) {
       Some(bytes) => {
-        let (x, y) = point_xy_from_wkb(bytes).map_err(to_datafusion_error)?;
         let (x, y) = transform
-          .transform_point(x, y)
+          .transform_point_from_wkb(bytes)
           .map_err(to_datafusion_error)?;
         xs.push(Some(x));
         ys.push(Some(y));

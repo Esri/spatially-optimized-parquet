@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use crate::analysis::Extent2D;
 use crate::geometry::{GeometryEncoding, GeometryKind};
-use crate::metadata::source::SourceGeometryMetadata;
+use crate::geoparquet::metadata::source::SourceGeometryMetadata;
 
 /// Parse and require consistent GeoParquet metadata across all discovered files.
 pub(super) fn load_geo_metadata(

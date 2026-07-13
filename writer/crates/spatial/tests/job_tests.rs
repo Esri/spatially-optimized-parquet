@@ -17,8 +17,8 @@ use tokio::runtime::Runtime;
 use spatial::analysis::Extent2D;
 use spatial::input::RowRange;
 use spatial::job::{OptimizeJobOptions, run_optimize_job};
+use spatial::optimized::multiscale::{geometry_extent_from_wkb, point_xy_from_wkb};
 use spatial::output::GeoParquetOutputMode;
-use spatial::output::optimized::multiscale::{geometry_extent_from_wkb, point_xy_from_wkb};
 use wkb::writer::WriteOptions;
 
 mod common;

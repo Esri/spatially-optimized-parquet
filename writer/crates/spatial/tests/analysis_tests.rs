@@ -14,8 +14,8 @@ use spatial::analysis::{
   analyze_display_job_with_progress,
 };
 use spatial::geometry::{GeometryEncoding, GeometryKind, GeometrySpec};
+use spatial::geoparquet::metadata::source::{SourceDatasetMetadata, SourceGeometryMetadata};
 use spatial::input::{InputBatchStream, InputSource, RowRange};
-use spatial::metadata::source::{SourceDatasetMetadata, SourceGeometryMetadata};
 use tempfile::TempDir;
 
 mod common;

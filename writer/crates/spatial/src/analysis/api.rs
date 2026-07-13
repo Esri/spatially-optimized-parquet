@@ -7,8 +7,8 @@ use super::derive::{
 };
 use super::types::{DisplayJobAnalysis, SpatialReferenceInfo};
 use crate::geometry::GeometrySpec;
+use crate::geoparquet::metadata::source::SourceDatasetMetadata;
 use crate::input::{InputSource, RowRange};
-use crate::metadata::source::SourceDatasetMetadata;
 use crate::output::reprojection::TransformSpec;
 
 /// Analyze the complete input without progress callbacks or reprojection.

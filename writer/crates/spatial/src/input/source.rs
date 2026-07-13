@@ -16,7 +16,7 @@ use futures_util::Stream;
 use futures_util::future::BoxFuture;
 
 use crate::geometry::GeometrySpec;
-use crate::metadata::source::SourceDatasetMetadata;
+use crate::geoparquet::metadata::source::SourceDatasetMetadata;
 
 use super::is_http_url;
 

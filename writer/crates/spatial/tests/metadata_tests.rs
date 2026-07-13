@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use parquet::file::metadata::KeyValue;
+use spatial::geoparquet::resolve_source_context;
 use spatial::input::RowRange;
-use spatial::output::geoparquet::resolve_source_context;
 use tempfile::TempDir;
 
 mod common;
