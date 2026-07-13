@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use gdal::spatial_ref::{AxisMappingStrategy, SpatialRef};
 use serde_json::Value;
 
-use crate::analysis::SpatialReferenceInfo;
+use crate::output::SpatialReferenceInfo;
 
 use super::PreparedTransform;
 

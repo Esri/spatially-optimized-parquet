@@ -1,11 +1,13 @@
+use anyhow::Result;
 use arrow_array::RecordBatch;
 use arrow_schema::Schema;
+use async_trait::async_trait;
 use engine::output_layout::OutputLayout;
 
 use crate::input::{InputSource, RowRange};
 
-/// Carries validated source and runtime controls into optimized output execution.
-pub(crate) struct OptimizeOutputRequest<'a> {
+/// Stores validated job resources and controls for one output stage.
+pub(crate) struct OutputStageContext<'a> {
   pub(crate) input: &'a dyn InputSource,
   pub(crate) session: &'a engine::SessionContext,
   pub(crate) output_layout: &'a OutputLayout,
@@ -20,4 +22,16 @@ pub(crate) struct OptimizeOutputRequest<'a> {
   pub(crate) compression: Option<&'a str>,
   pub(crate) progress: bool,
   pub(crate) explain: bool,
+}
+
+/// Represents the durable output produced by an output stage.
+pub(crate) struct OutputStageResult {
+  pub(crate) rows_written: u64,
+}
+
+/// Defines one statically dispatched GeoParquet output pipeline.
+#[async_trait]
+pub(crate) trait OutputStage {
+  /// Write one GeoParquet product from validated job resources.
+  async fn execute(&self, context: OutputStageContext<'_>) -> Result<OutputStageResult>;
 }

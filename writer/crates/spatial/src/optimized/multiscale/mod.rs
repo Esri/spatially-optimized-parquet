@@ -18,7 +18,6 @@ pub use payload::{
   FlatGeometryPayload, GeometryPayload, flat_geometry_payload_from_wkb,
   geometry_payload_from_geometry, geometry_payload_from_wkb,
 };
-pub(crate) use traversal::geometry_extent_from_trait;
 pub use traversal::{geometry_extent_from_wkb, point_xy_from_wkb};
 pub use wire::{
   GeometryEncodeScratch, encode_flat_geometry_owned_with_scratch,

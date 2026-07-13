@@ -4,7 +4,7 @@ use gdal::spatial_ref::SpatialRef;
 use gdal::vector::{LayerAccess, geometry_type_to_name};
 use gdal_sys::OGRwkbGeometryType;
 
-use crate::analysis::Extent2D;
+use crate::geometry::Extent2D;
 use crate::geometry::{GeometryEncoding, GeometryKind};
 use crate::geoparquet::metadata::source::SourceGeometryMetadata;
 use crate::input::InputOpenOptions;
@@ -182,17 +182,16 @@ pub(super) fn build_geometry_metadata(
     )
   };
   let (mut geometry_kind, mut has_z, mut has_m) = map_geometry_type(geometry_type);
-  if geometry_kind.is_none() {
-    if let Some(SampledGeometryType::Concrete {
+  if geometry_kind.is_none()
+    && let Some(SampledGeometryType::Concrete {
       geometry_kind: sampled_kind,
       has_z: sampled_has_z,
       has_m: sampled_has_m,
     }) = sample_geometry_type(layer)
-    {
-      geometry_kind = Some(sampled_kind);
-      has_z = sampled_has_z;
-      has_m = sampled_has_m;
-    }
+  {
+    geometry_kind = Some(sampled_kind);
+    has_z = sampled_has_z;
+    has_m = sampled_has_m;
   }
   let projjson = field_spatial_ref
     .or_else(|| layer.spatial_ref())

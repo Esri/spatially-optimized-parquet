@@ -12,12 +12,14 @@ use futures_util::StreamExt;
 use gdal::spatial_ref::{AxisMappingStrategy, SpatialRef};
 use serde_json::Value;
 
-use crate::analysis::{DisplayGeometryType, Extent2D, GeometryFamily, SpatialReferenceInfo};
-use crate::geometry::{GeometryEncoding, GeometryKind, GeometrySpec, geometry_kind_from_wkb};
+use crate::geometry::{
+  Extent2D, GeometryEncoding, GeometryKind, GeometryShape, GeometrySpec, geometry_kind_from_wkb,
+};
 use crate::geoparquet::metadata::source::{SourceDatasetMetadata, SourceGeometryMetadata};
 use crate::input::{InputSource, RowRange};
 use crate::optimized::multiscale::COVERING_BBOX_COLUMN;
 use crate::optimized::multiscale::geometry_extent_from_wkb;
+use crate::output::SpatialReferenceInfo;
 
 /// Stores normalized source geometry facts required by either GeoParquet output workflow.
 #[derive(Debug, Clone)]
@@ -30,10 +32,8 @@ pub struct SourceGeoParquetContext {
   pub source_extent: Extent2D,
   /// Stores the source coordinate reference system.
   pub source_spatial_reference: SpatialReferenceInfo,
-  /// Stores the display category used by optional SOP processing.
-  pub geometry_type: DisplayGeometryType,
-  /// Stores the point or non-point processing family.
-  pub geometry_family: GeometryFamily,
+  /// Stores the normalized geometry shape used by plain output mechanics.
+  pub geometry_shape: GeometryShape,
   /// Indicates whether source metadata declares Z ordinates.
   pub has_z: bool,
   /// Indicates whether source metadata declares M ordinates.
@@ -84,8 +84,7 @@ pub async fn resolve_source_context(
         .context("missing source geometry extent")?,
     )
   };
-  let geometry_type = display_geometry_type(&geometry_types)?;
-  let geometry_family = geometry_type.family();
+  let geometry_shape = GeometryShape::from_kinds(&geometry_types)?;
   let projjson = source_geometry
     .projjson
     .clone()
@@ -109,8 +108,7 @@ pub async fn resolve_source_context(
     geometry_types,
     source_extent,
     source_spatial_reference,
-    geometry_type,
-    geometry_family,
+    geometry_shape,
     has_z,
     has_m,
     source_metadata,
@@ -194,10 +192,25 @@ fn spatial_reference_info(projjson: &Value) -> Result<SpatialReferenceInfo> {
     SpatialRef::from_definition(&definition).context("load input spatial reference")?;
   spatial_ref.set_axis_mapping_strategy(AxisMappingStrategy::TraditionalGisOrder);
   Ok(SpatialReferenceInfo {
-    wkid: spatial_ref.auth_code().ok().map(|code| code as u32),
+    wkid: projjson.get("id").and_then(supported_authority_code),
     wkt: spatial_ref.to_wkt().ok(),
     projjson: Some(projjson.clone()),
   })
+}
+
+fn supported_authority_code(value: &Value) -> Option<u32> {
+  let authority = value.get("authority").and_then(Value::as_str);
+  let code = value.get("code").and_then(value_as_u32);
+  matches!(authority, Some("EPSG" | "ESRI"))
+    .then_some(code)
+    .flatten()
+}
+
+fn value_as_u32(value: &Value) -> Option<u32> {
+  value
+    .as_u64()
+    .and_then(|value| u32::try_from(value).ok())
+    .or_else(|| value.as_str().and_then(|value| value.parse::<u32>().ok()))
 }
 
 async fn scan_geometry_metadata(
@@ -310,24 +323,4 @@ impl BinaryValues for BinaryViewArray {
   fn value_opt(&self, index: usize) -> Option<&[u8]> {
     (!self.is_null(index)).then(|| self.value(index))
   }
-}
-
-fn display_geometry_type(geometry_types: &[GeometryKind]) -> Result<DisplayGeometryType> {
-  let mut display_type = None;
-  for geometry_kind in geometry_types {
-    let next = match geometry_kind {
-      GeometryKind::Point => DisplayGeometryType::Point,
-      GeometryKind::MultiPoint => DisplayGeometryType::MultiPoint,
-      GeometryKind::LineString | GeometryKind::MultiLineString => DisplayGeometryType::Polyline,
-      GeometryKind::Polygon | GeometryKind::MultiPolygon => DisplayGeometryType::Polygon,
-      GeometryKind::GeometryCollection | GeometryKind::Unknown => {
-        bail!("unsupported geometry kind: {geometry_kind:?}")
-      }
-    };
-    if display_type.is_some_and(|current| current != next) {
-      bail!("mixed display geometry categories are not supported");
-    }
-    display_type = Some(next);
-  }
-  display_type.context("unable to determine display geometry type")
 }

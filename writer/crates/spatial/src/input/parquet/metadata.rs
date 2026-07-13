@@ -6,7 +6,7 @@ use parquet::arrow::arrow_reader::ArrowReaderMetadata;
 use parquet::file::metadata::KeyValue;
 use serde_json::Value;
 
-use crate::analysis::Extent2D;
+use crate::geometry::Extent2D;
 use crate::geometry::{GeometryEncoding, GeometryKind};
 use crate::geoparquet::metadata::source::SourceGeometryMetadata;
 

@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::analysis::DisplayGeometryType;
+use crate::optimized::OptimizedGeometryType;
 use crate::output::{DEFAULT_OUTPUT_WKID, WEB_MERCATOR_OUTPUT_WKID};
 
 /// Stores the maximum display hierarchy level advertised in output metadata.
@@ -60,7 +60,7 @@ pub struct GeometryEncoding {
 /// Build the supported even-numbered display encodings for the target spatial reference.
 pub fn create_geometry_encodings(
   output_wkid: u32,
-  geometry_type: DisplayGeometryType,
+  geometry_type: OptimizedGeometryType,
 ) -> Result<Vec<GeometryEncoding>> {
   let min_length = min_vertex_count(geometry_type);
   let mut resolution = match output_wkid {
@@ -106,11 +106,11 @@ pub fn metadata_levels(encodings: &[GeometryEncoding]) -> Vec<MultiscaleLevel> {
     .collect()
 }
 
-pub(super) fn min_vertex_count(geometry_type: DisplayGeometryType) -> usize {
+pub(super) fn min_vertex_count(geometry_type: OptimizedGeometryType) -> usize {
   match geometry_type {
-    DisplayGeometryType::MultiPoint | DisplayGeometryType::Point => 1,
-    DisplayGeometryType::Polyline => 2,
-    DisplayGeometryType::Polygon => 3,
+    OptimizedGeometryType::MultiPoint | OptimizedGeometryType::Point => 1,
+    OptimizedGeometryType::Polyline => 2,
+    OptimizedGeometryType::Polygon => 3,
   }
 }
 
@@ -121,7 +121,7 @@ mod tests {
   #[test]
   fn creates_even_wgs84_levels() {
     let encodings =
-      create_geometry_encodings(DEFAULT_OUTPUT_WKID, DisplayGeometryType::Polygon).unwrap();
+      create_geometry_encodings(DEFAULT_OUTPUT_WKID, OptimizedGeometryType::Polygon).unwrap();
     assert_eq!(encodings.first().unwrap().level, 0);
     assert_eq!(encodings.last().unwrap().level, 16);
     assert_eq!(encodings[0].min_length, 3);
@@ -139,7 +139,7 @@ mod tests {
   #[test]
   fn creates_web_mercator_levels() {
     let encodings =
-      create_geometry_encodings(WEB_MERCATOR_OUTPUT_WKID, DisplayGeometryType::Polygon).unwrap();
+      create_geometry_encodings(WEB_MERCATOR_OUTPUT_WKID, OptimizedGeometryType::Polygon).unwrap();
     assert_eq!(encodings[0].resolution, FIRST_PROJECTED_LEVEL_RESOLUTION);
     assert_eq!(
       encodings[0].transform.scale,

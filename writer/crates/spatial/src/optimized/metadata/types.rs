@@ -9,7 +9,7 @@
 //! retain idiomatic names. Constructors fix index discriminators to supported values, preventing
 //! callers from emitting structurally valid but semantically inconsistent metadata.
 
-use crate::analysis::Extent2D;
+use crate::geometry::Extent2D;
 use crate::optimized::multiscale::MultiscaleLevel;
 use serde::Serialize;
 
@@ -106,6 +106,54 @@ pub struct DisplayIndexXz {
   pub levels: Vec<MultiscaleLevel>,
 }
 
+/// Stores point index values before fixed metadata fields are applied.
+pub struct DisplayIndexZInput {
+  /// Names the Z-order code column.
+  pub code: String,
+  /// Names the x-coordinate column.
+  pub x_column: String,
+  /// Names the y-coordinate column.
+  pub y_column: String,
+  /// Stores coordinate quantization precision.
+  pub coordinate_precision: u32,
+  /// Stores the indexed dataset extent.
+  pub full_extent: Extent2D,
+  /// Stores the coordinate reference authority code.
+  pub wkid: Option<u32>,
+  /// Stores the coordinate reference WKT.
+  pub wkt: Option<String>,
+  /// Indicates whether coordinates contain Z ordinates.
+  pub has_z: bool,
+  /// Indicates whether coordinates contain M ordinates.
+  pub has_m: bool,
+}
+
+/// Stores non-point index values before fixed metadata fields are applied.
+pub struct DisplayIndexXzInput {
+  /// Names the XZ-order code field.
+  pub code: String,
+  /// Names the geometry payload encoding.
+  pub encoding: String,
+  /// Names the display geometry category.
+  pub geometry_type: String,
+  /// Names the feature bounds field.
+  pub bounds: String,
+  /// Stores the indexed dataset extent.
+  pub full_extent: Extent2D,
+  /// Stores the maximum XZ hierarchy depth.
+  pub max_level: u32,
+  /// Stores the coordinate reference authority code.
+  pub wkid: Option<u32>,
+  /// Stores the coordinate reference WKT.
+  pub wkt: Option<String>,
+  /// Indicates whether coordinates contain Z ordinates.
+  pub has_z: bool,
+  /// Indicates whether coordinates contain M ordinates.
+  pub has_m: bool,
+  /// Lists generated multiscale geometry columns.
+  pub levels: Vec<MultiscaleLevel>,
+}
+
 impl GeodisplayMetadata {
   /// Build metadata for a point Z-order index.
   pub fn point(index: DisplayIndexZ) -> Self {
@@ -134,62 +182,40 @@ impl GeodisplayMetadata {
 
 impl DisplayIndexZ {
   /// Build point-index metadata with fixed `z` index semantics.
-  pub fn new(
-    code: impl Into<String>,
-    x_column: impl Into<String>,
-    y_column: impl Into<String>,
-    coordinate_precision: u32,
-    full_extent: Extent2D,
-    wkid: Option<u32>,
-    wkt: Option<String>,
-    has_z: bool,
-    has_m: bool,
-  ) -> Self {
+  pub fn new(input: DisplayIndexZInput) -> Self {
     Self {
       index_type: "z",
-      code: code.into(),
-      wkid,
-      wkt,
-      x_column: x_column.into(),
-      y_column: y_column.into(),
+      code: input.code,
+      wkid: input.wkid,
+      wkt: input.wkt,
+      x_column: input.x_column,
+      y_column: input.y_column,
       z_column: None,
       m_column: None,
-      coordinate_precision,
-      full_extent,
-      has_z,
-      has_m,
+      coordinate_precision: input.coordinate_precision,
+      full_extent: input.full_extent,
+      has_z: input.has_z,
+      has_m: input.has_m,
     }
   }
 }
 
 impl DisplayIndexXz {
   /// Build non-point index metadata with fixed `xz` index semantics.
-  pub fn new(
-    code: impl Into<String>,
-    encoding: impl Into<String>,
-    geometry_type: impl Into<String>,
-    bounds: impl Into<String>,
-    full_extent: Extent2D,
-    max_level: u32,
-    wkid: Option<u32>,
-    wkt: Option<String>,
-    has_z: bool,
-    has_m: bool,
-    levels: Vec<MultiscaleLevel>,
-  ) -> Self {
+  pub fn new(input: DisplayIndexXzInput) -> Self {
     Self {
       index_type: "xz",
-      code: code.into(),
-      wkid,
-      wkt,
-      encoding: encoding.into(),
-      geometry_type: geometry_type.into(),
-      bounds: bounds.into(),
-      full_extent,
-      max_level,
-      has_z,
-      has_m,
-      levels,
+      code: input.code,
+      wkid: input.wkid,
+      wkt: input.wkt,
+      encoding: input.encoding,
+      geometry_type: input.geometry_type,
+      bounds: input.bounds,
+      full_extent: input.full_extent,
+      max_level: input.max_level,
+      has_z: input.has_z,
+      has_m: input.has_m,
+      levels: input.levels,
     }
   }
 }

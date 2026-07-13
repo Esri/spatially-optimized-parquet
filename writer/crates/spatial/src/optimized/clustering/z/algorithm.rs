@@ -1,6 +1,6 @@
 //! Computes Morton Z-order codes for point clustering.
 
-use crate::analysis::Extent2D;
+use crate::geometry::Extent2D;
 
 use super::super::DisplayCode;
 

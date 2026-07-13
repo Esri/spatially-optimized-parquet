@@ -3,5 +3,8 @@
 mod types;
 mod writer;
 
-pub use types::{DisplayIndex, DisplayIndexXz, DisplayIndexZ, GeodisplayMetadata};
+pub use types::{
+  DisplayIndex, DisplayIndexXz, DisplayIndexXzInput, DisplayIndexZ, DisplayIndexZInput,
+  GeodisplayMetadata,
+};
 pub(crate) use writer::build_optimized_metadata;

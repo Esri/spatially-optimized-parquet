@@ -17,7 +17,7 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::{col, lit};
 
-use crate::analysis::Extent2D;
+use crate::geometry::Extent2D;
 use crate::optimized::multiscale::TEMP_XZ_CODE_COLUMN;
 use crate::optimized::multiscale::geometry_extent_from_wkb;
 use crate::output::geometry::{

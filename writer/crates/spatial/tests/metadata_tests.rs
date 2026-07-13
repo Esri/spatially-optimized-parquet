@@ -1,8 +1,19 @@
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
+use anyhow::Result;
+use arrow_array::RecordBatch;
+use arrow_schema::SchemaRef;
+use engine::{DataFrame, SessionContext};
+use futures_util::future::BoxFuture;
+use futures_util::stream;
+use gdal::spatial_ref::SpatialRef;
 use parquet::file::metadata::KeyValue;
+use spatial::geometry::{Extent2D, GeometryEncoding, GeometryKind, GeometrySpec};
+use spatial::geoparquet::metadata::source::{SourceDatasetMetadata, SourceGeometryMetadata};
 use spatial::geoparquet::resolve_source_context;
-use spatial::input::RowRange;
+use spatial::input::{InputBatchStream, InputSource, RowRange};
 use tempfile::TempDir;
 
 mod common;
@@ -10,6 +21,59 @@ use common::{
   geoparquet_kv, open_parquet_input, sample_batch_with_geometry, sample_schema_with_geometry,
   wkb_point, write_parquet,
 };
+
+struct MetadataInputSource {
+  schema: SchemaRef,
+  metadata: SourceDatasetMetadata,
+  read_batch_calls: Arc<AtomicUsize>,
+}
+
+impl InputSource for MetadataInputSource {
+  fn format_name(&self) -> &'static str {
+    "metadata-test"
+  }
+
+  fn source_location(&self) -> &str {
+    "metadata-test"
+  }
+
+  fn schema(&self) -> Result<SchemaRef> {
+    Ok(self.schema.clone())
+  }
+
+  fn total_rows(&self) -> Result<u64> {
+    Ok(3)
+  }
+
+  fn inferred_geometry_spec(&self) -> Result<Option<GeometrySpec>> {
+    Ok(Some(GeometrySpec {
+      column: "geometry".into(),
+      encoding: GeometryEncoding::Wkb,
+      geometry_kind: Some(GeometryKind::Point),
+    }))
+  }
+
+  fn source_metadata(&self) -> Result<SourceDatasetMetadata> {
+    Ok(self.metadata.clone())
+  }
+
+  fn read_batches(&self, _row_range: RowRange) -> BoxFuture<'_, Result<InputBatchStream>> {
+    self.read_batch_calls.fetch_add(1, Ordering::SeqCst);
+    Box::pin(async { Ok(Box::pin(stream::empty::<Result<RecordBatch>>()) as InputBatchStream) })
+  }
+
+  fn to_dataframe<'a>(
+    &'a self,
+    _ctx: &'a SessionContext,
+    _row_range: RowRange,
+  ) -> BoxFuture<'a, Result<DataFrame>> {
+    Box::pin(async { panic!("source context should not build a DataFrame") })
+  }
+}
+
+fn epsg_projjson(wkid: u32) -> serde_json::Value {
+  serde_json::from_str(&SpatialRef::from_epsg(wkid).unwrap().to_projjson().unwrap()).unwrap()
+}
 
 #[test]
 fn inferred_geometry_spec_reads_geoparquet_primary_column() {
@@ -149,4 +213,130 @@ fn source_context_retains_resolved_crs_and_extent_in_source_metadata() {
     source_geometry.projjson,
     context.source_spatial_reference.projjson
   );
+}
+
+#[test]
+fn source_context_uses_complete_metadata_without_scanning_batches() {
+  let read_batch_calls = Arc::new(AtomicUsize::new(0));
+  let expected_extent = Extent2D {
+    xmin: -10.0,
+    ymin: 5.0,
+    xmax: 20.0,
+    ymax: 30.0,
+  };
+  let input = MetadataInputSource {
+    schema: sample_schema_with_geometry(),
+    metadata: SourceDatasetMetadata {
+      geometry: Some(SourceGeometryMetadata {
+        column: "geometry".into(),
+        encoding: GeometryEncoding::Wkb,
+        geometry_types: vec![GeometryKind::Point],
+        bbox: Some(expected_extent),
+        projjson: Some(epsg_projjson(4326)),
+        has_z: false,
+        has_m: false,
+      }),
+      passthrough_kv: Vec::new(),
+    },
+    read_batch_calls: read_batch_calls.clone(),
+  };
+
+  let context = common::runtime()
+    .block_on(resolve_source_context(
+      &input,
+      input.schema().unwrap().as_ref(),
+      None,
+      None,
+      RowRange::default(),
+    ))
+    .unwrap();
+
+  assert_eq!(context.geometry_types, vec![GeometryKind::Point]);
+  assert_eq!(context.source_extent, expected_extent);
+  assert_eq!(read_batch_calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn source_context_prefers_top_level_crs_authority_code() {
+  let mut projjson = epsg_projjson(4269);
+  projjson["datum"]["id"] = serde_json::json!({
+    "authority": "EPSG",
+    "code": 6269
+  });
+  let input = MetadataInputSource {
+    schema: sample_schema_with_geometry(),
+    metadata: SourceDatasetMetadata {
+      geometry: Some(SourceGeometryMetadata {
+        column: "geometry".into(),
+        encoding: GeometryEncoding::Wkb,
+        geometry_types: vec![GeometryKind::Point],
+        bbox: Some(Extent2D {
+          xmin: -10.0,
+          ymin: 5.0,
+          xmax: 20.0,
+          ymax: 30.0,
+        }),
+        projjson: Some(projjson),
+        has_z: false,
+        has_m: false,
+      }),
+      passthrough_kv: Vec::new(),
+    },
+    read_batch_calls: Arc::new(AtomicUsize::new(0)),
+  };
+
+  let context = common::runtime()
+    .block_on(resolve_source_context(
+      &input,
+      input.schema().unwrap().as_ref(),
+      None,
+      None,
+      RowRange::default(),
+    ))
+    .unwrap();
+
+  assert_eq!(context.source_spatial_reference.wkid, Some(4269));
+}
+
+#[test]
+fn source_context_preserves_projjson_for_unknown_crs_authority() {
+  let mut projjson = epsg_projjson(4326);
+  projjson["id"] = serde_json::json!({
+    "authority": "IGNF",
+    "code": 1234
+  });
+  let input = MetadataInputSource {
+    schema: sample_schema_with_geometry(),
+    metadata: SourceDatasetMetadata {
+      geometry: Some(SourceGeometryMetadata {
+        column: "geometry".into(),
+        encoding: GeometryEncoding::Wkb,
+        geometry_types: vec![GeometryKind::Point],
+        bbox: Some(Extent2D {
+          xmin: -10.0,
+          ymin: 5.0,
+          xmax: 20.0,
+          ymax: 30.0,
+        }),
+        projjson: Some(projjson.clone()),
+        has_z: false,
+        has_m: false,
+      }),
+      passthrough_kv: Vec::new(),
+    },
+    read_batch_calls: Arc::new(AtomicUsize::new(0)),
+  };
+
+  let context = common::runtime()
+    .block_on(resolve_source_context(
+      &input,
+      input.schema().unwrap().as_ref(),
+      None,
+      None,
+      RowRange::default(),
+    ))
+    .unwrap();
+
+  assert_eq!(context.source_spatial_reference.wkid, None);
+  assert_eq!(context.source_spatial_reference.projjson, Some(projjson));
 }

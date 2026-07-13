@@ -39,23 +39,24 @@ use crate::diagnostics::{
   explain_dataframe_verbose, explain_physical_plan, explain_stage_completion,
 };
 use crate::optimized::clustering::cluster_key_column;
+use crate::optimized::{ClusteringFamily, OptimizedContext};
+use crate::output::stage::OutputStageContext;
 use crate::output::write::write_dataframe;
 use crate::progress::{
   SINK_ROWS_METRIC, WriteStagePhase, collect_plan_progress, finish_spinner, row_bar,
   update_write_stage_bar, write_stage_message,
 };
 
-use super::OptimizeOutputRequest;
 use super::multi_file::{MultiFileWriteConfig, preserve_partitioned_sort_execs};
-use super::prepare::PreparedOptimizeOutput;
-
-/// Configure the final Parquet sink and execute the prepared output DataFrame.
+/// Configure the final Parquet sink and execute the optimized projection.
 pub(crate) async fn write_optimized_output(
-  request: &OptimizeOutputRequest<'_>,
-  prepared: PreparedOptimizeOutput,
+  request: &OutputStageContext<'_>,
+  dataframe: engine::DataFrame,
+  context: &OptimizedContext,
+  metadata: Vec<parquet::file::metadata::KeyValue>,
 ) -> Result<u64> {
   let compression = parse_compression(request.compression.unwrap_or("snappy"))?;
-  let writer_options = create_datafusion_parquet_options(compression, &prepared.kv_metadata);
+  let writer_options = create_datafusion_parquet_options(compression, &metadata);
   let multi_file_output = request.output_layout.parts > 1;
   let write_bar = row_bar(
     request.progress,
@@ -63,23 +64,28 @@ pub(crate) async fn write_optimized_output(
     request.total_input_rows,
   );
   let rows_written = if multi_file_output {
-    let partition_column = prepared
-      .partition_column
-      .context("partition column should exist for multi-file output")?;
+    let partition_column =
+      super::clustering::cluster_partition_column(context.geometry.clustering_family);
+    let retained_cluster_key = matches!(
+      context.geometry.clustering_family,
+      ClusteringFamily::NonPoint
+    );
     write_parquet_with_metric_polling(
-      prepared.dataframe,
-      &request.output_layout.path.to_string_lossy(),
-      vec![partition_column.to_string()],
-      MultiFileWriteConfig {
-        partition_column: partition_column.to_string(),
-        cluster_key_column: cluster_key_column(&prepared.analysis).to_string(),
-        bucket_count: request.output_layout.parts,
-        drop_cluster_key_after_sort: prepared.retained_cluster_key_column.is_some(),
+      dataframe,
+      PartitionedWriteRequest {
+        write_path: request.output_layout.path.to_string_lossy().into_owned(),
+        partition_by: vec![partition_column.to_string()],
+        partitioned_write: MultiFileWriteConfig {
+          partition_column: partition_column.to_string(),
+          cluster_key_column: cluster_key_column(context.geometry.clustering_family).to_string(),
+          bucket_count: request.output_layout.parts,
+          drop_cluster_key_after_sort: retained_cluster_key,
+        },
+        writer_options,
+        progress_bar: &write_bar,
+        total_input_rows: request.total_input_rows,
+        explain: request.explain,
       },
-      writer_options,
-      &write_bar,
-      request.total_input_rows,
-      request.explain,
     )
     .await?
   } else {
@@ -89,7 +95,7 @@ pub(crate) async fn write_optimized_output(
       .context("missing output path")?
       .to_string_lossy()
       .into_owned();
-    write_dataframe(prepared.dataframe, &output_path, writer_options).await?
+    write_dataframe(dataframe, &output_path, writer_options).await?
   };
   finish_spinner(
     &write_bar,
@@ -378,19 +384,23 @@ fn make_count_batch(count: u64) -> RecordBatch {
   .expect("count batch should always be valid")
 }
 
-async fn write_parquet_with_metric_polling(
-  dataframe: engine::DataFrame,
-  write_path: &str,
+struct PartitionedWriteRequest<'a> {
+  write_path: String,
   partition_by: Vec<String>,
   partitioned_write: MultiFileWriteConfig,
   writer_options: TableParquetOptions,
-  progress_bar: &ProgressBar,
+  progress_bar: &'a ProgressBar,
   total_input_rows: u64,
   explain: bool,
+}
+
+async fn write_parquet_with_metric_polling(
+  dataframe: engine::DataFrame,
+  request: PartitionedWriteRequest<'_>,
 ) -> Result<u64> {
   let (state, logical_plan) = dataframe.into_parts();
   explain_dataframe_verbose(
-    explain,
+    request.explain,
     "Writing parquet output input query",
     &state,
     &logical_plan,
@@ -399,16 +409,17 @@ async fn write_parquet_with_metric_polling(
   .await?;
   let task_context = Arc::new(TaskContext::from(&state));
   let input_plan = state.create_physical_plan(&logical_plan).await?;
-  let rewritten_input =
-    preserve_partitioned_sort_execs(input_plan, &partitioned_write).map_err(anyhow::Error::from)?;
-  let parsed_url = ListingTableUrl::parse(write_path)?;
+  let rewritten_input = preserve_partitioned_sort_execs(input_plan, &request.partitioned_write)
+    .map_err(anyhow::Error::from)?;
+  let parsed_url = ListingTableUrl::parse(&request.write_path)?;
   let sink_config = FileSinkConfig {
-    original_url: write_path.to_string(),
+    original_url: request.write_path.clone(),
     object_store_url: parsed_url.object_store(),
     file_group: Default::default(),
     table_paths: vec![parsed_url],
     output_schema: rewritten_input.schema(),
-    table_partition_cols: partition_by
+    table_partition_cols: request
+      .partition_by
       .iter()
       .map(|column| (column.to_string(), DataType::Null))
       .collect(),
@@ -416,21 +427,25 @@ async fn write_parquet_with_metric_polling(
     keep_partition_by_columns: state.config_options().execution.keep_partition_by_columns,
     file_extension: "parquet".to_string(),
   };
-  let sink = Arc::new(TrackingParquetSink::new(sink_config, writer_options));
+  let sink = Arc::new(TrackingParquetSink::new(
+    sink_config,
+    request.writer_options,
+  ));
   let physical_plan: Arc<dyn ExecutionPlan> = Arc::new(ConcurrentPartitionedParquetSinkExec::new(
     rewritten_input,
     sink,
     None,
   ));
-  explain_physical_plan(explain, "Writing parquet output", &physical_plan);
+  explain_physical_plan(request.explain, "Writing parquet output", &physical_plan);
   let stage_start = Instant::now();
+  let total_input_rows = request.total_input_rows;
 
   let done = Arc::new(AtomicBool::new(false));
-  let poller = if progress_bar.is_hidden() {
+  let poller = if request.progress_bar.is_hidden() {
     None
   } else {
     let plan = Arc::clone(&physical_plan);
-    let bar = progress_bar.clone();
+    let bar = request.progress_bar.clone();
     let done = Arc::clone(&done);
     Some(std::thread::spawn(move || {
       let mut current_phase = None;
@@ -453,7 +468,7 @@ async fn write_parquet_with_metric_polling(
     let _ = poller.join();
   }
   explain_stage_completion(
-    explain,
+    request.explain,
     "Writing parquet output",
     stage_start.elapsed(),
     &physical_plan,

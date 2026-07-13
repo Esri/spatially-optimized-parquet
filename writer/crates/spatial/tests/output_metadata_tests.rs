@@ -1,25 +1,27 @@
-use spatial::analysis::Extent2D;
-use spatial::optimized::metadata::{DisplayIndexXz, DisplayIndexZ, GeodisplayMetadata};
+use spatial::geometry::Extent2D;
+use spatial::optimized::metadata::{
+  DisplayIndexXz, DisplayIndexXzInput, DisplayIndexZ, DisplayIndexZInput, GeodisplayMetadata,
+};
 use spatial::optimized::multiscale::{MultiscaleLevel, QuantizationTransform};
 
 #[test]
 fn point_metadata_serializes_spec_keys() {
-  let metadata = GeodisplayMetadata::point(DisplayIndexZ::new(
-    "zCode",
-    "x",
-    "y",
-    20,
-    Extent2D {
+  let metadata = GeodisplayMetadata::point(DisplayIndexZ::new(DisplayIndexZInput {
+    code: "zCode".to_string(),
+    x_column: "x".to_string(),
+    y_column: "y".to_string(),
+    coordinate_precision: 20,
+    full_extent: Extent2D {
       xmin: -180.0,
       ymin: -90.0,
       xmax: 180.0,
       ymax: 90.0,
     },
-    Some(4326),
-    None,
-    false,
-    false,
-  ));
+    wkid: Some(4326),
+    wkt: None,
+    has_z: false,
+    has_m: false,
+  }));
 
   let value = serde_json::to_value(metadata).unwrap();
   let index = &value["index"];
@@ -36,23 +38,23 @@ fn point_metadata_serializes_spec_keys() {
 fn xz_metadata_serializes_bounds_and_levels() {
   let metadata = GeodisplayMetadata::xz_with_parent(
     "geodisplay",
-    DisplayIndexXz::new(
-      "xzCode",
-      "pbf",
-      "polygon",
-      "bounds",
-      Extent2D {
+    DisplayIndexXz::new(DisplayIndexXzInput {
+      code: "xzCode".to_string(),
+      encoding: "pbf".to_string(),
+      geometry_type: "polygon".to_string(),
+      bounds: "bounds".to_string(),
+      full_extent: Extent2D {
         xmin: -10.0,
         ymin: -5.0,
         xmax: 10.0,
         ymax: 5.0,
       },
-      20,
-      Some(4326),
-      None,
-      false,
-      false,
-      vec![MultiscaleLevel {
+      max_level: 20,
+      wkid: Some(4326),
+      wkt: None,
+      has_z: false,
+      has_m: false,
+      levels: vec![MultiscaleLevel {
         column: "esri-multiscale-0".into(),
         level: 0,
         resolution: 0.70312359375,
@@ -62,7 +64,7 @@ fn xz_metadata_serializes_bounds_and_levels() {
           translate: [0.0, 0.0, 0.0, 0.0],
         },
       }],
-    ),
+    }),
   );
 
   let value = serde_json::to_value(metadata).unwrap();

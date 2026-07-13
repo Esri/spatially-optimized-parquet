@@ -11,14 +11,13 @@ use engine::output_layout::{OutputLayout, resolve_output_layout};
 use engine::session::{DataFusionSession, new_datafusion_session};
 
 use crate::diagnostics::{configure_explain_session, explain_stage_note, explain_timing};
-use crate::geoparquet::{
-  PlainOutputRequest, validate_covering_configuration, write as write_plain_geoparquet,
-};
+use crate::geoparquet::{PlainGeoParquet, validate_covering_configuration};
 use crate::input::materialized::{materialize_selected_http_range, validate_http_row_range};
 use crate::input::{
   InputOpenOptions, InputSource, RowRange, SourceFormat, open_input, resolve_source_format,
 };
-use crate::optimized::{OptimizeOutputRequest, run as run_optimized_output};
+use crate::optimized::OptimizedGeoParquet;
+use crate::output::stage::{OutputStage, OutputStageContext};
 use crate::output::{GeoParquetOutputMode, validate_output_wkid};
 use crate::progress::format_elapsed;
 
@@ -79,43 +78,36 @@ pub async fn run_optimize_job(options: OptimizeJobOptions) -> Result<()> {
   )
   .await?;
 
+  let output_context = OutputStageContext {
+    input: job.input.as_ref(),
+    session: job.session.context(),
+    output_layout: &job.output_layout,
+    source_schema: job.source_schema.as_ref(),
+    total_input_rows: job.total_input_rows,
+    row_range: options.row_range,
+    materialized_batches: materialized_row_range.as_deref(),
+    geometry_column: options.geometry_column.as_deref(),
+    input_wkid: options.input_wkid,
+    output_wkid: options.output_wkid,
+    covering: options.covering,
+    compression: options.compression.as_deref(),
+    progress: options.progress,
+    explain: options.explain,
+  };
+  let output_result = match options.output_mode {
+    GeoParquetOutputMode::Plain => PlainGeoParquet.execute(output_context).await?,
+    GeoParquetOutputMode::Optimized => OptimizedGeoParquet.execute(output_context).await?,
+  };
+
   if options.output_mode == GeoParquetOutputMode::Plain {
-    let rows_written = write_plain_geoparquet(PlainOutputRequest {
-      input: job.input.as_ref(),
-      session: job.session.context(),
-      output_layout: &job.output_layout,
-      row_range: options.row_range,
-      materialized_batches: materialized_row_range.as_deref(),
-      geometry_column: options.geometry_column.as_deref(),
-      input_wkid: options.input_wkid,
-      output_wkid: options.output_wkid,
-      covering: options.covering,
-      compression: options.compression.as_deref(),
-    })
-    .await?;
     explain_stage_note(
       options.explain,
       "Plain GeoParquet",
-      &format!("wrote {rows_written} selected rows without SOP display optimization"),
+      &format!(
+        "wrote {} selected rows without SOP display optimization",
+        output_result.rows_written
+      ),
     );
-  } else {
-    run_optimized_output(OptimizeOutputRequest {
-      input: job.input.as_ref(),
-      session: job.session.context(),
-      output_layout: &job.output_layout,
-      source_schema: job.source_schema.as_ref(),
-      total_input_rows: job.total_input_rows,
-      row_range: options.row_range,
-      materialized_batches: materialized_row_range.as_deref(),
-      geometry_column: options.geometry_column.as_deref(),
-      input_wkid: options.input_wkid,
-      output_wkid: options.output_wkid,
-      covering: options.covering,
-      compression: options.compression.as_deref(),
-      progress: options.progress,
-      explain: options.explain,
-    })
-    .await?;
   }
 
   report_job_completion(&options, job_start);

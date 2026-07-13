@@ -1,6 +1,6 @@
 //! Computes XZ hierarchy codes for non-point clustering.
 
-use crate::analysis::Extent2D;
+use crate::geometry::Extent2D;
 
 use super::super::DisplayCode;
 

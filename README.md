@@ -64,17 +64,17 @@ works with both plain and optimized GeoParquet.
 
 ## Implementation layout
 
-The Rust workspace separates source integration, format-neutral analysis, and output execution:
+The Rust workspace separates source integration, GeoParquet context resolution, and output
+execution:
 
 - `spatial::input::{gpkg, parquet}` owns format-specific discovery and scanning. Each source splits
   metadata, opening, and streaming concerns into focused modules.
-- `spatial::analysis` derives geometry family, extent, dimensions, and CRS after both sources
-  converge on the `InputSource` boundary.
 - `spatial::job` stays thin. It validates resources and routes plain or optimized output.
-- `spatial::geoparquet` owns source metadata normalization, GeoParquet JSON, covering behavior,
-  and the plain GeoParquet workflow.
-- `spatial::optimized` owns the optimized workflow, geodisplay metadata, spatial ordering, and
-  multiscale geometry encoding.
+- `spatial::geoparquet` resolves geometry kinds, source extent, dimensions, and CRS after both
+  sources converge on `InputSource`. It also owns GeoParquet JSON, covering behavior, and plain
+  output.
+- `spatial::optimized` owns optimized geometry classification, target extent, geodisplay
+  metadata, spatial ordering, and multiscale geometry encoding.
 - `spatial::output::reprojection` owns the shared CRS comparison, WKB transformation, point,
   bounds, and target-extent expressions used by both output modes.
 - `spatial::output` retains shared writing, geometry-array, output-mode, spatial-reference, and

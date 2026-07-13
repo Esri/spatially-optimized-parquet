@@ -41,7 +41,7 @@ pub(super) enum ParquetInputLocation {
     store_url: Url,
     store: Arc<dyn ObjectStore>,
     object_path: ObjectPath,
-    object_meta: ObjectMeta,
+    object_meta: Box<ObjectMeta>,
   },
 }
 

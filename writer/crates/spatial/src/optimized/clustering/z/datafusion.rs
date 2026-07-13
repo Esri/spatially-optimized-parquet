@@ -17,7 +17,7 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::{col, lit};
 
-use crate::analysis::Extent2D;
+use crate::geometry::Extent2D;
 use crate::optimized::multiscale::{POINT_Z_CODE_COLUMN, point_xy_from_wkb};
 use crate::output::geometry::{
   BinaryValueAccess, geometry_signature, map_geometry_to_u64, to_datafusion_error,

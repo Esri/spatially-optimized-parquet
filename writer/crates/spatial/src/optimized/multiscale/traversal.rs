@@ -6,7 +6,8 @@ use geo_traits::{
   MultiPolygonTrait, PointTrait, PolygonTrait,
 };
 
-use crate::analysis::{DisplayGeometryType, Extent2D};
+use crate::geometry::Extent2D;
+use crate::optimized::OptimizedGeometryType;
 
 /// Decode a WKB point and return its x/y coordinate.
 pub fn point_xy_from_wkb(bytes: &[u8]) -> Result<(f64, f64)> {
@@ -38,22 +39,24 @@ pub(crate) fn geometry_extent_from_trait<G: GeometryTrait<T = f64>>(
 
 pub(super) fn visit_geometry_for_display<G: GeometryTrait<T = f64>, S: GeometryPartSink>(
   geometry: &G,
-  geometry_type: DisplayGeometryType,
+  geometry_type: OptimizedGeometryType,
   sink: &mut S,
 ) -> Result<()> {
   match (geometry_type, geometry.as_type()) {
-    (DisplayGeometryType::Point, GeometryType::Point(point)) => visit_point(point, sink),
-    (DisplayGeometryType::MultiPoint, GeometryType::MultiPoint(points)) => {
+    (OptimizedGeometryType::Point, GeometryType::Point(point)) => visit_point(point, sink),
+    (OptimizedGeometryType::MultiPoint, GeometryType::MultiPoint(points)) => {
       visit_multipoint(points, sink)
     }
-    (DisplayGeometryType::Polyline, GeometryType::LineString(line)) => {
+    (OptimizedGeometryType::Polyline, GeometryType::LineString(line)) => {
       visit_line_string(line, sink)
     }
-    (DisplayGeometryType::Polyline, GeometryType::MultiLineString(lines)) => {
+    (OptimizedGeometryType::Polyline, GeometryType::MultiLineString(lines)) => {
       visit_multiline_string(lines, sink)
     }
-    (DisplayGeometryType::Polygon, GeometryType::Polygon(polygon)) => visit_polygon(polygon, sink),
-    (DisplayGeometryType::Polygon, GeometryType::MultiPolygon(polygons)) => {
+    (OptimizedGeometryType::Polygon, GeometryType::Polygon(polygon)) => {
+      visit_polygon(polygon, sink)
+    }
+    (OptimizedGeometryType::Polygon, GeometryType::MultiPolygon(polygons)) => {
       visit_multipolygon(polygons, sink)
     }
     _ => bail!("unsupported geometry for display type {geometry_type:?}"),

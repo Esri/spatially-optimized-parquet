@@ -9,7 +9,7 @@ use gdal::vector::LayerAccess;
 use gdal_sys::OGRwkbGeometryType;
 use tempfile::TempDir;
 
-use spatial::analysis::Extent2D;
+use spatial::geometry::Extent2D;
 use spatial::geometry::GeometryKind;
 use spatial::input::{InputOpenOptions, RowRange, SourceFormat, open_input};
 

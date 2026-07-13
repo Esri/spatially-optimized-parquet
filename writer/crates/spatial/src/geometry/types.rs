@@ -1,15 +1,79 @@
-//! Defines the smallest format-independent vocabulary shared by the spatial pipeline.
-//!
-//! [`GeometryKind`] normalizes geometry declarations from GDAL, GeoParquet metadata, and WKB.
-//! [`GeometryEncoding`] describes the physical representation stored in Arrow, while
-//! [`GeometrySpec`] binds that representation to the selected source column. Input providers
-//! produce these values and analysis/output code consumes them without depending on the source
-//! format.
-//!
-//! WKB decoding helpers intentionally determine only the top-level geometry kind. Coordinate
-//! traversal, extents, reprojection, and display encoding belong to dedicated modules.
-
 use anyhow::Result;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Groups geometry shapes by point-specific or general geometry processing.
+pub enum GeometryCategory {
+  /// Uses direct point coordinate extraction.
+  Point,
+  /// Uses general geometry bounds extraction.
+  NonPoint,
+}
+
+impl GeometryCategory {
+  /// Classify one concrete source geometry kind.
+  pub fn from_kind(kind: GeometryKind) -> Result<Self> {
+    match kind {
+      GeometryKind::Point => Ok(Self::Point),
+      GeometryKind::LineString
+      | GeometryKind::MultiPoint
+      | GeometryKind::MultiLineString
+      | GeometryKind::Polygon
+      | GeometryKind::MultiPolygon => Ok(Self::NonPoint),
+      GeometryKind::GeometryCollection | GeometryKind::Unknown => {
+        anyhow::bail!("unsupported geometry kind: {kind:?}")
+      }
+    }
+  }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Normalizes concrete geometry kinds into format-independent shape groups.
+pub enum GeometryShape {
+  /// Represents single-point features.
+  Point,
+  /// Represents multipoint features.
+  MultiPoint,
+  /// Represents line string and multi-line string features.
+  Polyline,
+  /// Represents polygon and multipolygon features.
+  Polygon,
+}
+
+impl GeometryShape {
+  /// Classify one concrete source geometry kind.
+  pub fn from_kind(kind: GeometryKind) -> Result<Self> {
+    match kind {
+      GeometryKind::Point => Ok(Self::Point),
+      GeometryKind::MultiPoint => Ok(Self::MultiPoint),
+      GeometryKind::LineString | GeometryKind::MultiLineString => Ok(Self::Polyline),
+      GeometryKind::Polygon | GeometryKind::MultiPolygon => Ok(Self::Polygon),
+      GeometryKind::GeometryCollection | GeometryKind::Unknown => {
+        anyhow::bail!("unsupported geometry kind: {kind:?}")
+      }
+    }
+  }
+
+  /// Classify source geometry kinds while rejecting mixed shape groups.
+  pub fn from_kinds(kinds: &[GeometryKind]) -> Result<Self> {
+    let mut shape = None;
+    for kind in kinds {
+      let next = Self::from_kind(*kind)?;
+      if shape.is_some_and(|current| current != next) {
+        anyhow::bail!("mixed geometry shapes are not supported");
+      }
+      shape = Some(next);
+    }
+    shape.ok_or_else(|| anyhow::anyhow!("unable to determine geometry shape"))
+  }
+
+  /// Return the processing category shared by output mechanics.
+  pub fn category(self) -> GeometryCategory {
+    match self {
+      Self::Point => GeometryCategory::Point,
+      Self::MultiPoint | Self::Polyline | Self::Polygon => GeometryCategory::NonPoint,
+    }
+  }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Identifies the concrete geometry shape represented by source metadata or WKB.

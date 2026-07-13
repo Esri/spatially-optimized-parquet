@@ -86,7 +86,7 @@ async fn open_http_parquet(location: &str) -> Result<Arc<dyn InputSource>> {
       store_url,
       store,
       object_path,
-      object_meta,
+      object_meta: Box::new(object_meta),
     },
     location.to_string(),
     vec![metadata],

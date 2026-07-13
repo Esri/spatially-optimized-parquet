@@ -5,7 +5,7 @@ use datafusion::logical_expr::expr_fn::ident;
 use datafusion::logical_expr::{Expr, SortExpr, when};
 use datafusion::prelude::lit;
 
-use crate::analysis::{DisplayJobAnalysis, GeometryFamily};
+use crate::optimized::ClusteringFamily;
 use crate::optimized::multiscale::{POINT_Z_CODE_COLUMN, TEMP_XZ_CODE_COLUMN};
 
 use super::DisplayCode;
@@ -19,21 +19,21 @@ pub(crate) struct ClusterRangeBoundaries {
   pub(crate) boundaries: Vec<DisplayCode>,
 }
 
-pub(crate) fn cluster_sort_expr(analysis: &DisplayJobAnalysis) -> SortExpr {
-  ident(cluster_key_column(analysis)).sort(true, false)
+pub(crate) fn cluster_sort_expr(clustering_family: ClusteringFamily) -> SortExpr {
+  ident(cluster_key_column(clustering_family)).sort(true, false)
 }
 
-pub(crate) fn cluster_key_column(analysis: &DisplayJobAnalysis) -> &'static str {
-  match analysis.geometry_family {
-    GeometryFamily::Point => POINT_Z_CODE_COLUMN,
-    GeometryFamily::NonPoint => TEMP_XZ_CODE_COLUMN,
+pub(crate) fn cluster_key_column(clustering_family: ClusteringFamily) -> &'static str {
+  match clustering_family {
+    ClusteringFamily::Point => POINT_Z_CODE_COLUMN,
+    ClusteringFamily::NonPoint => TEMP_XZ_CODE_COLUMN,
   }
 }
 
-pub(crate) fn cluster_partition_column(analysis: &DisplayJobAnalysis) -> &'static str {
-  match analysis.geometry_family {
-    GeometryFamily::Point => POINT_RANGE_COLUMN,
-    GeometryFamily::NonPoint => NON_POINT_RANGE_COLUMN,
+pub(crate) fn cluster_partition_column(clustering_family: ClusteringFamily) -> &'static str {
+  match clustering_family {
+    ClusteringFamily::Point => POINT_RANGE_COLUMN,
+    ClusteringFamily::NonPoint => NON_POINT_RANGE_COLUMN,
   }
 }
 

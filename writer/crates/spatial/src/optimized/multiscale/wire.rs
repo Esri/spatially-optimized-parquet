@@ -105,7 +105,7 @@ mod tests {
   use geo_types::{Geometry, polygon};
 
   use super::*;
-  use crate::analysis::DisplayGeometryType;
+  use crate::optimized::OptimizedGeometryType;
   use crate::optimized::multiscale::{QuantizationTransform, geometry_payload_from_geometry};
 
   #[derive(Clone, PartialEq, Message)]
@@ -124,7 +124,8 @@ mod tests {
         (x: 1.0, y: 1.0),
         (x: 0.0, y: 0.0),
     ]);
-    let payload = geometry_payload_from_geometry(&geometry, DisplayGeometryType::Polygon).unwrap();
+    let payload =
+      geometry_payload_from_geometry(&geometry, OptimizedGeometryType::Polygon).unwrap();
     let encoding = GeometryEncoding {
       level: 0,
       column: "level_0".to_string(),

@@ -17,7 +17,7 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::col;
 
-use crate::analysis::DisplayGeometryType;
+use crate::optimized::OptimizedGeometryType;
 use crate::output::geometry::{BinaryValueAccess, to_datafusion_error};
 
 use super::{
@@ -33,7 +33,7 @@ use super::{
 /// Equality and hashing include every encoding parameter because DataFusion uses UDF
 /// identity when comparing and optimizing logical expressions.
 pub(crate) struct NonPointGeodisplayUdf {
-  geometry_type: DisplayGeometryType,
+  geometry_type: OptimizedGeometryType,
   encodings: Vec<GeometryEncoding>,
   display_fields: Fields,
   bounds_fields: Fields,
@@ -41,7 +41,7 @@ pub(crate) struct NonPointGeodisplayUdf {
 
 impl NonPointGeodisplayUdf {
   /// Build stable output fields for the selected geometry type and LOD encodings.
-  fn new(geometry_type: DisplayGeometryType, encodings: Vec<GeometryEncoding>) -> Self {
+  fn new(geometry_type: OptimizedGeometryType, encodings: Vec<GeometryEncoding>) -> Self {
     let bounds_fields = Fields::from(vec![
       Arc::new(Field::new("xmin", DataType::Float64, true)),
       Arc::new(Field::new("ymin", DataType::Float64, true)),
@@ -170,10 +170,10 @@ impl Eq for NonPointGeodisplayUdf {}
 impl Hash for NonPointGeodisplayUdf {
   fn hash<H: Hasher>(&self, state: &mut H) {
     match self.geometry_type {
-      DisplayGeometryType::Point => 0u8,
-      DisplayGeometryType::MultiPoint => 1u8,
-      DisplayGeometryType::Polyline => 2u8,
-      DisplayGeometryType::Polygon => 3u8,
+      OptimizedGeometryType::Point => 0u8,
+      OptimizedGeometryType::MultiPoint => 1u8,
+      OptimizedGeometryType::Polyline => 2u8,
+      OptimizedGeometryType::Polygon => 3u8,
     }
     .hash(state);
     self.encodings.len().hash(state);
@@ -257,7 +257,7 @@ impl ScalarUDFImpl for NonPointGeodisplayUdf {
   }
 }
 pub(crate) fn non_point_geodisplay_udf(
-  geometry_type: DisplayGeometryType,
+  geometry_type: OptimizedGeometryType,
   encodings: Vec<GeometryEncoding>,
 ) -> ScalarUDF {
   ScalarUDF::new_from_impl(NonPointGeodisplayUdf::new(geometry_type, encodings))
@@ -291,7 +291,7 @@ fn multiscale_signature() -> &'static Signature {
 
 pub(crate) fn non_point_geodisplay_expr(
   geometry_column: &str,
-  geometry_type: DisplayGeometryType,
+  geometry_type: OptimizedGeometryType,
   encodings: &[GeometryEncoding],
 ) -> Expr {
   non_point_geodisplay_udf(geometry_type, encodings.to_vec())
@@ -324,13 +324,13 @@ mod tests {
   fn assert_encoding_parameter_changes_identity(mutate: impl FnOnce(&mut GeometryEncoding)) {
     let encodings = create_geometry_encodings(
       crate::output::DEFAULT_OUTPUT_WKID,
-      DisplayGeometryType::Polygon,
+      OptimizedGeometryType::Polygon,
     )
     .expect("encodings");
-    let original = NonPointGeodisplayUdf::new(DisplayGeometryType::Polygon, encodings.clone());
+    let original = NonPointGeodisplayUdf::new(OptimizedGeometryType::Polygon, encodings.clone());
     let mut changed_encodings = encodings;
     mutate(&mut changed_encodings[0]);
-    let changed = NonPointGeodisplayUdf::new(DisplayGeometryType::Polygon, changed_encodings);
+    let changed = NonPointGeodisplayUdf::new(OptimizedGeometryType::Polygon, changed_encodings);
     assert_ne!(original, changed);
   }
 
@@ -365,30 +365,30 @@ mod tests {
   fn identity_includes_geometry_type_encoding_order_and_count() {
     let encodings = create_geometry_encodings(
       crate::output::DEFAULT_OUTPUT_WKID,
-      DisplayGeometryType::Polygon,
+      OptimizedGeometryType::Polygon,
     )
     .expect("encodings");
-    let original = NonPointGeodisplayUdf::new(DisplayGeometryType::Polygon, encodings.clone());
-    let equal = NonPointGeodisplayUdf::new(DisplayGeometryType::Polygon, encodings.clone());
+    let original = NonPointGeodisplayUdf::new(OptimizedGeometryType::Polygon, encodings.clone());
+    let equal = NonPointGeodisplayUdf::new(OptimizedGeometryType::Polygon, encodings.clone());
     assert_eq!(original, equal);
     assert_eq!(hash_udf(&original), hash_udf(&equal));
 
     let different_type =
-      NonPointGeodisplayUdf::new(DisplayGeometryType::Polyline, encodings.clone());
+      NonPointGeodisplayUdf::new(OptimizedGeometryType::Polyline, encodings.clone());
     assert_ne!(original, different_type);
 
     let mut reordered = encodings.clone();
     reordered.swap(0, 1);
     assert_ne!(
       original,
-      NonPointGeodisplayUdf::new(DisplayGeometryType::Polygon, reordered)
+      NonPointGeodisplayUdf::new(OptimizedGeometryType::Polygon, reordered)
     );
 
     let mut shortened = encodings;
     shortened.pop();
     assert_ne!(
       original,
-      NonPointGeodisplayUdf::new(DisplayGeometryType::Polygon, shortened)
+      NonPointGeodisplayUdf::new(OptimizedGeometryType::Polygon, shortened)
     );
   }
 }

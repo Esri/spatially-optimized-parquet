@@ -12,7 +12,7 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::col;
 
-use crate::analysis::DisplayGeometryType;
+use crate::geometry::GeometryCategory;
 use crate::output::geometry::{
   BinaryValueAccess, geometry_signature, map_geometry_to_binary, to_datafusion_error,
 };
@@ -27,7 +27,7 @@ pub(crate) struct TransformedPointCoordsUdf {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct TransformedBoundsUdf {
   transform: TransformSpec,
-  geometry_type: DisplayGeometryType,
+  geometry_category: GeometryCategory,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -105,17 +105,17 @@ impl ScalarUDFImpl for TransformedBoundsUdf {
       DataType::Binary => transformed_bounds_struct(
         as_binary_array(geometry.as_ref())?,
         &prepared,
-        self.geometry_type,
+        self.geometry_category,
       )?,
       DataType::LargeBinary => transformed_bounds_struct(
         as_large_binary_array(geometry.as_ref())?,
         &prepared,
-        self.geometry_type,
+        self.geometry_category,
       )?,
       DataType::BinaryView => transformed_bounds_struct(
         as_binary_view_array(geometry.as_ref())?,
         &prepared,
-        self.geometry_type,
+        self.geometry_category,
       )?,
       other => {
         return Err(DataFusionError::Execution(format!(
@@ -167,11 +167,11 @@ pub(crate) fn transformed_point_coords_udf(transform: TransformSpec) -> ScalarUD
 
 pub(crate) fn transformed_bounds_udf(
   transform: TransformSpec,
-  geometry_type: DisplayGeometryType,
+  geometry_category: GeometryCategory,
 ) -> ScalarUDF {
   ScalarUDF::new_from_impl(TransformedBoundsUdf {
     transform,
-    geometry_type,
+    geometry_category,
   })
 }
 
@@ -188,10 +188,10 @@ pub(crate) fn transformed_point_coords_expr(
 
 pub(crate) fn transformed_bounds_expr(
   geometry_column: &str,
-  geometry_type: DisplayGeometryType,
+  geometry_category: GeometryCategory,
   transform: &TransformSpec,
 ) -> Expr {
-  transformed_bounds_udf(transform.clone(), geometry_type).call(vec![col(geometry_column)])
+  transformed_bounds_udf(transform.clone(), geometry_category).call(vec![col(geometry_column)])
 }
 
 pub(crate) fn reproject_geometry_expr(geometry_column: &str, transform: &TransformSpec) -> Expr {
@@ -261,7 +261,7 @@ where
 fn transformed_bounds_struct<T>(
   array: &T,
   transform: &PreparedTransform,
-  geometry_type: DisplayGeometryType,
+  geometry_category: GeometryCategory,
 ) -> DataFusionResult<StructArray>
 where
   T: BinaryValueAccess,
@@ -274,7 +274,7 @@ where
     match array.value_opt(index) {
       Some(bytes) => {
         let extent = transform
-          .transform_geometry_bounds_from_wkb(bytes, geometry_type)
+          .transform_geometry_bounds_from_wkb(bytes, geometry_category)
           .map_err(to_datafusion_error)?;
         xmin_values.push(Some(extent.xmin));
         ymin_values.push(Some(extent.ymin));

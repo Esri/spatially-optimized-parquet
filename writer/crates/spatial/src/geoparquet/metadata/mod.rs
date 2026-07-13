@@ -4,4 +4,4 @@ pub mod source;
 mod writer;
 
 pub use source::{SourceDatasetMetadata, SourceGeometryMetadata};
-pub use writer::{build_geo_key_values, build_geo_metadata};
+pub use writer::{GeoMetadataInput, build_geo_key_values, build_geo_metadata};

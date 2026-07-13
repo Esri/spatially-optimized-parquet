@@ -1,17 +1,18 @@
-//! Executes the Spatially Optimized GeoParquet workflow behind one output boundary.
+//! Executes the Spatially Optimized GeoParquet stage behind one output boundary.
 
-pub(crate) mod analysis;
 pub(crate) mod clustering;
-pub(crate) mod dataframe;
+mod context;
 pub(crate) mod execution;
+pub(crate) mod extent;
+pub mod geometry;
 pub mod metadata;
 pub mod multi_file;
 pub mod multiscale;
+mod output;
 pub(crate) mod partitioning;
-pub(crate) mod prepare;
-mod run;
-mod workflow;
+pub(crate) mod projection;
 pub(crate) mod write;
 
-pub(crate) use run::run;
-pub(crate) use workflow::OptimizeOutputRequest;
+pub use context::OptimizedContext;
+pub use geometry::{ClusteringFamily, OptimizedGeometry, OptimizedGeometryType};
+pub(crate) use output::OptimizedGeoParquet;

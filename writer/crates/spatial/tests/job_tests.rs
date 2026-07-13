@@ -14,7 +14,7 @@ use parquet::file::metadata::KeyValue;
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
-use spatial::analysis::Extent2D;
+use spatial::geometry::Extent2D;
 use spatial::input::RowRange;
 use spatial::job::{OptimizeJobOptions, run_optimize_job};
 use spatial::optimized::multiscale::{geometry_extent_from_wkb, point_xy_from_wkb};
@@ -1102,7 +1102,7 @@ fn plain_geoparquet_preserves_same_crs_wkb_and_rows_without_sop_metadata() {
   let output_metadata = kv_map(&output);
   assert_eq!(output_metadata.get("geodisplay"), None);
   assert_eq!(output_metadata.get("custom"), Some(&custom_value));
-  assert!(output_metadata.get("geo").is_some());
+  assert!(output_metadata.contains_key("geo"));
 }
 
 #[test]
