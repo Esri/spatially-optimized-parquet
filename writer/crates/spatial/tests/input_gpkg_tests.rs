@@ -11,8 +11,7 @@ use tempfile::TempDir;
 
 use spatial::analysis::Extent2D;
 use spatial::geometry::GeometryKind;
-use spatial::input::gpkg::GpkgInputProvider;
-use spatial::input::{InputOpenOptions, InputProvider, RowRange, open_input};
+use spatial::input::{InputOpenOptions, RowRange, SourceFormat, open_input};
 
 mod common;
 use common::{GpkgFeature, GpkgLayerSpec, open_gpkg_dataset, open_gpkg_input, runtime, write_gpkg};
@@ -144,8 +143,10 @@ fn open_input_requires_layer_for_multi_layer_geopackage() {
     ],
   );
 
-  let providers: Vec<Box<dyn InputProvider>> = vec![Box::new(GpkgInputProvider::new())];
-  let err = match runtime().block_on(open_input(&InputOpenOptions::new(path.clone()), &providers)) {
+  let err = match runtime().block_on(open_input(
+    SourceFormat::GeoPackage,
+    &InputOpenOptions::new(path.clone()),
+  )) {
     Ok(_) => panic!("expected multi-layer GeoPackage without --layer to fail"),
     Err(err) => err,
   };
@@ -451,13 +452,12 @@ fn open_input_reports_layer_metadata_for_unknown_layer_name() {
     ],
   );
 
-  let providers: Vec<Box<dyn InputProvider>> = vec![Box::new(GpkgInputProvider::new())];
   let err = match runtime().block_on(open_input(
+    SourceFormat::GeoPackage,
     &InputOpenOptions {
       location: path.to_string_lossy().into_owned(),
       layer: Some("missing".to_string()),
     },
-    &providers,
   )) {
     Ok(_) => panic!("expected unknown GeoPackage layer to fail"),
     Err(err) => err,
@@ -495,8 +495,10 @@ fn open_input_reports_generic_and_non_spatial_layer_hints() {
     ],
   );
 
-  let providers: Vec<Box<dyn InputProvider>> = vec![Box::new(GpkgInputProvider::new())];
-  let err = match runtime().block_on(open_input(&InputOpenOptions::new(path.clone()), &providers)) {
+  let err = match runtime().block_on(open_input(
+    SourceFormat::GeoPackage,
+    &InputOpenOptions::new(path.clone()),
+  )) {
     Ok(_) => panic!("expected mixed GeoPackage without --layer to fail"),
     Err(err) => err,
   };

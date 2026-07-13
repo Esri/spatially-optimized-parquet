@@ -3,25 +3,22 @@
 //! The crate follows one data-flow boundary. [`input`] providers normalize GeoPackage and
 //! Parquet sources into Arrow schemas, metadata, batch streams, and DataFrames. [`analysis`]
 //! resolves geometry category, extent, dimensions, and coordinate reference system. [`job`]
-//! composes reprojection, spatial-code generation, multiscale encoding, sorting, metadata,
-//! and Parquet writing into executable DataFusion plans.
+//! opens validated resources and routes execution into plain or optimized output workflows.
 //!
-//! Lower-level modules isolate the algorithms behind that flow. [`codes`] implements Z/XZ
-//! indexing, [`pbf`] flattens and quantizes geometry, [`udf`] exposes those operations to
-//! DataFusion, [`reprojection`] wraps GDAL/PROJ transforms, and [`metadata`] defines the
-//! normalized source and serialized output models. This separation keeps storage integration,
-//! geometry computation, and execution orchestration independently testable.
+//! Lower-level modules isolate the algorithms behind that flow. [`output::optimized`] owns
+//! spatial clustering, multiscale geometry encoding, and optimized planning. [`udf`] exposes
+//! those operations to DataFusion, [`reprojection`] wraps GDAL/PROJ transforms, and [`metadata`]
+//! defines the normalized source and serialized output models.
 
 #![warn(missing_docs)]
 
 pub mod analysis;
-pub mod codes;
-pub mod display;
+pub mod diagnostics;
 pub mod geometry;
 pub mod input;
 pub mod job;
 pub mod metadata;
-pub mod multiscale;
-pub mod pbf;
+pub mod output;
+pub mod progress;
 pub mod reprojection;
 pub mod udf;

@@ -5,8 +5,7 @@
 //! - [`session`] configures DataFusion memory, partitioning, and disk spilling.
 //! - [`read`] converts lazy DataFrames into ordered or partitioned batch streams.
 //! - [`plan`] validates file-versus-directory output layouts before execution.
-//! - [`mod@write`] keeps direct Arrow writers and DataFusion Parquet sinks consistent.
-//! - [`run`] supports the legacy direct batch-transform/write workflow.
+//! - [`mod@write`] configures DataFusion Parquet sinks.
 //!
 //! Geospatial policy intentionally remains outside this crate. The `spatial` crate decides
 //! which columns to derive, how geometries should be indexed, and which metadata to emit.
@@ -16,7 +15,6 @@
 
 pub mod plan;
 pub mod read;
-pub mod run;
 pub mod session;
 pub mod write;
 

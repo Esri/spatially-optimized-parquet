@@ -1,37 +1,22 @@
-//! Centralizes Parquet writer policy for both direct Arrow writers and DataFusion sinks.
+//! Centralizes Parquet writer policy for DataFusion sinks.
 //!
 //! The module parses supported compression names, disables dictionary encoding, applies
-//! consistent row-group and write-batch sizes, propagates key-value metadata, and tracks
-//! direct-writer row counts. [`create_datafusion_parquet_options`] mirrors the settings used
-//! by [`create_output_writer`] so output characteristics do not depend on the execution path.
+//! consistent row-group and write-batch sizes, and propagates key-value metadata through
+//! [`create_datafusion_parquet_options`].
 //!
 //! Row-group and batch sizes can be tuned through `OPT_PARQUET_ROW_GROUP_SIZE` and
 //! `OPT_PARQUET_WRITE_BATCH_SIZE`. Larger values can improve compression and throughput at
 //! the cost of memory, while smaller values reduce buffering and may increase file overhead.
 
-use std::fs;
-use std::path::Path;
-
 use anyhow::{Context, Result};
-use arrow_array::RecordBatch;
-use arrow_schema::SchemaRef;
 use datafusion::common::config::TableParquetOptions;
-use parquet::arrow::arrow_writer::ArrowWriter;
 use parquet::basic::{BrotliLevel, Compression, GzipLevel, ZstdLevel};
 use parquet::file::metadata::KeyValue;
-use parquet::file::properties::WriterProperties;
 
 const DEFAULT_MAX_ROW_GROUP_SIZE: usize = 128 * 1024;
 const DEFAULT_WRITE_BATCH_SIZE: usize = 8 * 1024;
 const ROW_GROUP_SIZE_ENV: &str = "OPT_PARQUET_ROW_GROUP_SIZE";
 const WRITE_BATCH_SIZE_ENV: &str = "OPT_PARQUET_WRITE_BATCH_SIZE";
-
-/// Owns a direct Arrow Parquet writer and its committed row count.
-pub struct OutputWriter {
-  writer: Option<ArrowWriter<fs::File>>,
-  /// Tracks rows accepted by the underlying Parquet writer.
-  pub rows_written: u64,
-}
 
 /// Parse a user-facing compression name into a Parquet codec.
 pub fn parse_compression(compression: &str) -> Result<Compression> {
@@ -54,39 +39,7 @@ pub fn parse_compression(compression: &str) -> Result<Compression> {
   Ok(codec)
 }
 
-/// Create a direct Parquet writer with repository-wide row-group and batch settings.
-pub fn create_output_writer(
-  path: &Path,
-  schema: &SchemaRef,
-  compression: Compression,
-) -> Result<OutputWriter> {
-  let file =
-    fs::File::create(path).with_context(|| format!("create output file: {}", path.display()))?;
-  let writer_properties = WriterProperties::builder()
-    .set_compression(compression)
-    .set_dictionary_enabled(false)
-    .set_max_row_group_size(configured_max_row_group_size())
-    .set_write_batch_size(configured_write_batch_size())
-    .build();
-  let writer = ArrowWriter::try_new(file, schema.clone(), Some(writer_properties))?;
-  Ok(OutputWriter {
-    writer: Some(writer),
-    rows_written: 0,
-  })
-}
-
-/// Append one record batch and update the writer's row count.
-pub fn write_batches(writer: &mut OutputWriter, batch: &RecordBatch) -> Result<()> {
-  writer
-    .writer
-    .as_mut()
-    .context("missing parquet writer")?
-    .write(batch)?;
-  writer.rows_written += batch.num_rows() as u64;
-  Ok(())
-}
-
-/// Build DataFusion Parquet options equivalent to the direct-writer configuration.
+/// Build repository-wide DataFusion Parquet options.
 pub fn create_datafusion_parquet_options(
   compression: Compression,
   kv_metadata: &[KeyValue],
@@ -101,18 +54,6 @@ pub fn create_datafusion_parquet_options(
     .map(|kv| (kv.key.clone(), kv.value.clone()))
     .collect();
   options
-}
-
-/// Attach file metadata and close every direct writer.
-pub fn finalize_writers(mut writers: Vec<OutputWriter>, kv_metadata: &[KeyValue]) -> Result<()> {
-  for writer in writers.iter_mut() {
-    let mut parquet_writer = writer.writer.take().context("missing parquet writer")?;
-    for kv in kv_metadata {
-      parquet_writer.append_key_value_metadata(kv.clone());
-    }
-    parquet_writer.close()?;
-  }
-  Ok(())
 }
 
 fn compression_to_datafusion_string(compression: Compression) -> String {

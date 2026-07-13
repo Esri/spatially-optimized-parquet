@@ -44,3 +44,33 @@ parquet-opt
 
 GeoParquet is also supported. Parquet without geospatial metadata can also be used provided the geometry column is tagged with `--geometry-column`. Add `--covering` to write a GeoParquet 1.1 root `bbox` covering column with `xmin`, `ymin`, `xmax`, and `ymax` fields.
 
+Input format is inferred from `.gpkg` or `.parquet`. Local directories are treated as Parquet
+datasets. Use `--input-format gpkg|parquet` for extensionless or unconventional locations.
+
+Both output modes write GeoParquet:
+
+- The default writes Spatially Optimized GeoParquet with spatial ordering and display columns.
+- `--no-optimization` writes plain GeoParquet, preserving source geometry coordinates and CRS
+  without SOP display columns or spatial sorting.
+
+When Parquet geometry lacks CRS metadata, pass `--geometry-column <NAME> --in-sr <LATEST_WKID>`.
+The writer scans WKB to infer geometry types and the selected-row extent. `--in-sr` fails when
+the selected geometry already declares a CRS, preventing accidental overrides. `--covering`
+works with both plain and optimized GeoParquet.
+
+## Implementation layout
+
+The Rust workspace separates source integration, format-neutral analysis, and output execution:
+
+- `spatial::input::{gpkg, parquet}` owns format-specific discovery and scanning. Each source splits
+  metadata, opening, and streaming concerns into focused modules.
+- `spatial::analysis` derives geometry family, extent, dimensions, and CRS after both sources
+  converge on the `InputSource` boundary.
+- `spatial::job` stays thin. It validates resources and routes plain or optimized output.
+- `spatial::output::optimized::clustering` owns Z and XZ ordering algorithms.
+- `spatial::output::optimized::multiscale` owns level planning, quantization, traversal, payload,
+  and wire encoding.
+- `spatial::udf` exposes clustering, multiscale, and reprojection operations to DataFusion through
+  typed builders while keeping implementations and signatures private.
+
+See [architecture.md](architecture.md) for the complete execution flow and module map.

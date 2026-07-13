@@ -5,14 +5,11 @@ edition.workspace = true
 
 [dependencies]
 anyhow = "1.0"
-arrow-array = "57.1.0"
 arrow-schema = "57.1.0"
 datafusion = "52.1.0"
 datafusion-execution = "52.1.0"
-futures = "0.3"
-parquet = { version = "57.1.0", features = ["arrow", "brotli", "flate2", "lz4", "snap", "zstd"] }
+parquet = { version = "57.1.0", features = ["brotli", "flate2", "lz4", "snap", "zstd"] }
 thiserror = "2.0"
-futures-util = "0.3"
 tempfile = "3.13"
 
 [dev-dependencies]

@@ -171,7 +171,7 @@ impl PreparedTransform {
     geometry_type: DisplayGeometryType,
   ) -> Result<Extent2D> {
     if matches!(geometry_type, DisplayGeometryType::Point) {
-      let (x, y) = crate::pbf::point_xy_from_wkb(bytes)?;
+      let (x, y) = crate::output::optimized::multiscale::point_xy_from_wkb(bytes)?;
       let (x, y) = self.transform_point(x, y)?;
       return Ok(Extent2D {
         xmin: x,

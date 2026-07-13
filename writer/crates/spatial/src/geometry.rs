@@ -69,3 +69,55 @@ pub fn geometry_kind_from_wkb(bytes: &[u8]) -> Result<GeometryKind> {
   let wkb_geom = wkb::reader::read_wkb(bytes)?;
   Ok(geometry_kind_from_wkb_type(wkb_geom.geometry_type()))
 }
+
+#[cfg(test)]
+mod tests {
+  use geo::polygon;
+  use wkb::writer::write_geometry;
+
+  use super::{GeometryKind, geometry_kind_from_wkb};
+
+  fn encoded_geometry(geometry: &geo::Geometry) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    write_geometry(&mut bytes, geometry, &Default::default()).unwrap();
+    bytes
+  }
+
+  #[test]
+  fn wkb_kind_decodes_point() {
+    let bytes = encoded_geometry(&geo::Geometry::Point(geo::Point::new(1.0, 2.0)));
+
+    assert_eq!(geometry_kind_from_wkb(&bytes).unwrap(), GeometryKind::Point);
+  }
+
+  #[test]
+  fn wkb_kind_decodes_polygon() {
+    let geometry = geo::Geometry::Polygon(geo::polygon![
+        (x: 0.0, y: 0.0),
+        (x: 1.0, y: 0.0),
+        (x: 1.0, y: 1.0),
+        (x: 0.0, y: 1.0),
+        (x: 0.0, y: 0.0),
+    ]);
+    let bytes = encoded_geometry(&geometry);
+
+    assert_eq!(
+      geometry_kind_from_wkb(&bytes).unwrap(),
+      GeometryKind::Polygon
+    );
+  }
+
+  #[test]
+  fn wkb_kind_decodes_geometry_collection() {
+    let geometry = geo::Geometry::GeometryCollection(geo::GeometryCollection::new_from(vec![
+      geo::Geometry::Point(geo::Point::new(0.0, 0.0)),
+      geo::Geometry::Point(geo::Point::new(1.0, 1.0)),
+    ]));
+    let bytes = encoded_geometry(&geometry);
+
+    assert_eq!(
+      geometry_kind_from_wkb(&bytes).unwrap(),
+      GeometryKind::GeometryCollection
+    );
+  }
+}

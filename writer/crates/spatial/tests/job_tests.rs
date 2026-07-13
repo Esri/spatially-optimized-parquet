@@ -15,7 +15,8 @@ use tokio::runtime::Runtime;
 
 use spatial::input::RowRange;
 use spatial::job::{OptimizeJobOptions, run_optimize_job};
-use spatial::pbf::{geometry_extent_from_wkb, point_xy_from_wkb};
+use spatial::output::GeoParquetOutputMode;
+use spatial::output::optimized::multiscale::{geometry_extent_from_wkb, point_xy_from_wkb};
 use wkb::writer::WriteOptions;
 
 mod common;
@@ -140,17 +141,19 @@ fn optimize_job_writes_sorted_point_output_and_metadata() {
   runtime()
     .block_on(run_optimize_job(OptimizeJobOptions {
       input: input.to_string_lossy().into_owned(),
+      input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
       row_range: RowRange::default(),
       layer: None,
       geometry_column: None,
+      input_wkid: None,
       covering: false,
       overwrite: true,
       progress: false,
       explain: false,
-      no_optimization: false,
+      output_mode: GeoParquetOutputMode::Optimized,
     }))
     .unwrap();
 
@@ -212,17 +215,19 @@ fn optimize_job_writes_covering_bbox_for_reprojected_points() {
   runtime()
     .block_on(run_optimize_job(OptimizeJobOptions {
       input: input.to_string_lossy().into_owned(),
+      input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
       row_range: RowRange::default(),
       layer: None,
       geometry_column: None,
+      input_wkid: None,
       covering: true,
       overwrite: true,
       progress: false,
       explain: false,
-      no_optimization: false,
+      output_mode: GeoParquetOutputMode::Optimized,
     }))
     .unwrap();
 
@@ -281,17 +286,19 @@ fn optimize_job_reprojects_geoparquet_point_output_to_wgs84() {
   runtime()
     .block_on(run_optimize_job(OptimizeJobOptions {
       input: input.to_string_lossy().into_owned(),
+      input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
       row_range: RowRange::default(),
       layer: None,
       geometry_column: None,
+      input_wkid: None,
       covering: false,
       overwrite: true,
       progress: false,
       explain: false,
-      no_optimization: false,
+      output_mode: GeoParquetOutputMode::Optimized,
     }))
     .unwrap();
 
@@ -364,17 +371,19 @@ fn optimize_job_writes_non_point_display_struct_and_metadata() {
   runtime()
     .block_on(run_optimize_job(OptimizeJobOptions {
       input: input.to_string_lossy().into_owned(),
+      input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
       row_range: RowRange::default(),
       layer: None,
       geometry_column: None,
+      input_wkid: None,
       covering: false,
       overwrite: true,
       progress: false,
       explain: false,
-      no_optimization: false,
+      output_mode: GeoParquetOutputMode::Optimized,
     }))
     .unwrap();
 
@@ -455,17 +464,19 @@ fn optimize_job_writes_covering_bbox_for_non_point_output() {
   runtime()
     .block_on(run_optimize_job(OptimizeJobOptions {
       input: input.to_string_lossy().into_owned(),
+      input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
       row_range: RowRange::default(),
       layer: None,
       geometry_column: None,
+      input_wkid: None,
       covering: true,
       overwrite: true,
       progress: false,
       explain: false,
-      no_optimization: false,
+      output_mode: GeoParquetOutputMode::Optimized,
     }))
     .unwrap();
 
@@ -525,17 +536,19 @@ fn optimize_job_replaces_existing_non_point_geodisplay_column() {
   runtime()
     .block_on(run_optimize_job(OptimizeJobOptions {
       input: input.to_string_lossy().into_owned(),
+      input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
       row_range: RowRange::default(),
       layer: None,
       geometry_column: None,
+      input_wkid: None,
       covering: false,
       overwrite: true,
       progress: false,
       explain: false,
-      no_optimization: false,
+      output_mode: GeoParquetOutputMode::Optimized,
     }))
     .unwrap();
 
@@ -608,17 +621,19 @@ fn optimize_job_sorts_non_point_rows_across_multiple_input_batches() {
   runtime()
     .block_on(run_optimize_job(OptimizeJobOptions {
       input: input.to_string_lossy().into_owned(),
+      input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
       row_range: RowRange::default(),
       layer: None,
       geometry_column: None,
+      input_wkid: None,
       covering: false,
       overwrite: true,
       progress: false,
       explain: false,
-      no_optimization: false,
+      output_mode: GeoParquetOutputMode::Optimized,
     }))
     .unwrap();
 
@@ -683,17 +698,19 @@ fn optimize_job_writes_range_partitioned_multi_file_output() {
   runtime()
     .block_on(run_optimize_job(OptimizeJobOptions {
       input: input.to_string_lossy().into_owned(),
+      input_format: None,
       output: output_dir.clone(),
       output_files: Some(2),
       compression: None,
       row_range: RowRange::default(),
       layer: None,
       geometry_column: None,
+      input_wkid: None,
       covering: false,
       overwrite: true,
       progress: false,
       explain: false,
-      no_optimization: false,
+      output_mode: GeoParquetOutputMode::Optimized,
     }))
     .unwrap();
 
@@ -787,6 +804,7 @@ fn optimize_job_row_range_writes_requested_input_rows() {
   runtime()
     .block_on(run_optimize_job(OptimizeJobOptions {
       input: input.to_string_lossy().into_owned(),
+      input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
@@ -796,11 +814,12 @@ fn optimize_job_row_range_writes_requested_input_rows() {
       },
       layer: None,
       geometry_column: None,
+      input_wkid: None,
       covering: false,
       overwrite: true,
       progress: false,
       explain: false,
-      no_optimization: false,
+      output_mode: GeoParquetOutputMode::Optimized,
     }))
     .unwrap();
 
@@ -823,7 +842,7 @@ fn optimize_job_row_range_writes_requested_input_rows() {
 }
 
 #[test]
-fn optimize_job_no_optimization_passthrough_filters_without_sorting_or_metadata_changes() {
+fn plain_geoparquet_preserves_rows_without_sop_metadata() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("optimized-points.parquet");
   let output = temp.path().join("passthrough.parquet");
@@ -871,6 +890,7 @@ fn optimize_job_no_optimization_passthrough_filters_without_sorting_or_metadata_
   runtime()
     .block_on(run_optimize_job(OptimizeJobOptions {
       input: input.to_string_lossy().into_owned(),
+      input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
@@ -880,11 +900,12 @@ fn optimize_job_no_optimization_passthrough_filters_without_sorting_or_metadata_
       },
       layer: None,
       geometry_column: None,
+      input_wkid: None,
       covering: false,
       overwrite: true,
       progress: false,
       explain: false,
-      no_optimization: true,
+      output_mode: GeoParquetOutputMode::Plain,
     }))
     .unwrap();
 
@@ -908,17 +929,13 @@ fn optimize_job_no_optimization_passthrough_filters_without_sorting_or_metadata_
   assert_eq!(z_codes.value(1), 1);
 
   let output_metadata = kv_map(&output);
-  assert_eq!(output_metadata.get("geodisplay"), Some(&geodisplay));
+  assert_eq!(output_metadata.get("geodisplay"), None);
   assert_eq!(output_metadata.get("custom"), Some(&custom_value));
-  assert_eq!(
-    output_metadata.get("geo"),
-    kv_map(&input).get("geo"),
-    "geo metadata should be preserved exactly"
-  );
+  assert!(output_metadata.get("geo").is_some());
 }
 
 #[test]
-fn optimize_job_rejects_covering_with_no_optimization() {
+fn plain_geoparquet_writes_covering_bbox() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("points.parquet");
   let output = temp.path().join("points-passthrough.parquet");
@@ -944,27 +961,33 @@ fn optimize_job_rejects_covering_with_no_optimization() {
     &[geoparquet_kv("geometry", &["Point"])],
   );
 
-  let err = runtime()
+  runtime()
     .block_on(run_optimize_job(OptimizeJobOptions {
       input: input.to_string_lossy().into_owned(),
+      input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
       row_range: RowRange::default(),
       layer: None,
       geometry_column: None,
+      input_wkid: None,
       covering: true,
       overwrite: true,
       progress: false,
       explain: false,
-      no_optimization: true,
+      output_mode: GeoParquetOutputMode::Plain,
     }))
-    .unwrap_err();
-  assert!(
-    err
-      .to_string()
-      .contains("--covering cannot be used with --no-optimization"),
-    "{err:#}"
+    .unwrap();
+  let dataframe = runtime()
+    .block_on(read_parquet_df(output.to_str().unwrap()))
+    .unwrap();
+  let batches = runtime().block_on(dataframe.collect()).unwrap();
+  assert!(batches[0].column_by_name("bbox").is_some());
+  let geo: serde_json::Value = serde_json::from_str(kv_map(&output).get("geo").unwrap()).unwrap();
+  assert_eq!(
+    geo["columns"]["geometry"]["covering"]["bbox"]["xmin"],
+    serde_json::json!(["bbox", "xmin"])
   );
 }
 
@@ -1000,17 +1023,19 @@ fn optimize_job_rejects_covering_when_bbox_column_exists() {
   let err = runtime()
     .block_on(run_optimize_job(OptimizeJobOptions {
       input: input.to_string_lossy().into_owned(),
+      input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
       row_range: RowRange::default(),
       layer: None,
       geometry_column: None,
+      input_wkid: None,
       covering: true,
       overwrite: true,
       progress: false,
       explain: false,
-      no_optimization: false,
+      output_mode: GeoParquetOutputMode::Optimized,
     }))
     .unwrap_err();
   assert!(
@@ -1055,27 +1080,50 @@ fn optimize_job_errors_when_explicit_geometry_column_lacks_crs_metadata() {
   let err = runtime()
     .block_on(run_optimize_job(OptimizeJobOptions {
       input: input.to_string_lossy().into_owned(),
+      input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
       row_range: RowRange::default(),
       layer: None,
       geometry_column: Some("geometry".to_string()),
+      input_wkid: None,
       covering: false,
       overwrite: true,
       progress: false,
       explain: false,
-      no_optimization: false,
+      output_mode: GeoParquetOutputMode::Optimized,
     }))
     .unwrap_err();
-  assert!(
-    err.to_string().contains("CRS metadata is required"),
-    "{err:#}"
+  assert!(err.to_string().contains("pass --in-sr"), "{err:#}");
+
+  runtime()
+    .block_on(run_optimize_job(OptimizeJobOptions {
+      input: input.to_string_lossy().into_owned(),
+      input_format: None,
+      output: output.clone(),
+      output_files: None,
+      compression: None,
+      row_range: RowRange::default(),
+      layer: None,
+      geometry_column: Some("geometry".to_string()),
+      input_wkid: Some(3857),
+      covering: false,
+      overwrite: true,
+      progress: false,
+      explain: false,
+      output_mode: GeoParquetOutputMode::Plain,
+    }))
+    .unwrap();
+  let geo: serde_json::Value = serde_json::from_str(kv_map(&output).get("geo").unwrap()).unwrap();
+  assert_eq!(
+    geo["columns"]["geometry"]["crs"]["id"]["code"],
+    serde_json::json!(3857)
   );
 }
 
 #[test]
-fn optimize_job_errors_when_geometry_type_metadata_is_missing() {
+fn optimize_job_scans_when_geometry_type_metadata_is_missing() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("points.parquet");
   let output = temp.path().join("points-optimized.parquet");
@@ -1105,28 +1153,75 @@ fn optimize_job_errors_when_geometry_type_metadata_is_missing() {
     &[geoparquet_kv_with_epsg("geometry", &[], 4326)],
   );
 
-  let err = runtime()
+  runtime()
     .block_on(run_optimize_job(OptimizeJobOptions {
       input: input.to_string_lossy().into_owned(),
+      input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
       row_range: RowRange::default(),
       layer: None,
       geometry_column: None,
+      input_wkid: None,
       covering: false,
       overwrite: true,
       progress: false,
       explain: false,
-      no_optimization: false,
+      output_mode: GeoParquetOutputMode::Optimized,
+    }))
+    .unwrap();
+  let metadata = kv_map(&output);
+  let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").unwrap()).unwrap();
+  assert_eq!(
+    geo["columns"]["geometry"]["geometry_types"],
+    serde_json::json!(["Point"])
+  );
+}
+
+#[test]
+fn optimize_job_rejects_input_wkid_when_crs_metadata_exists() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("points.parquet");
+  let output = temp.path().join("points-optimized.parquet");
+  let schema = Arc::new(Schema::new(vec![Field::new(
+    "geometry",
+    DataType::Binary,
+    true,
+  )]));
+  let point = wkb_point(1.0, 1.0);
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![Arc::new(BinaryArray::from(vec![Some(point.as_slice())]))],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv_with_epsg("geometry", &["Point"], 4326)],
+  );
+
+  let error = runtime()
+    .block_on(run_optimize_job(OptimizeJobOptions {
+      input: input.to_string_lossy().into_owned(),
+      input_format: None,
+      output,
+      output_files: None,
+      compression: None,
+      row_range: RowRange::default(),
+      layer: None,
+      geometry_column: None,
+      input_wkid: Some(3857),
+      covering: false,
+      overwrite: true,
+      progress: false,
+      explain: false,
+      output_mode: GeoParquetOutputMode::Optimized,
     }))
     .unwrap_err();
-  assert!(
-    err
-      .to_string()
-      .contains("unable to determine display geometry type"),
-    "{err:#}"
-  );
+  assert!(error.to_string().contains("already has CRS metadata"));
 }
 
 #[test]
@@ -1160,17 +1255,19 @@ fn optimize_job_accepts_single_layer_geopackage_input() {
   runtime()
     .block_on(run_optimize_job(OptimizeJobOptions {
       input: input.to_string_lossy().into_owned(),
+      input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
       row_range: RowRange::default(),
       layer: None,
       geometry_column: None,
+      input_wkid: None,
       covering: false,
       overwrite: true,
       progress: false,
       explain: false,
-      no_optimization: false,
+      output_mode: GeoParquetOutputMode::Optimized,
     }))
     .unwrap();
 
@@ -1228,17 +1325,19 @@ fn optimize_job_reprojects_geopackage_polygon_output_to_wgs84() {
   runtime()
     .block_on(run_optimize_job(OptimizeJobOptions {
       input: input.to_string_lossy().into_owned(),
+      input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
       row_range: RowRange::default(),
       layer: None,
       geometry_column: None,
+      input_wkid: None,
       covering: false,
       overwrite: true,
       progress: false,
       explain: false,
-      no_optimization: false,
+      output_mode: GeoParquetOutputMode::Optimized,
     }))
     .unwrap();
 
@@ -1349,17 +1448,19 @@ fn optimize_job_selects_requested_geopackage_layer() {
   runtime()
     .block_on(run_optimize_job(OptimizeJobOptions {
       input: input.to_string_lossy().into_owned(),
+      input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
       row_range: RowRange::default(),
       layer: Some("polygons".to_string()),
       geometry_column: None,
+      input_wkid: None,
       covering: false,
       overwrite: true,
       progress: false,
       explain: false,
-      no_optimization: false,
+      output_mode: GeoParquetOutputMode::Optimized,
     }))
     .unwrap();
 

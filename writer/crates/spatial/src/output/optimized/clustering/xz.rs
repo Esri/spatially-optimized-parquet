@@ -1,50 +1,18 @@
-//! Computes sortable spatial codes used to cluster features for viewport-oriented reads.
-//!
-//! Points use Morton Z-order: coordinates are quantized relative to the dataset extent and
-//! their bits are interleaved. Non-point features use an XZ hierarchy: the feature extent
-//! selects a containment level, then its lower-left point identifies a hierarchy path.
-//! Nearby features therefore tend to receive nearby codes without clipping their geometry.
-//!
-//! These functions perform pure arithmetic and allocate no heap storage. Their results drive
-//! DataFusion sorts and output-range partitioning, so coordinate precision and hierarchy depth
-//! directly affect clustering granularity and the distribution of generated files.
+//! Computes XZ hierarchy codes for non-point clustering.
 
 use crate::analysis::Extent2D;
 
-/// Stores a sortable spatial index code.
-pub type DisplayCode = u64;
+use super::common::DisplayCode;
 
 /// Stores the default maximum depth of the XZ hierarchy.
-pub const DEFAULT_XZ_MAX_LEVEL: u32 = 20;
-/// Stores the default number of quantization bits per point coordinate axis.
-pub const DEFAULT_COORDINATE_PRECISION: u32 = 20;
-
-/// Quantize a point within the full extent and interleave its x/y bits.
-pub fn point_z_code(
-  full_extent: Extent2D,
-  x: f64,
-  y: f64,
-  coordinate_precision: u32,
-) -> DisplayCode {
-  let quantized_x = quantize_to_bits(x, full_extent.xmin, full_extent.xmax, coordinate_precision);
-  let quantized_y = quantize_to_bits(y, full_extent.ymin, full_extent.ymax, coordinate_precision);
-  swizzle_bits(quantized_x, quantized_y, coordinate_precision)
-}
-
-/// Interleave x and y bits into one Morton-order code.
-pub fn swizzle_bits(x: u32, y: u32, coordinate_precision: u32) -> DisplayCode {
-  let mut out = 0u64;
-  for bit in 0..coordinate_precision.min(32) {
-    let x_bit = ((x >> bit) & 1) as u64;
-    let y_bit = ((y >> bit) & 1) as u64;
-    out |= x_bit << (2 * bit);
-    out |= y_bit << (2 * bit + 1);
-  }
-  out
-}
+pub(crate) const DEFAULT_XZ_MAX_LEVEL: u32 = 20;
 
 /// Select the deepest XZ hierarchy level whose cell can contain a feature extent.
-pub fn extent_xz_level(full_extent: Extent2D, feature_extent: Extent2D, max_depth: u32) -> u32 {
+pub(crate) fn extent_xz_level(
+  full_extent: Extent2D,
+  feature_extent: Extent2D,
+  max_depth: u32,
+) -> u32 {
   let full_extent_width = full_extent.xmax - full_extent.xmin;
   let full_extent_height = full_extent.ymax - full_extent.ymin;
   let feature_width = feature_extent.xmax - feature_extent.xmin;
@@ -60,7 +28,7 @@ pub fn extent_xz_level(full_extent: Extent2D, feature_extent: Extent2D, max_dept
 }
 
 /// Encode a feature extent at an XZ hierarchy level that preserves spatial containment.
-pub fn extent_xz_code(
+pub(crate) fn extent_xz_code(
   full_extent: Extent2D,
   feature_extent: Extent2D,
   max_depth: u32,
@@ -97,7 +65,7 @@ pub fn extent_xz_code(
 ///
 /// `insert_level` truncates the path for extent indexing. Without it, the code reaches
 /// `max_depth`.
-pub fn point_xz_code(
+pub(crate) fn point_xz_code(
   full_extent: Extent2D,
   point_x: f64,
   point_y: f64,
@@ -139,16 +107,6 @@ pub fn point_xz_code(
   sequence_code
 }
 
-fn quantize_to_bits(value: f64, min: f64, max: f64, coordinate_precision: u32) -> u32 {
-  if coordinate_precision == 0 || (max - min).abs() < f64::EPSILON {
-    return 0;
-  }
-  let cell_count = 1u64 << coordinate_precision.min(32);
-  let normalized = (value - min) / (max - min);
-  let quantized = (normalized * cell_count as f64) as i64;
-  quantized.clamp(0, cell_count as i64 - 1) as u32
-}
-
 fn code_for_level(quadrant_code: u32, depth: u32, max_depth: u32) -> DisplayCode {
   (quadrant_code as DisplayCode) * element_count(max_depth, depth) + 1
 }
@@ -160,43 +118,6 @@ fn element_count(max_depth: u32, sequence_index: u32) -> DisplayCode {
 #[cfg(test)]
 mod tests {
   use super::*;
-
-  #[test]
-  fn swizzle_bits_interleaves_xy_bits() {
-    assert_eq!(swizzle_bits(0, 0, 4), 0);
-    assert_eq!(swizzle_bits(1, 0, 4), 1);
-    assert_eq!(swizzle_bits(0, 1, 4), 2);
-    assert_eq!(swizzle_bits(1, 1, 4), 3);
-    assert_eq!(swizzle_bits(3, 3, 2), 15);
-  }
-
-  #[test]
-  fn point_z_code_normalizes_against_full_extent() {
-    let full_extent = Extent2D {
-      xmin: -180.0,
-      ymin: -90.0,
-      xmax: 180.0,
-      ymax: 90.0,
-    };
-
-    assert_eq!(point_z_code(full_extent, -180.0, -90.0, 4), 0);
-    assert_eq!(point_z_code(full_extent, 180.0, 90.0, 2), 15);
-    assert_eq!(point_z_code(full_extent, 0.0, 0.0, 1), 3);
-  }
-
-  #[test]
-  fn point_z_code_uses_cell_quantization() {
-    let full_extent = Extent2D {
-      xmin: 0.0,
-      ymin: 0.0,
-      xmax: 1.0,
-      ymax: 1.0,
-    };
-
-    assert_eq!(point_z_code(full_extent, 0.2, 0.0, 2), 0);
-    assert_eq!(point_z_code(full_extent, 0.25, 0.0, 2), 1);
-    assert_eq!(point_z_code(full_extent, 1.0, 1.0, 2), 15);
-  }
 
   #[test]
   fn extent_xz_code_matches_reference_cases() {

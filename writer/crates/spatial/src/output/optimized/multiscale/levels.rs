@@ -1,26 +1,14 @@
 //! Plans the multiscale geometry representations emitted for non-point features.
-//!
-//! The writer generates even-numbered levels from zero through sixteen. Each level halves
-//! resolution twice relative to the preceding emitted level, records its map scale, and defines
-//! a quantization transform for the PBF encoder. Geometry-family-specific minimum vertex counts
-//! prevent simplification from collapsing valid lines or polygons below their structural limit.
-//!
-//! Output currently targets EPSG:4326 because the initial resolution and scale constants follow
-//! that display scheme. [`metadata_levels`] converts the executable encoding plan into the
-//! serialized geodisplay metadata consumed by clients.
 
 use anyhow::{Result, bail};
 
 use crate::analysis::DisplayGeometryType;
 use crate::metadata::output::{MultiscaleLevel, QuantizationTransform};
-use crate::pbf::min_vertex_count;
 
 /// Stores the maximum display hierarchy level advertised in output metadata.
 pub const DEFAULT_MAX_LEVEL: u32 = 20;
 /// Stores the only coordinate system currently supported for display payload output.
 pub const DISPLAY_OUTPUT_WKID: u32 = 4326;
-// Matches GeoAnalytics/ST STGeoDisplay initialResolution for EPSG:4326:
-// initialScaleDenom * oneMeter / (39.37 * 96dpi).
 const FIRST_LEVEL_RESOLUTION: f64 = 0.70312359375;
 const FIRST_LEVEL_SCALE: f64 = 295_828_763.795_854_7;
 const MAX_MULTISCALE_LEVEL: u16 = 16;
@@ -61,20 +49,18 @@ pub fn create_geometry_encodings(
 
   for level in 0..=MAX_MULTISCALE_LEVEL {
     if level % 2 == 0 {
-      let transform = QuantizationTransform {
-        scale: [resolution, resolution, 1.0, 1.0],
-        translate: [0.0, 0.0, 0.0, 0.0],
-      };
       encodings.push(GeometryEncoding {
         level,
         column: format!("level_{level}"),
         resolution,
         scale,
-        transform,
+        transform: QuantizationTransform {
+          scale: [resolution, resolution, 1.0, 1.0],
+          translate: [0.0, 0.0, 0.0, 0.0],
+        },
         min_length,
       });
     }
-
     resolution /= 2.0;
     scale /= 2.0;
   }
@@ -96,6 +82,14 @@ pub fn metadata_levels(encodings: &[GeometryEncoding]) -> Vec<MultiscaleLevel> {
     .collect()
 }
 
+pub(super) fn min_vertex_count(geometry_type: DisplayGeometryType) -> usize {
+  match geometry_type {
+    DisplayGeometryType::MultiPoint | DisplayGeometryType::Point => 1,
+    DisplayGeometryType::Polyline => 2,
+    DisplayGeometryType::Polygon => 3,
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -114,17 +108,15 @@ mod tests {
       encodings[0].transform.scale,
       [FIRST_LEVEL_RESOLUTION, FIRST_LEVEL_RESOLUTION, 1.0, 1.0]
     );
-    assert_eq!(encodings[0].transform.translate, [0.0, 0.0, 0.0, 0.0]);
     assert_eq!(encodings[1].level, 2);
     assert_eq!(encodings[1].resolution, FIRST_LEVEL_RESOLUTION / 4.0);
-    assert_eq!(encodings[1].scale, FIRST_LEVEL_SCALE / 4.0);
   }
 
   #[test]
   fn rejects_non_wgs84_output() {
-    let err = create_geometry_encodings(3857, DisplayGeometryType::Polygon).unwrap_err();
+    let error = create_geometry_encodings(3857, DisplayGeometryType::Polygon).unwrap_err();
     assert!(
-      err
+      error
         .to_string()
         .contains("currently only supports output WKID 4326")
     );

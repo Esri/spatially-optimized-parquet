@@ -1,0 +1,165 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use anyhow::{Context, Result, bail};
+use datafusion::catalog::streaming::StreamingTable;
+use datafusion::physical_plan::streaming::PartitionStream;
+use engine::session::configured_target_partitions;
+use engine::{DataFrame, SessionContext};
+use futures_util::StreamExt;
+use futures_util::future::BoxFuture;
+use gdal::vector::LayerAccess;
+
+use crate::geometry::{GeometryEncoding, GeometrySpec};
+use crate::input::{
+  InputBatchStream, InputOpenOptions, InputSource, RowRange, SourceFormat, require_local_path,
+};
+use crate::metadata::source::SourceDatasetMetadata;
+
+use super::arrow::{gpkg_batch_stream, load_schema, open_gpkg_batch_state};
+use super::metadata::{build_geometry_metadata, collect_layer_summaries, select_layer_name};
+use super::open::{is_gpkg_path, open_gpkg_dataset};
+use super::partition::{GpkgPartitionStream, plan_gpkg_scan_partitions};
+
+#[derive(Debug, Clone)]
+/// Stores normalized GeoPackage metadata and constructs GDAL-backed batch streams.
+pub struct GpkgInputSource {
+  input_path: PathBuf,
+  source_location: String,
+  layer_name: String,
+  schema: arrow_schema::SchemaRef,
+  total_rows: u64,
+  geometry_spec: Option<GeometrySpec>,
+  source_metadata: SourceDatasetMetadata,
+}
+
+/// Open one local GeoPackage layer through GDAL.
+pub async fn open_source(options: &InputOpenOptions) -> Result<Arc<dyn InputSource>> {
+  let path = require_local_path(SourceFormat::GeoPackage, options)?;
+  if !is_gpkg_path(path) {
+    bail!("GeoPackage input must use a .gpkg file: {}", path.display());
+  }
+
+  let dataset = open_gpkg_dataset(path)?;
+  let layer_summaries = collect_layer_summaries(&dataset)?;
+  let layer_name = select_layer_name(options, &layer_summaries)?;
+  let mut layer = dataset
+    .layer_by_name(&layer_name)
+    .with_context(|| format!("failed to open GeoPackage layer {layer_name}"))?;
+  let geometry_metadata = build_geometry_metadata(&mut layer, &layer_name)?;
+  let schema = load_schema(path, &layer_name, &geometry_metadata.column)?;
+  let total_rows = layer
+    .try_feature_count()
+    .unwrap_or_else(|| layer.feature_count());
+  let geometry_kind = geometry_metadata.geometry_types.first().copied();
+  let geometry_spec = Some(GeometrySpec {
+    column: geometry_metadata.column.clone(),
+    encoding: GeometryEncoding::Wkb,
+    geometry_kind,
+  });
+  let source_metadata = SourceDatasetMetadata {
+    geometry: Some(geometry_metadata),
+    passthrough_kv: Vec::new(),
+  };
+
+  Ok(Arc::new(GpkgInputSource {
+    input_path: path.to_path_buf(),
+    source_location: options.location.clone(),
+    layer_name,
+    schema,
+    total_rows,
+    geometry_spec,
+    source_metadata,
+  }))
+}
+
+impl InputSource for GpkgInputSource {
+  fn format_name(&self) -> &'static str {
+    "GeoPackage"
+  }
+
+  fn source_location(&self) -> &str {
+    &self.source_location
+  }
+
+  fn schema(&self) -> Result<arrow_schema::SchemaRef> {
+    Ok(self.schema.clone())
+  }
+
+  fn total_rows(&self) -> Result<u64> {
+    Ok(self.total_rows)
+  }
+
+  fn inferred_geometry_spec(&self) -> Result<Option<GeometrySpec>> {
+    Ok(self.geometry_spec.clone())
+  }
+
+  fn source_metadata(&self) -> Result<SourceDatasetMetadata> {
+    Ok(self.source_metadata.clone())
+  }
+
+  fn read_batches(&self, row_range: RowRange) -> BoxFuture<'_, Result<InputBatchStream>> {
+    let input_path = self.input_path.clone();
+    let layer_name = self.layer_name.clone();
+    let schema = self.schema.clone();
+    Box::pin(async move {
+      let rows_to_read = row_range.num.map(|num| num.saturating_add(row_range.start));
+      let state = open_gpkg_batch_state(&input_path, &layer_name, schema, None, rows_to_read)
+        .with_context(|| format!("failed to stream GeoPackage layer {layer_name}"))?;
+      let mut rows_to_skip = row_range.start;
+      let stream = gpkg_batch_stream(state).filter_map(move |batch| {
+        let out = match batch {
+          Ok(batch) if rows_to_skip >= batch.num_rows() => {
+            rows_to_skip -= batch.num_rows();
+            None
+          }
+          Ok(batch) => {
+            let offset = rows_to_skip;
+            rows_to_skip = 0;
+            Some(Ok(batch.slice(offset, batch.num_rows() - offset)))
+          }
+          Err(err) => Some(Err(err)),
+        };
+        std::future::ready(out)
+      });
+      Ok(Box::pin(stream) as InputBatchStream)
+    })
+  }
+
+  fn to_dataframe<'a>(
+    &'a self,
+    ctx: &'a SessionContext,
+    row_range: RowRange,
+  ) -> BoxFuture<'a, Result<DataFrame>> {
+    let input_path = self.input_path.clone();
+    let layer_name = self.layer_name.clone();
+    let schema = self.schema.clone();
+    let total_rows = self.total_rows;
+    Box::pin(async move {
+      let partitions = plan_gpkg_scan_partitions(
+        &input_path,
+        &layer_name,
+        total_rows,
+        row_range,
+        configured_target_partitions(),
+      )?;
+      let streams: Vec<_> = partitions
+        .into_iter()
+        .map(|partition| {
+          Arc::new(GpkgPartitionStream::new(
+            input_path.clone(),
+            layer_name.clone(),
+            schema.clone(),
+            partition.attribute_filter(),
+          )) as Arc<dyn PartitionStream>
+        })
+        .collect();
+      let table = StreamingTable::try_new(schema, streams)?;
+      let mut df = ctx.read_table(Arc::new(table))?;
+      if let Some(num) = row_range.num {
+        df = df.limit(0, Some(num))?;
+      }
+      Ok(df)
+    })
+  }
+}

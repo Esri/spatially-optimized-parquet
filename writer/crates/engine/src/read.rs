@@ -1,4 +1,4 @@
-//! Adapts lazy DataFusion plans into record-batch streams used by direct writer workflows.
+//! Adapts lazy DataFusion plans into record-batch streams.
 //!
 //! [`read_parquet_df`] creates a minimal DataFusion context for local Parquet input without
 //! eagerly collecting rows. [`execute_partitioned`] preserves physical partition streams for
@@ -6,8 +6,7 @@
 //! downstream file ordering must follow the DataFusion plan.
 //!
 //! The main spatial job usually builds its own configured session through `engine::session`.
-//! These helpers primarily support format adapters and legacy paths that need a compact
-//! read-and-stream boundary.
+//! These helpers primarily support format adapters that need a compact read-and-stream boundary.
 
 use anyhow::{Context, Result};
 use datafusion::dataframe::DataFrame;

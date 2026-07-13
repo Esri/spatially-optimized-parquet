@@ -6,8 +6,7 @@ use engine::session::new_datafusion_session;
 use futures_util::StreamExt;
 use tempfile::TempDir;
 
-use spatial::input::parquet::ParquetInputProvider;
-use spatial::input::{InputOpenOptions, InputProvider, RowRange, open_input};
+use spatial::input::{InputOpenOptions, RowRange, SourceFormat, open_input};
 
 mod common;
 use common::{runtime, sample_batch_with_geometry, sample_schema_with_geometry, write_parquet};
@@ -39,9 +38,11 @@ fn open_input_accepts_single_parquet_file() {
     &[],
   );
 
-  let providers: Vec<Box<dyn InputProvider>> = vec![Box::new(ParquetInputProvider::new())];
   let input = runtime()
-    .block_on(open_input(&InputOpenOptions::new(path.clone()), &providers))
+    .block_on(open_input(
+      SourceFormat::Parquet,
+      &InputOpenOptions::new(path.clone()),
+    ))
     .unwrap();
   assert_eq!(input.format_name(), "parquet");
   assert_eq!(input.source_location(), path.to_str().unwrap());
@@ -68,11 +69,10 @@ fn open_input_accepts_directory_of_parquet_files() {
     &[],
   );
 
-  let providers: Vec<Box<dyn InputProvider>> = vec![Box::new(ParquetInputProvider::new())];
   let input = runtime()
     .block_on(open_input(
+      SourceFormat::Parquet,
       &InputOpenOptions::new(temp.path().to_path_buf()),
-      &providers,
     ))
     .unwrap();
   assert_eq!(input.format_name(), "parquet");
@@ -85,16 +85,14 @@ fn open_input_rejects_non_parquet_file() {
   let path = temp.path().join("data.txt");
   std::fs::write(&path, "hi").unwrap();
 
-  let providers: Vec<Box<dyn InputProvider>> = vec![Box::new(ParquetInputProvider::new())];
-  let err = match runtime().block_on(open_input(&InputOpenOptions::new(path.clone()), &providers)) {
+  let err = match runtime().block_on(open_input(
+    SourceFormat::Parquet,
+    &InputOpenOptions::new(path.clone()),
+  )) {
     Ok(_) => panic!("expected non-parquet input to be rejected"),
     Err(err) => err,
   };
-  assert!(
-    err
-      .to_string()
-      .contains("no input provider could open input")
-  );
+  assert!(err.to_string().contains("parquet input must be"));
 }
 
 #[test]
@@ -121,9 +119,11 @@ fn input_schema_and_batch_limit_work() {
     &[],
   );
 
-  let providers: Vec<Box<dyn InputProvider>> = vec![Box::new(ParquetInputProvider::new())];
   let input = runtime()
-    .block_on(open_input(&InputOpenOptions::new(path.clone()), &providers))
+    .block_on(open_input(
+      SourceFormat::Parquet,
+      &InputOpenOptions::new(path.clone()),
+    ))
     .unwrap();
   let schema = input.schema().unwrap();
   assert!(schema.field_with_name("name").is_ok());
@@ -170,9 +170,11 @@ fn parquet_input_can_produce_dataframe_for_execution() {
     &[],
   );
 
-  let providers: Vec<Box<dyn InputProvider>> = vec![Box::new(ParquetInputProvider::new())];
   let input = runtime()
-    .block_on(open_input(&InputOpenOptions::new(path.clone()), &providers))
+    .block_on(open_input(
+      SourceFormat::Parquet,
+      &InputOpenOptions::new(path.clone()),
+    ))
     .unwrap();
   let session = new_datafusion_session().unwrap();
 

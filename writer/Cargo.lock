@@ -1554,12 +1554,9 @@ name = "engine"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arrow-array",
  "arrow-schema",
  "datafusion",
  "datafusion-execution",
- "futures",
- "futures-util",
  "parquet",
  "tempfile",
  "thiserror 2.0.18",
@@ -3671,9 +3668,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow-array",
- "arrow-ord",
  "arrow-schema",
- "arrow-select",
  "async-trait",
  "datafusion",
  "engine",
@@ -3689,7 +3684,6 @@ dependencies = [
  "object_store",
  "parquet",
  "prost",
- "rayon",
  "serde",
  "serde_json",
  "tempfile",

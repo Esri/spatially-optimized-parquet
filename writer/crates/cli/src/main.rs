@@ -14,8 +14,9 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-use spatial::input::RowRange;
+use spatial::input::{RowRange, SourceFormat};
 use spatial::job::{OptimizeJobOptions, run_optimize_job};
+use spatial::output::GeoParquetOutputMode;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -26,6 +27,8 @@ use spatial::job::{OptimizeJobOptions, run_optimize_job};
 struct Cli {
   #[arg(long, value_name = "PATH")]
   input: String,
+  #[arg(long, value_name = "FORMAT")]
+  input_format: Option<SourceFormat>,
   #[arg(long, value_name = "PATH")]
   output: PathBuf,
   #[arg(long, value_name = "N")]
@@ -44,6 +47,12 @@ struct Cli {
   layer: Option<String>,
   #[arg(long, value_name = "NAME")]
   geometry_column: Option<String>,
+  #[arg(
+    long,
+    value_name = "LATEST_WKID",
+    help = "Set the input CRS when source geometry metadata does not declare one"
+  )]
+  in_sr: Option<u32>,
   #[arg(
     long,
     help = "Write a root bbox struct column and GeoParquet 1.1 covering metadata"
@@ -76,6 +85,7 @@ async fn main() -> Result<()> {
 async fn run(cli: Cli) -> Result<()> {
   let options = OptimizeJobOptions {
     input: cli.input,
+    input_format: cli.input_format,
     output: cli.output,
     output_files: cli.output_files,
     compression: cli.compression,
@@ -85,11 +95,16 @@ async fn run(cli: Cli) -> Result<()> {
     },
     layer: cli.layer,
     geometry_column: cli.geometry_column,
+    input_wkid: cli.in_sr,
     covering: cli.covering,
     overwrite: cli.overwrite,
     progress: !cli.explain,
     explain: cli.explain,
-    no_optimization: cli.no_optimization,
+    output_mode: if cli.no_optimization {
+      GeoParquetOutputMode::Plain
+    } else {
+      GeoParquetOutputMode::Optimized
+    },
   };
   run_optimize_job(options).await
 }
