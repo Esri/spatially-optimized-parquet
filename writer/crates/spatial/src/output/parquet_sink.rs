@@ -38,6 +38,7 @@ use futures_util::StreamExt;
 use tokio::task::JoinSet;
 
 use crate::pipeline::{SharedWriteReporter, WriteProgress};
+use crate::plan_diagnostics::print_physical_plan;
 
 struct WriteTracker {
   total_rows: u64,
@@ -225,7 +226,7 @@ impl TrackingParquetWriter {
     )?;
     let plan: Arc<dyn ExecutionPlan> =
       Arc::new(DataSinkExec::new(input, Arc::clone(&sink) as _, sort_order));
-    let rows_written = execute_sink_plan(plan, sink, context).await?;
+    let rows_written = execute_sink_plan("single-file sink", plan, sink, context).await?;
     self.tracker.finish(rows_written);
     Ok(rows_written)
   }
@@ -273,7 +274,7 @@ impl TrackingParquetWriter {
     )?;
     let plan: Arc<dyn ExecutionPlan> =
       Arc::new(ConcurrentPartitionSinkExec::new(input, Arc::clone(&sink)));
-    let rows_written = execute_sink_plan(plan, sink, context).await?;
+    let rows_written = execute_sink_plan("partitioned sink", plan, sink, context).await?;
     self.tracker.finish(rows_written);
     Ok(rows_written)
   }
@@ -310,10 +311,12 @@ fn create_sink(
 }
 
 async fn execute_sink_plan(
+  label: &str,
   plan: Arc<dyn ExecutionPlan>,
   sink: Arc<TrackingParquetSink>,
   context: Arc<TaskContext>,
 ) -> Result<u64> {
+  print_physical_plan(label, plan.as_ref());
   let batches = match collect(plan, Arc::clone(&context)).await {
     Ok(batches) => batches,
     Err(error) => {

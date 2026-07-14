@@ -3,6 +3,9 @@ name = "spatial"
 version.workspace = true
 edition.workspace = true
 
+[features]
+print-plan = []
+
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"

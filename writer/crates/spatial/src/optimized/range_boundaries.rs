@@ -8,6 +8,8 @@ use datafusion::functions_aggregate::expr_fn::min;
 use datafusion::logical_expr::expr_fn::ident;
 use datafusion::prelude::lit;
 
+use crate::plan_diagnostics::collect_dataframe;
+
 use super::clustering::ClusterRangeBoundaries;
 
 /// Estimate balanced cluster-key ranges with one minimum and approximate percentiles.
@@ -29,10 +31,8 @@ pub(super) async fn compute_cluster_range_boundaries(
     )
     .alias(format!("range_boundary_{index}"))
   }));
-  let batches = dataframe
-    .aggregate(vec![], aggregate_expressions)?
-    .collect()
-    .await?;
+  let aggregate_dataframe = dataframe.aggregate(vec![], aggregate_expressions)?;
+  let batches = collect_dataframe(aggregate_dataframe, "cluster boundary aggregate").await?;
   let Some(batch) = batches.first() else {
     return Ok(ClusterRangeBoundaries::new(0, Vec::new()));
   };

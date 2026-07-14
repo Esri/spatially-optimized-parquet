@@ -9,6 +9,7 @@ use crate::geometry::Extent2D;
 use crate::geoparquet::{PreparedSpatialFrame, ResolvedGeoParquetSource, bbox_field_expr};
 use crate::input::{InputSource, RowRange};
 use crate::output::ReprojectionSpec;
+use crate::plan_diagnostics::collect_dataframe;
 
 const EXTENT_XMIN_COLUMN: &str = "__extent_xmin";
 const EXTENT_YMIN_COLUMN: &str = "__extent_ymin";
@@ -47,7 +48,7 @@ impl<'a> TargetExtentResolver<'a> {
       source.source_extent
     } else {
       let aggregate_dataframe = target_extent_aggregate(prepared.dataframe())?;
-      let batches = aggregate_dataframe.collect().await?;
+      let batches = collect_dataframe(aggregate_dataframe, "target extent aggregate").await?;
       extract_target_extent(&batches)?
     };
     Ok(target_extent)
