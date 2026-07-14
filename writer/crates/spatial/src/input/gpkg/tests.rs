@@ -6,8 +6,10 @@ use arrow_array::{Int32Array, StringArray, StringViewArray};
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
 use datafusion::physical_plan::ExecutionPlanProperties;
 use futures_util::StreamExt;
-use gdal::vector::LayerAccess;
-use gdal_sys::OGRwkbGeometryType;
+use gdal::spatial_ref::SpatialRef;
+use gdal::vector::{Feature, Geometry, LayerAccess, LayerOptions};
+use gdal::{Dataset, DriverManager};
+use gdal_sys::{OGRFieldType, OGRwkbGeometryType};
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
@@ -15,10 +17,70 @@ use crate::geometry::{Extent2D, GeometryKind};
 use crate::input::{InputOpenOptions, InputSource, RowRange, SourceFormat, open_input};
 use crate::session::DataFusionSession;
 
-use crate::test_support::{GpkgFeature, GpkgLayerSpec, open_gpkg_dataset, write_gpkg};
-
 fn runtime() -> Runtime {
   Runtime::new().unwrap()
+}
+
+struct GpkgFeature<'a> {
+  id: i32,
+  name: Option<&'a str>,
+  geometry_wkt: &'a str,
+}
+
+struct GpkgLayerSpec<'a> {
+  name: &'a str,
+  geometry_type: OGRwkbGeometryType::Type,
+  epsg: Option<u32>,
+  features: &'a [GpkgFeature<'a>],
+}
+
+fn write_gpkg(path: &Path, layers: &[GpkgLayerSpec<'_>]) {
+  if path.exists() {
+    std::fs::remove_file(path).unwrap();
+  }
+  let driver = DriverManager::get_driver_by_name("GPKG")
+    .expect("GDAL GPKG driver is required for GeoPackage tests");
+  let mut dataset = driver.create_vector_only(path).unwrap();
+  for layer_spec in layers {
+    let spatial_ref = layer_spec
+      .epsg
+      .map(|epsg| SpatialRef::from_epsg(epsg).unwrap());
+    let geometry_options = ["GEOMETRY_NAME=geometry"];
+    let layer = dataset
+      .create_layer(LayerOptions {
+        name: layer_spec.name,
+        srs: spatial_ref.as_ref(),
+        ty: layer_spec.geometry_type,
+        options: Some(&geometry_options),
+      })
+      .unwrap();
+    layer
+      .create_defn_fields(&[
+        ("id", OGRFieldType::OFTInteger),
+        ("name", OGRFieldType::OFTString),
+      ])
+      .unwrap();
+    let id_index = layer.defn().field_index("id").unwrap();
+    let name_index = layer.defn().field_index("name").unwrap();
+    for feature_spec in layer_spec.features {
+      let mut feature = Feature::new(layer.defn()).unwrap();
+      feature
+        .set_field_integer(id_index, feature_spec.id)
+        .unwrap();
+      if let Some(name) = feature_spec.name {
+        feature.set_field_string(name_index, name).unwrap();
+      }
+      feature
+        .set_geometry(Geometry::from_wkt(feature_spec.geometry_wkt).unwrap())
+        .unwrap();
+      feature.create(&layer).unwrap();
+    }
+  }
+  dataset.flush_cache().unwrap();
+}
+
+fn open_gpkg_dataset(path: &Path) -> Dataset {
+  Dataset::open(path).unwrap()
 }
 
 fn open_gpkg_input(path: &Path, layer: Option<&str>) -> Arc<dyn InputSource> {

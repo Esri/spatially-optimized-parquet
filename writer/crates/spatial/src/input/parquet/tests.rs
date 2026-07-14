@@ -1,18 +1,67 @@
+use std::fs::File;
+use std::path::Path;
 use std::sync::Arc;
 
-use arrow_array::RecordBatch;
-use arrow_schema::{DataType, Field, Schema};
+use arrow_array::{BinaryArray, Int32Array, RecordBatch};
+use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use futures_util::StreamExt;
+use parquet::arrow::arrow_writer::ArrowWriter;
+use parquet::basic::Compression;
+use parquet::file::metadata::KeyValue;
+use parquet::file::properties::WriterProperties;
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
 use crate::input::{InputOpenOptions, RowRange, SourceFormat, open_input};
 use crate::session::DataFusionSession;
 
-use crate::test_support::{sample_batch_with_geometry, sample_schema_with_geometry, write_parquet};
-
 fn runtime() -> Runtime {
   Runtime::new().unwrap()
+}
+
+fn sample_schema_with_geometry() -> SchemaRef {
+  Arc::new(Schema::new(vec![
+    Field::new("id", DataType::Int32, false),
+    Field::new("geometry", DataType::Binary, true),
+  ]))
+}
+
+fn sample_batch_with_geometry(wkb_values: Vec<Option<Vec<u8>>>) -> RecordBatch {
+  let ids = Int32Array::from_iter_values(1..=wkb_values.len() as i32);
+  let values = wkb_values
+    .iter()
+    .map(|value| value.as_deref())
+    .collect::<Vec<_>>();
+  RecordBatch::try_new(
+    sample_schema_with_geometry(),
+    vec![Arc::new(ids), Arc::new(BinaryArray::from(values))],
+  )
+  .unwrap()
+}
+
+fn write_parquet(
+  path: &Path,
+  schema: &SchemaRef,
+  batches: &[RecordBatch],
+  compression: Compression,
+  metadata: &[KeyValue],
+) {
+  let properties = WriterProperties::builder()
+    .set_compression(compression)
+    .build();
+  let mut writer = ArrowWriter::try_new(
+    File::create(path).unwrap(),
+    schema.clone(),
+    Some(properties),
+  )
+  .unwrap();
+  for batch in batches {
+    writer.write(batch).unwrap();
+  }
+  for entry in metadata {
+    writer.append_key_value_metadata(entry.clone());
+  }
+  writer.close().unwrap();
 }
 
 fn string_value(array: &dyn arrow_array::Array, index: usize) -> String {

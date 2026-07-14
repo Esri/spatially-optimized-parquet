@@ -16,8 +16,6 @@ use crate::geometry::{GeometryEncoding, GeometrySpec};
 #[cfg(test)]
 use crate::input::source::InputBatchStream;
 use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata};
-#[cfg(test)]
-use crate::test_support::scan_parquet;
 
 use super::metadata::{
   load_covering_metadata, load_geo_metadata, load_point_optimization_metadata,
@@ -121,7 +119,10 @@ impl InputSource for ParquetInputSource {
       ParquetInputLocation::Local { input_path } => {
         let input_path = input_path.clone();
         Box::pin(async move {
-          let mut dataframe = scan_parquet(&input_path).await?;
+          let context = SessionContext::new();
+          let mut dataframe = context
+            .read_parquet(&input_path, Default::default())
+            .await?;
           if !row_range.is_full() {
             dataframe = dataframe.limit(row_range.start(), row_range.num())?;
           }

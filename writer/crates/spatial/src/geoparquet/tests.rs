@@ -1,19 +1,23 @@
 use std::collections::HashMap;
+use std::fs::File;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
-use arrow_array::RecordBatch;
-use arrow_schema::SchemaRef;
+use arrow_array::{BinaryArray, Int32Array, RecordBatch};
+use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
 use futures_util::Stream;
 use futures_util::future::BoxFuture;
 use futures_util::stream;
 use gdal::spatial_ref::SpatialRef;
+use parquet::arrow::arrow_writer::ArrowWriter;
+use parquet::basic::Compression;
 use parquet::file::metadata::KeyValue;
+use parquet::file::properties::WriterProperties;
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
@@ -25,14 +29,83 @@ use crate::input::{
 
 use super::resolve_source;
 
-use crate::test_support::{
-  geoparquet_kv, sample_batch_with_geometry, sample_schema_with_geometry, wkb_point, write_parquet,
-};
-
 type InputBatchStream = Pin<Box<dyn Stream<Item = Result<RecordBatch>> + Send + 'static>>;
 
 fn runtime() -> Runtime {
   Runtime::new().unwrap()
+}
+
+fn sample_schema_with_geometry() -> SchemaRef {
+  Arc::new(Schema::new(vec![
+    Field::new("id", DataType::Int32, false),
+    Field::new("geometry", DataType::Binary, true),
+  ]))
+}
+
+fn sample_batch_with_geometry(wkb_values: Vec<Option<Vec<u8>>>) -> RecordBatch {
+  let ids = Int32Array::from_iter_values(1..=wkb_values.len() as i32);
+  let values = wkb_values
+    .iter()
+    .map(|value| value.as_deref())
+    .collect::<Vec<_>>();
+  RecordBatch::try_new(
+    sample_schema_with_geometry(),
+    vec![Arc::new(ids), Arc::new(BinaryArray::from(values))],
+  )
+  .unwrap()
+}
+
+fn wkb_point(x: f64, y: f64) -> Vec<u8> {
+  let geometry = geo::Geometry::Point(geo::Point::new(x, y));
+  let mut buffer = Vec::new();
+  wkb::writer::write_geometry(&mut buffer, &geometry, &Default::default()).unwrap();
+  buffer
+}
+
+fn write_parquet(
+  path: &Path,
+  schema: &SchemaRef,
+  batches: &[RecordBatch],
+  compression: Compression,
+  metadata: &[KeyValue],
+) {
+  let properties = WriterProperties::builder()
+    .set_compression(compression)
+    .build();
+  let mut writer = ArrowWriter::try_new(
+    File::create(path).unwrap(),
+    schema.clone(),
+    Some(properties),
+  )
+  .unwrap();
+  for batch in batches {
+    writer.write(batch).unwrap();
+  }
+  for entry in metadata {
+    writer.append_key_value_metadata(entry.clone());
+  }
+  writer.close().unwrap();
+}
+
+fn geoparquet_kv(primary_column: &str, geometry_types: &[&str]) -> KeyValue {
+  let crs = SpatialRef::from_epsg(4326).unwrap().to_projjson().unwrap();
+  let crs: serde_json::Value = serde_json::from_str(&crs).unwrap();
+  let geometry_types = geometry_types
+    .iter()
+    .map(|item| serde_json::Value::String((*item).to_string()))
+    .collect::<Vec<_>>();
+  let value = serde_json::json!({
+    "version": "1.1.0",
+    "primary_column": primary_column,
+    "columns": {
+      primary_column: {
+        "encoding": "WKB",
+        "geometry_types": geometry_types,
+        "crs": crs
+      }
+    }
+  });
+  KeyValue::new("geo".to_string(), Some(value.to_string()))
 }
 
 fn open_parquet_input(path: &Path) -> Arc<dyn InputSource> {

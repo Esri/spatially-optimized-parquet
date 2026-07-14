@@ -48,19 +48,55 @@ fn validate_dataset(
 
 #[cfg(test)]
 mod tests {
+  use std::fs::File;
+  use std::path::Path;
   use std::sync::Arc;
 
   use arrow_array::{BinaryArray, Float64Array, RecordBatch, UInt64Array};
-  use arrow_schema::{DataType, Field, Schema};
+  use arrow_schema::{DataType, Field, Schema, SchemaRef};
   use gdal::spatial_ref::SpatialRef;
+  use parquet::arrow::arrow_writer::ArrowWriter;
+  use parquet::basic::Compression;
   use parquet::file::metadata::KeyValue;
+  use parquet::file::properties::WriterProperties;
   use tempfile::TempDir;
 
   use crate::geometry::Extent2D;
   use crate::optimized::point_z_code;
-  use crate::test_support::{wkb_point, write_parquet};
 
   use super::*;
+
+  fn wkb_point(x: f64, y: f64) -> Vec<u8> {
+    let geometry = geo::Geometry::Point(geo::Point::new(x, y));
+    let mut buffer = Vec::new();
+    wkb::writer::write_geometry(&mut buffer, &geometry, &Default::default()).unwrap();
+    buffer
+  }
+
+  fn write_parquet(
+    path: &Path,
+    schema: &SchemaRef,
+    batches: &[RecordBatch],
+    compression: Compression,
+    metadata: &[KeyValue],
+  ) {
+    let properties = WriterProperties::builder()
+      .set_compression(compression)
+      .build();
+    let mut writer = ArrowWriter::try_new(
+      File::create(path).unwrap(),
+      schema.clone(),
+      Some(properties),
+    )
+    .unwrap();
+    for batch in batches {
+      writer.write(batch).unwrap();
+    }
+    for entry in metadata {
+      writer.append_key_value_metadata(entry.clone());
+    }
+    writer.close().unwrap();
+  }
 
   #[test]
   fn metadata_accepts_matching_wgs84_and_web_mercator() {

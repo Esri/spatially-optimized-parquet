@@ -20,8 +20,6 @@ mod output;
 mod parquet_dataset;
 mod pipeline;
 mod session;
-#[cfg(test)]
-mod test_support;
 pub mod validate;
 
 pub use input::{RowRange, SourceFormat};

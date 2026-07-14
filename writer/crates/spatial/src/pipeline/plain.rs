@@ -29,7 +29,3 @@ impl PlainPipeline {
     Ok(state.finish_plain(rows_written))
   }
 }
-
-#[cfg(test)]
-#[path = "tests.rs"]
-mod tests;

@@ -1,27 +1,24 @@
 use std::path::Path;
 
+use gdal::DriverManager;
 use gdal::spatial_ref::SpatialRef;
 use gdal::vector::{Feature, Geometry, LayerAccess, LayerOptions};
-use gdal::{Dataset, DriverManager};
 use gdal_sys::{OGRFieldType, OGRwkbGeometryType};
 
-#[allow(dead_code)]
-pub(crate) struct GpkgFeature<'a> {
-  pub(crate) id: i32,
-  pub(crate) name: Option<&'a str>,
-  pub(crate) geometry_wkt: &'a str,
+pub struct GpkgFeature<'a> {
+  pub id: i32,
+  pub name: Option<&'a str>,
+  pub geometry_wkt: &'a str,
 }
 
-#[allow(dead_code)]
-pub(crate) struct GpkgLayerSpec<'a> {
-  pub(crate) name: &'a str,
-  pub(crate) geometry_type: OGRwkbGeometryType::Type,
-  pub(crate) epsg: Option<u32>,
-  pub(crate) features: &'a [GpkgFeature<'a>],
+pub struct GpkgLayerSpec<'a> {
+  pub name: &'a str,
+  pub geometry_type: OGRwkbGeometryType::Type,
+  pub epsg: Option<u32>,
+  pub features: &'a [GpkgFeature<'a>],
 }
 
-#[allow(dead_code)]
-pub(crate) fn write_gpkg(path: &Path, layers: &[GpkgLayerSpec<'_>]) {
+pub fn write_gpkg(path: &Path, layers: &[GpkgLayerSpec<'_>]) {
   if path.exists() {
     std::fs::remove_file(path).unwrap();
   }
@@ -49,25 +46,23 @@ pub(crate) fn write_gpkg(path: &Path, layers: &[GpkgLayerSpec<'_>]) {
         ("name", OGRFieldType::OFTString),
       ])
       .unwrap();
-    let id_idx = layer.defn().field_index("id").unwrap();
-    let name_idx = layer.defn().field_index("name").unwrap();
+    let id_index = layer.defn().field_index("id").unwrap();
+    let name_index = layer.defn().field_index("name").unwrap();
 
     for feature_spec in layer_spec.features {
       let mut feature = Feature::new(layer.defn()).unwrap();
-      feature.set_field_integer(id_idx, feature_spec.id).unwrap();
+      feature
+        .set_field_integer(id_index, feature_spec.id)
+        .unwrap();
       if let Some(name) = feature_spec.name {
-        feature.set_field_string(name_idx, name).unwrap();
+        feature.set_field_string(name_index, name).unwrap();
       }
-      let geometry = Geometry::from_wkt(feature_spec.geometry_wkt).unwrap();
-      feature.set_geometry(geometry).unwrap();
+      feature
+        .set_geometry(Geometry::from_wkt(feature_spec.geometry_wkt).unwrap())
+        .unwrap();
       feature.create(&layer).unwrap();
     }
   }
 
   dataset.flush_cache().unwrap();
-}
-
-#[allow(dead_code)]
-pub(crate) fn open_gpkg_dataset(path: &Path) -> Dataset {
-  Dataset::open(path).unwrap()
 }
