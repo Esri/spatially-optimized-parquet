@@ -5,7 +5,7 @@ use crate::geometry::Extent2D;
 use super::super::ClusterKey;
 
 /// Stores the default number of quantization bits per point coordinate axis.
-pub(in crate::optimized) const DEFAULT_COORDINATE_PRECISION: u32 = 20;
+pub(crate) const DEFAULT_COORDINATE_PRECISION: u32 = 20;
 
 /// Quantize a point within the full extent and interleave its x/y bits.
 pub(crate) fn point_z_code(

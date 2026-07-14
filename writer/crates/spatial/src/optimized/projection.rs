@@ -1,18 +1,16 @@
 //! Creates the lazy spatially ordered projection for optimized output.
 
-use crate::geoparquet::feature_bbox_expr;
+use crate::geoparquet::bbox_field_expr;
 use crate::optimized::clustering::{
-  ClusterRangeBoundaries, bounds_expr, cluster_key_column, cluster_partition_column,
-  cluster_sort_expr, non_point_xzcode_from_bounds_expr, point_expr, point_zcode_from_xy_expr,
+  ClusterRangeBoundaries, cluster_key_column, cluster_partition_column, cluster_sort_expr,
+  non_point_xzcode_from_bounds_expr, point_expr, point_zcode_from_xy_expr,
 };
 use crate::optimized::multiscale::non_point_geodisplay_expr;
 use crate::optimized::multiscale::{
-  GEODISPLAY_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_CODE_COLUMN, TEMP_BOUNDS_COLUMN,
-  TEMP_POINT_COORDS_COLUMN, TEMP_REPROJECTED_GEOMETRY_COLUMN, TEMP_XMAX_COLUMN, TEMP_XMIN_COLUMN,
-  TEMP_XZ_CODE_COLUMN, TEMP_YMAX_COLUMN, TEMP_YMIN_COLUMN,
+  COVERING_BBOX_COLUMN, GEODISPLAY_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_CODE_COLUMN,
+  TEMP_XZ_CODE_COLUMN,
 };
 use crate::optimized::{ClusteringFamily, OptimizedGeometry, ResolvedOptimization};
-use crate::output::{CoordinateTransformSpec, reproject_geometry_expr};
 use anyhow::Result;
 use datafusion::dataframe::DataFrame;
 use datafusion::functions::core::expr_ext::FieldAccessor;
@@ -35,10 +33,6 @@ pub(super) fn single_file_projection(
       context,
       None,
       None,
-      context
-        .reprojection()
-        .requires_reprojection()
-        .then_some(TEMP_REPROJECTED_GEOMETRY_COLUMN),
       covering,
     ))
     .map_err(Into::into)
@@ -50,11 +44,7 @@ pub(super) fn partitioned_range_source(
   input_dataframe: DataFrame,
 ) -> Result<DataFrame> {
   add_sort_columns_dataframe(
-    narrow_helper_projection(
-      input_dataframe,
-      context.geometry(),
-      context.reprojection().transform(),
-    )?,
+    narrow_helper_projection(input_dataframe, context.geometry())?,
     context,
   )
 }
@@ -83,10 +73,6 @@ pub(super) fn partitioned_projection(
       context,
       Some(partition_column),
       retained_cluster_key_column,
-      context
-        .reprojection()
-        .requires_reprojection()
-        .then_some(TEMP_REPROJECTED_GEOMETRY_COLUMN),
       covering,
     ))
     .map_err(Into::into)
@@ -95,10 +81,12 @@ pub(super) fn partitioned_projection(
 fn narrow_helper_projection(
   dataframe: DataFrame,
   geometry: &OptimizedGeometry,
-  transform: Option<&CoordinateTransformSpec>,
 ) -> Result<DataFrame> {
-  let projected = dataframe.select(vec![ident(&geometry.geometry_spec.column)])?;
-  add_geometry_helper_columns_dataframe(projected, geometry, transform)
+  let projected = dataframe.select(vec![
+    ident(&geometry.geometry_spec.column),
+    ident(COVERING_BBOX_COLUMN),
+  ])?;
+  add_geometry_helper_columns_dataframe(projected, geometry, false)
 }
 
 fn output_projection_expressions(
@@ -106,43 +94,19 @@ fn output_projection_expressions(
   context: &ResolvedOptimization,
   partition_column: Option<&str>,
   retained_cluster_key_column: Option<&str>,
-  projected_geometry_column: Option<&str>,
   covering: bool,
 ) -> Vec<Expr> {
   let mut expressions = source_schema
     .fields()
     .iter()
     .filter(|field| {
-      !is_generated_optimized_output_column(field.name(), context.geometry().clustering_family)
+      field.name() != COVERING_BBOX_COLUMN
+        && !is_generated_optimized_output_column(field.name(), context.geometry().clustering_family)
     })
-    .map(|field| {
-      if field.name() == &context.geometry().geometry_spec.column
-        && let Some(projected_geometry_column) = projected_geometry_column
-      {
-        return ident(projected_geometry_column).alias(field.name());
-      }
-      ident(field.name())
-    })
+    .map(|field| ident(field.name()))
     .collect::<Vec<_>>();
   if covering {
-    let geometry_column =
-      projected_geometry_column.unwrap_or(&context.geometry().geometry_spec.column);
-    match context.geometry().clustering_family {
-      ClusteringFamily::Point => expressions.push(feature_bbox_expr(
-        geometry_column,
-        POINT_X_COLUMN,
-        POINT_Y_COLUMN,
-        POINT_X_COLUMN,
-        POINT_Y_COLUMN,
-      )),
-      ClusteringFamily::NonPoint => expressions.push(feature_bbox_expr(
-        geometry_column,
-        TEMP_XMIN_COLUMN,
-        TEMP_YMIN_COLUMN,
-        TEMP_XMAX_COLUMN,
-        TEMP_YMAX_COLUMN,
-      )),
-    }
+    expressions.push(ident(COVERING_BBOX_COLUMN));
   }
   match context.geometry().clustering_family {
     ClusteringFamily::Point => {
@@ -151,7 +115,7 @@ fn output_projection_expressions(
       expressions.push(ident(POINT_Y_COLUMN));
     }
     ClusteringFamily::NonPoint => expressions.push(non_point_geodisplay_expr(
-      projected_geometry_column.unwrap_or(&context.geometry().geometry_spec.column),
+      &context.geometry().geometry_spec.column,
       context.geometry().geometry_type,
       context.encodings(),
     )),
@@ -169,51 +133,32 @@ fn base_helper_projection(
   dataframe: DataFrame,
   source_schema: &arrow_schema::Schema,
   geometry: &OptimizedGeometry,
-  transform: Option<&CoordinateTransformSpec>,
+  point_optimization_reused: bool,
 ) -> Result<DataFrame> {
   let projected = dataframe.select(
     source_schema
       .fields()
       .iter()
+      .filter(|field| field.name() != COVERING_BBOX_COLUMN)
       .map(|field| ident(field.name()))
+      .chain(std::iter::once(ident(COVERING_BBOX_COLUMN)))
       .collect::<Vec<_>>(),
   )?;
-  add_geometry_helper_columns_dataframe(projected, geometry, transform)
+  add_geometry_helper_columns_dataframe(projected, geometry, point_optimization_reused)
 }
 
 fn add_geometry_helper_columns_dataframe(
   mut projected: DataFrame,
   geometry: &OptimizedGeometry,
-  transform: Option<&CoordinateTransformSpec>,
+  point_optimization_reused: bool,
 ) -> Result<DataFrame> {
-  let geometry_column = if let Some(transform) = transform {
-    projected = projected.with_column(
-      TEMP_REPROJECTED_GEOMETRY_COLUMN,
-      reproject_geometry_expr(&geometry.geometry_spec.column, transform),
-    )?;
-    TEMP_REPROJECTED_GEOMETRY_COLUMN
-  } else {
-    &geometry.geometry_spec.column
-  };
   match geometry.clustering_family {
-    ClusteringFamily::Point => {
-      projected = projected.with_column(TEMP_POINT_COORDS_COLUMN, point_expr(geometry_column))?;
-      projected =
-        projected.with_column(POINT_X_COLUMN, ident(TEMP_POINT_COORDS_COLUMN).field("x"))?;
-      projected =
-        projected.with_column(POINT_Y_COLUMN, ident(TEMP_POINT_COORDS_COLUMN).field("y"))?;
+    ClusteringFamily::Point if !point_optimization_reused => {
+      let point = point_expr(&geometry.geometry_spec.column);
+      projected = projected.with_column(POINT_X_COLUMN, point.clone().field("x"))?;
+      projected = projected.with_column(POINT_Y_COLUMN, point.field("y"))?;
     }
-    ClusteringFamily::NonPoint => {
-      projected = projected.with_column(TEMP_BOUNDS_COLUMN, bounds_expr(geometry_column))?;
-      projected =
-        projected.with_column(TEMP_XMIN_COLUMN, ident(TEMP_BOUNDS_COLUMN).field("xmin"))?;
-      projected =
-        projected.with_column(TEMP_YMIN_COLUMN, ident(TEMP_BOUNDS_COLUMN).field("ymin"))?;
-      projected =
-        projected.with_column(TEMP_XMAX_COLUMN, ident(TEMP_BOUNDS_COLUMN).field("xmax"))?;
-      projected =
-        projected.with_column(TEMP_YMAX_COLUMN, ident(TEMP_BOUNDS_COLUMN).field("ymax"))?;
-    }
+    ClusteringFamily::Point | ClusteringFamily::NonPoint => {}
   }
   Ok(projected)
 }
@@ -223,17 +168,22 @@ fn add_sort_columns_dataframe(
   context: &ResolvedOptimization,
 ) -> Result<DataFrame> {
   match context.geometry().clustering_family {
-    ClusteringFamily::Point => Ok(dataframe.with_column(
+    ClusteringFamily::Point if !context.point_optimization_reused() => Ok(dataframe.with_column(
       POINT_Z_CODE_COLUMN,
-      point_zcode_from_xy_expr(POINT_X_COLUMN, POINT_Y_COLUMN, context.target_extent()),
+      point_zcode_from_xy_expr(
+        bbox_field_expr("xmin"),
+        bbox_field_expr("ymin"),
+        context.target_extent(),
+      ),
     )?),
+    ClusteringFamily::Point => Ok(dataframe),
     ClusteringFamily::NonPoint => Ok(dataframe.with_column(
       TEMP_XZ_CODE_COLUMN,
       non_point_xzcode_from_bounds_expr(
-        TEMP_XMIN_COLUMN,
-        TEMP_YMIN_COLUMN,
-        TEMP_XMAX_COLUMN,
-        TEMP_YMAX_COLUMN,
+        bbox_field_expr("xmin"),
+        bbox_field_expr("ymin"),
+        bbox_field_expr("xmax"),
+        bbox_field_expr("ymax"),
         context.target_extent(),
       ),
     )?),
@@ -249,7 +199,7 @@ fn helper_projection(
     dataframe,
     source_schema,
     context.geometry(),
-    context.reprojection().transform(),
+    context.point_optimization_reused(),
   )?;
   add_sort_columns_dataframe(projected, context)
 }

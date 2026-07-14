@@ -5,10 +5,10 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Arc, OnceLock};
 
 use arrow_array::builder::BinaryBuilder;
-use arrow_array::{Array, ArrayRef, Float64Array, StructArray, UInt64Array};
+use arrow_array::{Array, ArrayRef, StructArray, UInt64Array};
 use arrow_schema::{DataType, Field, Fields};
 use datafusion::common::cast::{
-  as_binary_array, as_binary_view_array, as_float64_array, as_large_binary_array, as_uint64_array,
+  as_binary_array, as_binary_view_array, as_large_binary_array, as_uint64_array,
 };
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
 use datafusion::logical_expr::{
@@ -21,8 +21,7 @@ use crate::geometry::{BinaryValueAccess, to_datafusion_error};
 use crate::optimized::OptimizedGeometryType;
 
 use super::{
-  BOUNDS_COLUMN, GEODISPLAY_COLUMN, GeometryEncodeScratch, GeometryEncoding, TEMP_XMAX_COLUMN,
-  TEMP_XMIN_COLUMN, TEMP_XZ_CODE_COLUMN, TEMP_YMAX_COLUMN, TEMP_YMIN_COLUMN, XZ_CODE_COLUMN,
+  GEODISPLAY_COLUMN, GeometryEncodeScratch, GeometryEncoding, TEMP_XZ_CODE_COLUMN, XZ_CODE_COLUMN,
   encode_flat_geometry_with_scratch,
   flat_geometry_payload_from_wkb as pbf_flat_geometry_payload_from_wkb,
 };
@@ -36,26 +35,16 @@ struct NonPointGeodisplayUdf {
   geometry_type: OptimizedGeometryType,
   encodings: Vec<GeometryEncoding>,
   geodisplay_fields: Fields,
-  bounds_fields: Fields,
 }
 
 impl NonPointGeodisplayUdf {
   /// Construct stable output fields for the selected geometry type and LOD encodings.
   fn new(geometry_type: OptimizedGeometryType, encodings: Vec<GeometryEncoding>) -> Self {
-    let bounds_fields = Fields::from(vec![
-      Arc::new(Field::new("xmin", DataType::Float64, true)),
-      Arc::new(Field::new("ymin", DataType::Float64, true)),
-      Arc::new(Field::new("xmax", DataType::Float64, true)),
-      Arc::new(Field::new("ymax", DataType::Float64, true)),
-    ]);
-    let mut geodisplay_fields = vec![
-      Arc::new(Field::new(XZ_CODE_COLUMN, DataType::UInt64, false)),
-      Arc::new(Field::new(
-        BOUNDS_COLUMN,
-        DataType::Struct(bounds_fields.clone()),
-        true,
-      )),
-    ];
+    let mut geodisplay_fields = vec![Arc::new(Field::new(
+      XZ_CODE_COLUMN,
+      DataType::UInt64,
+      false,
+    ))];
     for encoding in &encodings {
       geodisplay_fields.push(Arc::new(Field::new(
         &encoding.column,
@@ -67,7 +56,6 @@ impl NonPointGeodisplayUdf {
       geometry_type,
       encodings,
       geodisplay_fields: Fields::from(geodisplay_fields),
-      bounds_fields,
     }
   }
 
@@ -76,10 +64,6 @@ impl NonPointGeodisplayUdf {
     &self,
     geometry: &T,
     xz_code: &UInt64Array,
-    xmin: &Float64Array,
-    ymin: &Float64Array,
-    xmax: &Float64Array,
-    ymax: &Float64Array,
   ) -> DataFusionResult<StructArray> {
     let mut pbf_builders = self
       .encodings
@@ -107,19 +91,7 @@ impl NonPointGeodisplayUdf {
       }
     }
 
-    let bounds = StructArray::try_new(
-      self.bounds_fields.clone(),
-      vec![
-        Arc::new(xmin.clone()),
-        Arc::new(ymin.clone()),
-        Arc::new(xmax.clone()),
-        Arc::new(ymax.clone()),
-      ],
-      xmin.nulls().cloned(),
-    )
-    .map_err(to_datafusion_error)?;
-
-    let mut geodisplay_columns: Vec<ArrayRef> = vec![Arc::new(xz_code.clone()), Arc::new(bounds)];
+    let mut geodisplay_columns: Vec<ArrayRef> = vec![Arc::new(xz_code.clone())];
     for mut builder in pbf_builders {
       geodisplay_columns.push(Arc::new(builder.finish()));
     }
@@ -216,36 +188,15 @@ impl ScalarUDFImpl for NonPointGeodisplayUdf {
       .first()
       .ok_or_else(|| DataFusionError::Execution("missing geometry argument".to_string()))?;
     let xz_code = as_uint64_array(arrays[1].as_ref())?;
-    let xmin = as_float64_array(arrays[2].as_ref())?;
-    let ymin = as_float64_array(arrays[3].as_ref())?;
-    let xmax = as_float64_array(arrays[4].as_ref())?;
-    let ymax = as_float64_array(arrays[5].as_ref())?;
 
     let output = match geometry.data_type() {
-      DataType::Binary => self.encode_geodisplay(
-        as_binary_array(geometry.as_ref())?,
-        xz_code,
-        xmin,
-        ymin,
-        xmax,
-        ymax,
-      )?,
-      DataType::LargeBinary => self.encode_geodisplay(
-        as_large_binary_array(geometry.as_ref())?,
-        xz_code,
-        xmin,
-        ymin,
-        xmax,
-        ymax,
-      )?,
-      DataType::BinaryView => self.encode_geodisplay(
-        as_binary_view_array(geometry.as_ref())?,
-        xz_code,
-        xmin,
-        ymin,
-        xmax,
-        ymax,
-      )?,
+      DataType::Binary => self.encode_geodisplay(as_binary_array(geometry.as_ref())?, xz_code)?,
+      DataType::LargeBinary => {
+        self.encode_geodisplay(as_large_binary_array(geometry.as_ref())?, xz_code)?
+      }
+      DataType::BinaryView => {
+        self.encode_geodisplay(as_binary_view_array(geometry.as_ref())?, xz_code)?
+      }
       other => {
         return Err(DataFusionError::Execution(format!(
           "unsupported geometry data type for UDF: {other}"
@@ -273,16 +224,7 @@ fn multiscale_signature() -> &'static Signature {
         DataType::BinaryView,
       ]
       .into_iter()
-      .map(|geometry_type| {
-        TypeSignature::Exact(vec![
-          geometry_type,
-          DataType::UInt64,
-          DataType::Float64,
-          DataType::Float64,
-          DataType::Float64,
-          DataType::Float64,
-        ])
-      })
+      .map(|geometry_type| TypeSignature::Exact(vec![geometry_type, DataType::UInt64]))
       .collect(),
       Volatility::Immutable,
     )
@@ -295,14 +237,7 @@ pub(in crate::optimized) fn non_point_geodisplay_expr(
   encodings: &[GeometryEncoding],
 ) -> Expr {
   non_point_geodisplay_udf(geometry_type, encodings.to_vec())
-    .call(vec![
-      col(geometry_column),
-      col(TEMP_XZ_CODE_COLUMN),
-      col(TEMP_XMIN_COLUMN),
-      col(TEMP_YMIN_COLUMN),
-      col(TEMP_XMAX_COLUMN),
-      col(TEMP_YMAX_COLUMN),
-    ])
+    .call(vec![col(geometry_column), col(TEMP_XZ_CODE_COLUMN)])
     .alias(GEODISPLAY_COLUMN)
 }
 

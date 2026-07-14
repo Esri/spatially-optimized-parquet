@@ -90,6 +90,15 @@ fn kv_map(path: &std::path::Path) -> HashMap<String, String> {
     .collect()
 }
 
+fn raw_parquet_schema(path: &Path) -> Arc<Schema> {
+  let metadata = ArrowReaderMetadata::load(
+    &std::fs::File::open(path).unwrap(),
+    ArrowReaderOptions::new(),
+  )
+  .unwrap();
+  Arc::new(metadata.schema().as_ref().clone())
+}
+
 fn wkb_polygon(coords: &[(f64, f64)]) -> Vec<u8> {
   let polygon = geo::Geometry::Polygon(geo::Polygon::new(
     geo::LineString::from(coords.to_vec()),
@@ -523,7 +532,7 @@ fn spatial_pipeline_writes_non_point_geodisplay_struct_and_metadata() {
   assert!(output_schema.index_of("geodisplay").is_ok());
   assert_eq!(ids.value(0), 1);
   assert!(geodisplay_column.column_by_name("xzCode").is_some());
-  assert!(geodisplay_column.column_by_name("bounds").is_some());
+  assert!(geodisplay_column.column_by_name("bounds").is_none());
 
   let kv = kv_map(&output);
   let geo: serde_json::Value = serde_json::from_str(kv.get("geo").unwrap()).unwrap();
@@ -717,7 +726,7 @@ fn spatial_pipeline_replaces_existing_non_point_geodisplay_column() {
 
   assert_eq!(geodisplay_fields, 1);
   assert!(geodisplay_column.column_by_name("xzCode").is_some());
-  assert!(geodisplay_column.column_by_name("bounds").is_some());
+  assert!(geodisplay_column.column_by_name("bounds").is_none());
 }
 
 #[test]
@@ -920,6 +929,9 @@ fn spatial_pipeline_writes_range_partitioned_multi_file_output() {
   let files = parquet_files(&output_dir);
   assert_eq!(files.len(), 2);
   for file in &files {
+    let schema = raw_parquet_schema(file);
+    assert!(schema.field_with_name("zCode").is_ok());
+    assert!(schema.field_with_name("z_order").is_err());
     let metadata = kv_map(file);
     let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").unwrap()).unwrap();
     let geodisplay: serde_json::Value =
@@ -1278,7 +1290,7 @@ fn plain_geoparquet_reprojects_wkb_covering_extent_and_crs() {
 }
 
 #[test]
-fn spatial_pipeline_rejects_covering_when_bbox_column_exists() {
+fn spatial_pipeline_overwrites_unmanaged_bbox_column() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("points-with-bbox.parquet");
   let output = temp.path().join("points-covering.parquet");
@@ -1306,7 +1318,7 @@ fn spatial_pipeline_rejects_covering_when_bbox_column_exists() {
     &[geoparquet_kv("geometry", &["Point"])],
   );
 
-  let err = runtime()
+  runtime()
     .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
@@ -1322,13 +1334,19 @@ fn spatial_pipeline_rejects_covering_when_bbox_column_exists() {
       overwrite: true,
       output_mode: OutputMode::Optimized,
     }))
-    .unwrap_err();
-  assert!(
-    err
-      .to_string()
-      .contains("--covering would overwrite existing input column 'bbox'"),
-    "{err:#}"
-  );
+    .unwrap();
+  let dataframe = runtime()
+    .block_on(scan_parquet(output.to_str().unwrap()))
+    .unwrap();
+  let batches = runtime().block_on(dataframe.collect()).unwrap();
+  let bbox = batches[0]
+    .column_by_name("bbox")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap();
+  assert_close(struct_f64_value(bbox, "xmin", 0), 1.0);
+  assert_close(struct_f64_value(bbox, "ymin", 0), 1.0);
 }
 
 #[test]
@@ -1638,40 +1656,7 @@ fn spatial_pipeline_reprojects_geopackage_polygon_output_to_wgs84() {
     .as_any()
     .downcast_ref::<StructArray>()
     .unwrap();
-  let bounds = geodisplay_column
-    .column_by_name("bounds")
-    .unwrap()
-    .as_any()
-    .downcast_ref::<StructArray>()
-    .unwrap();
-  let xmin = bounds
-    .column_by_name("xmin")
-    .unwrap()
-    .as_any()
-    .downcast_ref::<arrow_array::Float64Array>()
-    .unwrap();
-  let ymin = bounds
-    .column_by_name("ymin")
-    .unwrap()
-    .as_any()
-    .downcast_ref::<arrow_array::Float64Array>()
-    .unwrap();
-  let xmax = bounds
-    .column_by_name("xmax")
-    .unwrap()
-    .as_any()
-    .downcast_ref::<arrow_array::Float64Array>()
-    .unwrap();
-  let ymax = bounds
-    .column_by_name("ymax")
-    .unwrap()
-    .as_any()
-    .downcast_ref::<arrow_array::Float64Array>()
-    .unwrap();
-  assert_close(xmin.value(0), 0.0);
-  assert_close(ymin.value(0), 0.0);
-  assert_close(xmax.value(0), 1.0);
-  assert_close(ymax.value(0), 1.0);
+  assert!(geodisplay_column.column_by_name("bounds").is_none());
   let level_zero = geodisplay_column.column_by_name("level_0").unwrap();
   assert!(!binary_value(level_zero.as_ref(), 0).is_empty());
 
@@ -1789,7 +1774,7 @@ fn spatial_pipeline_selects_requested_geopackage_layer() {
   assert!(output_schema.index_of("geodisplay").is_ok());
   assert_eq!(ids.value(0), 1);
   assert!(geodisplay_column.column_by_name("xzCode").is_some());
-  assert!(geodisplay_column.column_by_name("bounds").is_some());
+  assert!(geodisplay_column.column_by_name("bounds").is_none());
 
   let kv = kv_map(&output);
   let geo: serde_json::Value = serde_json::from_str(kv.get("geo").unwrap()).unwrap();

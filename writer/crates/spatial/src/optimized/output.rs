@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use arrow_schema::Schema;
 use datafusion::dataframe::DataFrame;
 
-use crate::geoparquet::{resolve_source, validate_covering_configuration};
+use crate::geoparquet::{PreparedSpatialFrame, resolve_source};
 use crate::input::{InputSource, RowRange};
 use crate::optimized::clustering::{
   cluster_key_column, cluster_partition_column, validate_cluster_partition_column,
@@ -74,7 +74,6 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
     covering: bool,
     compression: Option<&'a str>,
   ) -> Result<OptimizedOutput<'a, ResolvedOutputState<'a>>> {
-    validate_covering_configuration(covering, self.source_schema)?;
     let source = resolve_source(
       self.state.input,
       self.input_dataframe.clone(),
@@ -91,19 +90,21 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
       .as_ref()
       .context("missing resolved source CRS PROJJSON")?;
     let reprojection = ReprojectionSpec::from_source_projjson(source_projjson, output_wkid)?;
-    let target_extent = TargetExtentResolver::new(
-      self.state.input,
+    let prepared = PreparedSpatialFrame::new(
       self.input_dataframe.clone(),
-      self.state.row_range,
-    )
-    .resolve(&source, &geometry, &reprojection)
-    .await?;
+      self.source_schema,
+      &source,
+      &reprojection,
+    )?;
+    let target_extent = TargetExtentResolver::new(self.state.input, self.state.row_range)
+      .resolve(&source, &prepared, &reprojection)
+      .await?;
     let encodings = match geometry.clustering_family {
       ClusteringFamily::Point => Vec::new(),
       ClusteringFamily::NonPoint => create_geometry_encodings(output_wkid, geometry.geometry_type)?,
     };
     Ok(OptimizedOutput {
-      input_dataframe: self.input_dataframe,
+      input_dataframe: prepared.dataframe(),
       output_layout: self.output_layout,
       source_schema: self.source_schema,
       total_input_rows: self.total_input_rows,
@@ -117,6 +118,7 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
           reprojection,
           target_extent,
           encodings,
+          prepared.point_optimization_reused(),
         ),
       },
     })

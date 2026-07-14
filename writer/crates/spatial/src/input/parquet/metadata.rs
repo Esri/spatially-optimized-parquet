@@ -8,7 +8,10 @@ use serde_json::Value;
 
 use crate::geometry::Extent2D;
 use crate::geometry::{GeometryEncoding, GeometryKind};
-use crate::input::SourceGeometryMetadata;
+use crate::input::{
+  SourceCoveringMetadata, SourceGeometryMetadata, SourcePointOptimizationMetadata,
+};
+use crate::output::GeodisplayMetadata;
 
 /// Parse and require consistent GeoParquet metadata across all discovered files.
 pub(super) fn load_geo_metadata(
@@ -43,21 +46,131 @@ pub(super) fn load_geo_metadata(
 
 /// Decode the GeoParquet `geo` key from one Parquet footer.
 fn parse_geo_metadata(metadata: &ArrowReaderMetadata) -> Result<Option<GeoParquetMetadata>> {
-  let Some(geo_value) = metadata
-    .metadata()
-    .file_metadata()
-    .key_value_metadata()
-    .and_then(|items| items.iter().find(|item| item.key == "geo"))
-    .and_then(|item| item.value.as_ref())
-  else {
+  let Some(mut json) = metadata_json(metadata, "geo")? else {
     return Ok(None);
   };
-
-  let mut json: Value = serde_json::from_str(geo_value).context("decode geo metadata json")?;
   sanitize_geo_metadata_json(&mut json);
   serde_json::from_value(json)
     .context("deserialize geo metadata")
     .map(Some)
+}
+
+fn metadata_json(metadata: &ArrowReaderMetadata, key: &str) -> Result<Option<Value>> {
+  let Some(value) = metadata
+    .metadata()
+    .file_metadata()
+    .key_value_metadata()
+    .and_then(|items| items.iter().find(|item| item.key == key))
+    .and_then(|item| item.value.as_ref())
+  else {
+    return Ok(None);
+  };
+  serde_json::from_str(value)
+    .with_context(|| format!("decode {key} metadata json"))
+    .map(Some)
+}
+
+pub(super) fn load_covering_metadata(
+  metadata_items: &[ArrowReaderMetadata],
+  geometry_column: &str,
+) -> Result<Option<SourceCoveringMetadata>> {
+  let mut covering = None;
+  let mut saw_missing = false;
+  for metadata in metadata_items {
+    let file_covering = metadata_json(metadata, "geo")?
+      .as_ref()
+      .and_then(|json| covering_column(json, geometry_column));
+    match file_covering {
+      Some(file_covering) => {
+        if saw_missing
+          || covering
+            .as_ref()
+            .is_some_and(|existing| existing != &file_covering)
+        {
+          return Ok(None);
+        }
+        covering = Some(file_covering);
+      }
+      None => {
+        if covering.is_some() {
+          return Ok(None);
+        }
+        saw_missing = true;
+      }
+    }
+  }
+  Ok(covering)
+}
+
+fn covering_column(json: &Value, geometry_column: &str) -> Option<SourceCoveringMetadata> {
+  let bbox = json
+    .get("columns")?
+    .get(geometry_column)?
+    .get("covering")?
+    .get("bbox")?;
+  let paths = [
+    ("xmin", bbox.get("xmin")?),
+    ("ymin", bbox.get("ymin")?),
+    ("xmax", bbox.get("xmax")?),
+    ("ymax", bbox.get("ymax")?),
+  ];
+  let mut covering_column = None;
+  for (expected_field, path) in paths {
+    let path = path.as_array()?;
+    if path.len() != 2 || path[1].as_str()? != expected_field {
+      return None;
+    }
+    let column = path[0].as_str()?;
+    match &covering_column {
+      Some(existing) if existing != column => return None,
+      Some(_) => {}
+      None => covering_column = Some(column.to_string()),
+    }
+  }
+  covering_column.map(|column| SourceCoveringMetadata { column })
+}
+
+pub(super) fn load_point_optimization_metadata(
+  metadata_items: &[ArrowReaderMetadata],
+) -> Result<Option<SourcePointOptimizationMetadata>> {
+  let mut optimization = None;
+  let mut saw_missing = false;
+  for metadata in metadata_items {
+    let file_optimization = match metadata_json(metadata, "geodisplay")? {
+      Some(json) => match serde_json::from_value::<GeodisplayMetadata>(json) {
+        Ok(GeodisplayMetadata::Z(index)) => Some(SourcePointOptimizationMetadata {
+          code: index.code,
+          x_column: index.x_column,
+          y_column: index.y_column,
+          coordinate_precision: index.coordinate_precision,
+          full_extent: index.full_extent,
+          wkid: index.wkid,
+          wkt: index.wkt,
+        }),
+        Ok(GeodisplayMetadata::Xz(_)) | Err(_) => None,
+      },
+      None => None,
+    };
+    match file_optimization {
+      Some(file_optimization) => {
+        if saw_missing
+          || optimization
+            .as_ref()
+            .is_some_and(|existing| existing != &file_optimization)
+        {
+          return Ok(None);
+        }
+        optimization = Some(file_optimization);
+      }
+      None => {
+        if optimization.is_some() {
+          return Ok(None);
+        }
+        saw_missing = true;
+      }
+    }
+  }
+  Ok(optimization)
 }
 
 /// Remove non-semantic metadata differences before comparing file-level GeoParquet JSON.
@@ -85,6 +198,7 @@ impl SourceGeometryMetadata {
   /// Construct normalized source geometry metadata from a GeoParquet contract.
   pub(super) fn from_geoparquet(
     geo_meta: &GeoParquetMetadata,
+    covering: Option<SourceCoveringMetadata>,
   ) -> Result<Option<SourceGeometryMetadata>> {
     let Some(column_meta) = geo_meta.columns.get(&geo_meta.primary_column) else {
       return Ok(None);
@@ -104,6 +218,7 @@ impl SourceGeometryMetadata {
       encoding: GeometryEncoding::Wkb,
       geometry_types,
       bbox: bbox_to_extent(column_meta.bbox.as_deref()),
+      covering,
       projjson: column_meta.crs.clone(),
       has_z: has_dimension_suffix(column_meta, "Z"),
       has_m: has_dimension_suffix(column_meta, "M"),
@@ -174,7 +289,7 @@ pub(super) fn passthrough_metadata(metadata_items: &[ArrowReaderMetadata]) -> Ve
 mod tests {
   use serde_json::json;
 
-  use super::{bbox_to_extent, sanitize_geo_metadata_json};
+  use super::{bbox_to_extent, covering_column, sanitize_geo_metadata_json};
 
   #[test]
   fn metadata_sanitization_removes_null_bbox_values() {
@@ -225,5 +340,63 @@ mod tests {
   fn bbox_normalization_rejects_incomplete_bounds() {
     assert!(bbox_to_extent(Some(&[-1.0, -2.0, 3.0])).is_none());
     assert!(bbox_to_extent(None).is_none());
+  }
+
+  #[test]
+  fn covering_normalization_accepts_one_root_bbox_struct() {
+    let metadata = json!({
+      "columns": {
+        "geometry": {
+          "covering": {
+            "bbox": {
+              "xmin": ["source_bbox", "xmin"],
+              "ymin": ["source_bbox", "ymin"],
+              "xmax": ["source_bbox", "xmax"],
+              "ymax": ["source_bbox", "ymax"]
+            }
+          }
+        }
+      }
+    });
+
+    assert_eq!(
+      covering_column(&metadata, "geometry").unwrap().column,
+      "source_bbox"
+    );
+  }
+
+  #[test]
+  fn covering_normalization_rejects_mixed_or_deep_paths() {
+    let mixed = json!({
+      "columns": {
+        "geometry": {
+          "covering": {
+            "bbox": {
+              "xmin": ["bbox", "xmin"],
+              "ymin": ["other", "ymin"],
+              "xmax": ["bbox", "xmax"],
+              "ymax": ["bbox", "ymax"]
+            }
+          }
+        }
+      }
+    });
+    let deep = json!({
+      "columns": {
+        "geometry": {
+          "covering": {
+            "bbox": {
+              "xmin": ["geodisplay", "bounds", "xmin"],
+              "ymin": ["geodisplay", "bounds", "ymin"],
+              "xmax": ["geodisplay", "bounds", "xmax"],
+              "ymax": ["geodisplay", "bounds", "ymax"]
+            }
+          }
+        }
+      }
+    });
+
+    assert!(covering_column(&mixed, "geometry").is_none());
+    assert!(covering_column(&deep, "geometry").is_none());
   }
 }

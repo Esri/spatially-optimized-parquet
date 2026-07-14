@@ -3,27 +3,20 @@
 use std::any::Any;
 use std::sync::{Arc, OnceLock};
 
-use anyhow::{Result, bail};
 use arrow_array::{ArrayRef, Float64Array, StructArray};
-use arrow_schema::{DataType, Field, Fields, Schema};
+use arrow_schema::{DataType, Field, Fields};
 use datafusion::common::cast::as_float64_array;
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
+use datafusion::functions::core::expr_ext::FieldAccessor;
 use datafusion::logical_expr::{
   ColumnarValue, Expr, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature,
   Volatility,
 };
 use datafusion::prelude::col;
 
+use crate::geometry::GeometryCategory;
 use crate::geometry::to_datafusion_error;
-use crate::optimized::COVERING_BBOX_COLUMN;
-
-/// Reject covering output that would overwrite an existing source column.
-pub(crate) fn validate_covering_configuration(covering: bool, schema: &Schema) -> Result<()> {
-  if covering && schema.field_with_name(COVERING_BBOX_COLUMN).is_ok() {
-    bail!("--covering would overwrite existing input column '{COVERING_BBOX_COLUMN}'");
-  }
-  Ok(())
-}
+use crate::optimized::{COVERING_BBOX_COLUMN, bounds_expr, point_expr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct FeatureBboxUdf;
@@ -54,15 +47,16 @@ impl ScalarUDFImpl for FeatureBboxUdf {
     let ymin = float_argument(&arrays, 2, "ymin")?;
     let xmax = float_argument(&arrays, 3, "xmax")?;
     let ymax = float_argument(&arrays, 4, "ymax")?;
+    let nulls = geometry.nulls().cloned();
     let output = StructArray::try_new(
       bounds_fields(),
       vec![
-        Arc::new(xmin.clone()),
-        Arc::new(ymin.clone()),
-        Arc::new(xmax.clone()),
-        Arc::new(ymax.clone()),
+        Arc::new(Float64Array::new(xmin.values().clone(), nulls.clone())),
+        Arc::new(Float64Array::new(ymin.values().clone(), nulls.clone())),
+        Arc::new(Float64Array::new(xmax.values().clone(), nulls.clone())),
+        Arc::new(Float64Array::new(ymax.values().clone(), nulls.clone())),
       ],
-      geometry.nulls().cloned(),
+      nulls,
     )
     .map_err(to_datafusion_error)?;
     Ok(ColumnarValue::Array(Arc::new(output) as ArrayRef))
@@ -73,22 +67,45 @@ fn feature_bbox_udf() -> ScalarUDF {
   ScalarUDF::new_from_impl(FeatureBboxUdf)
 }
 
-pub(crate) fn feature_bbox_expr(
+pub(crate) fn geometry_bbox_expr(
   geometry_column: &str,
-  xmin_column: &str,
-  ymin_column: &str,
-  xmax_column: &str,
-  ymax_column: &str,
+  geometry_category: GeometryCategory,
 ) -> Expr {
+  let geometry = col(geometry_column);
+  match geometry_category {
+    GeometryCategory::Point => {
+      let coordinates = point_expr(geometry_column);
+      let x = coordinates.clone().field("x");
+      let y = coordinates.field("y");
+      feature_bbox_udf()
+        .call(vec![geometry, x.clone(), y.clone(), x, y])
+        .alias(COVERING_BBOX_COLUMN)
+    }
+    GeometryCategory::NonPoint => {
+      let bounds = bounds_expr(geometry_column);
+      feature_bbox_udf()
+        .call(vec![
+          geometry,
+          bounds.clone().field("xmin"),
+          bounds.clone().field("ymin"),
+          bounds.clone().field("xmax"),
+          bounds.field("ymax"),
+        ])
+        .alias(COVERING_BBOX_COLUMN)
+    }
+  }
+}
+
+pub(crate) fn point_bbox_expr(geometry_column: &str, x_column: &str, y_column: &str) -> Expr {
+  let x = col(x_column);
+  let y = col(y_column);
   feature_bbox_udf()
-    .call(vec![
-      col(geometry_column),
-      col(xmin_column),
-      col(ymin_column),
-      col(xmax_column),
-      col(ymax_column),
-    ])
+    .call(vec![col(geometry_column), x.clone(), y.clone(), x, y])
     .alias(COVERING_BBOX_COLUMN)
+}
+
+pub(crate) fn bbox_field_expr(field: &str) -> Expr {
+  col(COVERING_BBOX_COLUMN).field(field)
 }
 
 fn float_argument<'a>(

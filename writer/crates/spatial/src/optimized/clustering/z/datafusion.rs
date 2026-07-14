@@ -244,14 +244,14 @@ pub(crate) fn point_expr(geometry_column: &str) -> Expr {
 }
 
 pub(in crate::optimized) fn point_zcode_from_xy_expr(
-  x_column: &str,
-  y_column: &str,
+  x: Expr,
+  y: Expr,
   full_extent: Extent2D,
 ) -> Expr {
   point_zcode_from_xy_udf()
     .call(vec![
-      col(x_column),
-      col(y_column),
+      x,
+      y,
       lit(full_extent.xmin),
       lit(full_extent.ymin),
       lit(full_extent.xmax),

@@ -12,6 +12,9 @@ mod source;
 
 pub use format::SourceFormat;
 pub(crate) use format::resolve_source_format;
-pub(crate) use metadata::{SourceDatasetMetadata, SourceGeometryMetadata};
+pub(crate) use metadata::{
+  SourceCoveringMetadata, SourceDatasetMetadata, SourceGeometryMetadata,
+  SourcePointOptimizationMetadata,
+};
 pub use source::RowRange;
 pub(crate) use source::{InputOpenOptions, InputSource, open_input};

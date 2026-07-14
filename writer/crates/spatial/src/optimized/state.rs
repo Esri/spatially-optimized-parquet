@@ -15,6 +15,7 @@ pub(super) struct ResolvedOptimization {
   reprojection: ReprojectionSpec,
   target_extent: Extent2D,
   encodings: Vec<GeometryEncoding>,
+  point_optimization_reused: bool,
 }
 
 impl ResolvedOptimization {
@@ -24,6 +25,7 @@ impl ResolvedOptimization {
     reprojection: ReprojectionSpec,
     target_extent: Extent2D,
     encodings: Vec<GeometryEncoding>,
+    point_optimization_reused: bool,
   ) -> Self {
     Self {
       source_metadata,
@@ -31,6 +33,7 @@ impl ResolvedOptimization {
       reprojection,
       target_extent,
       encodings,
+      point_optimization_reused,
     }
   }
 
@@ -52,5 +55,9 @@ impl ResolvedOptimization {
 
   pub(super) fn encodings(&self) -> &[GeometryEncoding] {
     &self.encodings
+  }
+
+  pub(super) fn point_optimization_reused(&self) -> bool {
+    self.point_optimization_reused
   }
 }

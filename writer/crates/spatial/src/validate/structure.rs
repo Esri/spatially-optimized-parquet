@@ -137,12 +137,23 @@ fn validate_geometry_schema(
     }
 
     if let Some(covering) = &geo_column.covering {
-      for path in [
+      let covering_paths = [
         covering.bbox.xmin.as_slice(),
         covering.bbox.ymin.as_slice(),
         covering.bbox.xmax.as_slice(),
         covering.bbox.ymax.as_slice(),
-      ] {
+      ];
+      if !valid_covering_paths(covering_paths) {
+        report.push(
+          ValidationRule::Schema,
+          ValidationSeverity::Error,
+          ValidationLocation::file(file.file.relative_path.clone())
+            .with_column(format!("{column_name}.covering.bbox")),
+          "GeoParquet bbox covering must use one root struct and exact xmin/ymin/xmax/ymax child paths",
+        );
+        continue;
+      }
+      for path in covering_paths {
         let path = path.join(".");
         match field_at_path(file.metadata.schema().as_ref(), &path) {
           Some(field) if field.data_type() == &DataType::Float64 => {}
@@ -162,6 +173,26 @@ fn validate_geometry_schema(
             "GeoParquet covering field is missing",
           ),
         }
+      }
+
+      fn valid_covering_paths(paths: [&[String]; 4]) -> bool {
+        let expected_fields = ["xmin", "ymin", "xmax", "ymax"];
+        let mut root = None;
+        paths
+          .into_iter()
+          .zip(expected_fields)
+          .all(|(path, expected_field)| {
+            if path.len() != 2 || path[1] != expected_field {
+              return false;
+            }
+            match root {
+              Some(existing) => existing == path[0],
+              None => {
+                root = Some(path[0].as_str());
+                true
+              }
+            }
+          })
       }
     }
   }

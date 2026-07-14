@@ -2,7 +2,7 @@
 
 use anyhow::{Result, bail};
 
-use crate::geometry::{GeometryCategory, GeometryKind, GeometrySpec};
+use crate::geometry::{GeometryKind, GeometrySpec};
 use crate::geoparquet::ResolvedGeoParquetSource;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,14 +43,6 @@ impl OptimizedGeometryType {
     match self {
       Self::Point => ClusteringFamily::Point,
       Self::MultiPoint | Self::Polyline | Self::Polygon => ClusteringFamily::NonPoint,
-    }
-  }
-
-  /// Return the generic processing category used by shared geometry mechanics.
-  pub(super) fn category(self) -> GeometryCategory {
-    match self.clustering_family() {
-      ClusteringFamily::Point => GeometryCategory::Point,
-      ClusteringFamily::NonPoint => GeometryCategory::NonPoint,
     }
   }
 

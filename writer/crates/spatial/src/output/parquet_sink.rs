@@ -253,7 +253,7 @@ impl TrackingParquetWriter {
 }
 
 fn create_sink(
-  state: &datafusion::execution::context::SessionState,
+  _state: &datafusion::execution::context::SessionState,
   write_path: String,
   output_schema: SchemaRef,
   partition_by: Vec<String>,
@@ -272,7 +272,7 @@ fn create_sink(
       .map(|column| (column, DataType::Null))
       .collect(),
     insert_op: InsertOp::Append,
-    keep_partition_by_columns: state.config_options().execution.keep_partition_by_columns,
+    keep_partition_by_columns: false,
     file_extension: "parquet".to_string(),
   };
   Ok(Arc::new(TrackingParquetSink::new(

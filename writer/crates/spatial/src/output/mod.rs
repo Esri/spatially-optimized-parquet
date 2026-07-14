@@ -19,10 +19,7 @@ pub(crate) use metadata::{
 pub use mode::OutputMode;
 pub(crate) use parquet::ParquetWriterOptions;
 pub(crate) use parquet_sink::TrackingParquetWriter;
-pub(crate) use reprojection::{
-  CoordinateTransformSpec, ReprojectionSpec, reproject_geometry_expr, transformed_bounds_expr,
-  transformed_point_coords_expr,
-};
+pub(crate) use reprojection::{ReprojectionSpec, reproject_geometry_expr};
 pub use spatial_reference::DEFAULT_OUTPUT_WKID;
 pub(crate) use spatial_reference::{
   SpatialReferenceInfo, WEB_MERCATOR_OUTPUT_WKID, validate_output_wkid,

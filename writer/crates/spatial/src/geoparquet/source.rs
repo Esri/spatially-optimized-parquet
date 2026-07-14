@@ -79,6 +79,7 @@ pub(crate) async fn resolve_source(
     encoding: GeometryEncoding::Wkb,
     geometry_types: geometry_types.clone(),
     bbox: Some(source_extent),
+    covering: source_geometry.covering.clone(),
     projjson: Some(projjson),
     has_z,
     has_m,

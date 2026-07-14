@@ -262,18 +262,18 @@ pub(crate) fn bounds_expr(geometry_column: &str) -> Expr {
 }
 
 pub(in crate::optimized) fn non_point_xzcode_from_bounds_expr(
-  xmin_column: &str,
-  ymin_column: &str,
-  xmax_column: &str,
-  ymax_column: &str,
+  xmin: Expr,
+  ymin: Expr,
+  xmax: Expr,
+  ymax: Expr,
   full_extent: Extent2D,
 ) -> Expr {
   non_point_xzcode_from_bounds_udf()
     .call(vec![
-      col(xmin_column),
-      col(ymin_column),
-      col(xmax_column),
-      col(ymax_column),
+      xmin,
+      ymin,
+      xmax,
+      ymax,
       lit(full_extent.xmin),
       lit(full_extent.ymin),
       lit(full_extent.xmax),

@@ -208,6 +208,7 @@ impl SourceGeometryMetadata {
       encoding: GeometryEncoding::Wkb,
       geometry_types: geometry_kind.into_iter().collect(),
       bbox,
+      covering: None,
       projjson,
       has_z,
       has_m,

@@ -19,7 +19,10 @@ use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryM
 #[cfg(test)]
 use crate::test_support::scan_parquet;
 
-use super::metadata::{load_geo_metadata, map_geo_geometry_type, passthrough_metadata};
+use super::metadata::{
+  load_covering_metadata, load_geo_metadata, load_point_optimization_metadata,
+  map_geo_geometry_type, passthrough_metadata,
+};
 
 /// Stores Parquet footer metadata and the location needed to construct future scans.
 pub(super) struct ParquetInputSource {
@@ -98,12 +101,16 @@ impl InputSource for ParquetInputSource {
 
   fn source_metadata(&self) -> Result<SourceDatasetMetadata> {
     let geometry = match load_geo_metadata(&self.metadata)? {
-      Some(geo_meta) => SourceGeometryMetadata::from_geoparquet(&geo_meta)?,
+      Some(geo_meta) => {
+        let covering = load_covering_metadata(&self.metadata, &geo_meta.primary_column)?;
+        SourceGeometryMetadata::from_geoparquet(&geo_meta, covering)?
+      }
       None => None,
     };
 
     Ok(SourceDatasetMetadata {
       geometry,
+      point_optimization: load_point_optimization_metadata(&self.metadata)?,
       passthrough_kv: passthrough_metadata(&self.metadata),
     })
   }

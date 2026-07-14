@@ -6,16 +6,14 @@ use datafusion::dataframe::DataFrame;
 
 use crate::input::{InputSource, RowRange};
 use crate::optimized::COVERING_BBOX_COLUMN;
+use crate::optimized::TargetExtentResolver;
 use crate::output::{
   GeoMetadataInput, OutputLayout, ParquetWriterOptions, ReprojectionSpec, TrackingParquetWriter,
   geoparquet_metadata,
 };
 use crate::pipeline::SharedWriteReporter;
 
-use super::{
-  analyze_plain_target_extent, plain_output_dataframe, resolve_source,
-  validate_covering_configuration,
-};
+use super::{PreparedSpatialFrame, plain_output_dataframe, resolve_source};
 
 pub(crate) struct PlainOutput<'a> {
   input: &'a dyn InputSource,
@@ -62,7 +60,6 @@ impl<'a> PlainOutput<'a> {
     covering: bool,
     compression: Option<&str>,
   ) -> Result<u64> {
-    validate_covering_configuration(covering, self.source_schema)?;
     let source = resolve_source(
       self.input,
       self.input_dataframe.clone(),
@@ -78,19 +75,19 @@ impl<'a> PlainOutput<'a> {
       .as_ref()
       .context("missing resolved source CRS PROJJSON")?;
     let reprojection = ReprojectionSpec::from_source_projjson(source_projjson, output_wkid)?;
-    let target_extent = analyze_plain_target_extent(
+    let prepared = PreparedSpatialFrame::new(
       self.input_dataframe.clone(),
-      &source.geometry_spec.column,
-      source.geometry_shape.category(),
-      reprojection.transform(),
-    )
-    .await?;
+      self.source_schema,
+      &source,
+      &reprojection,
+    )?;
+    let target_extent = TargetExtentResolver::new(self.input, self.row_range)
+      .resolve(&source, &prepared, &reprojection)
+      .await?;
     let dataframe = plain_output_dataframe(
-      self.input_dataframe,
+      prepared.dataframe(),
       self.source_schema,
       &source.geometry_spec.column,
-      source.geometry_shape.category(),
-      reprojection.transform(),
       covering,
     )?;
     let geo_metadata = GeoMetadataInput {

@@ -4,7 +4,6 @@ use anyhow::{Result, bail};
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
 
-use crate::geoparquet::validate_covering_configuration;
 use crate::input::{InputOpenOptions, InputSource, RowRange, open_input, resolve_source_format};
 use crate::optimized::validate_internal_projection_columns;
 use crate::output::{OutputLayout, OutputMode, validate_output_wkid};
@@ -35,7 +34,6 @@ impl Pipeline {
       options.output.overwrite,
     )?;
     let source_schema = input.schema()?;
-    validate_covering_configuration(options.output.covering, source_schema.as_ref())?;
     validate_internal_projection_columns(source_schema.as_ref())?;
     let discovered_rows = input.total_rows()?;
     let total_input_rows = options.input.row_range.effective_rows(discovered_rows);

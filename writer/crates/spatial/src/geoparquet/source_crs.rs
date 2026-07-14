@@ -36,6 +36,9 @@ pub(super) fn apply_input_wkid(
         .map(|geometry| geometry.geometry_types.clone())
         .unwrap_or_default(),
       bbox: existing.as_ref().and_then(|geometry| geometry.bbox),
+      covering: existing
+        .as_ref()
+        .and_then(|geometry| geometry.covering.clone()),
       projjson: Some(projjson),
       has_z: existing.as_ref().is_some_and(|geometry| geometry.has_z),
       has_m: existing.as_ref().is_some_and(|geometry| geometry.has_m),
