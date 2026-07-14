@@ -1,13 +1,10 @@
 //! Plans the multiscale geometry representations emitted for non-point features.
 
 use anyhow::Result;
-use serde::Serialize;
 
 use crate::optimized::OptimizedGeometryType;
 use crate::output::{DEFAULT_OUTPUT_WKID, WEB_MERCATOR_OUTPUT_WKID};
 
-/// Stores the maximum multiscale hierarchy level advertised in output metadata.
-pub const DEFAULT_MAX_LEVEL: u32 = 20;
 /// Stores the WGS84 angular resolution used for the first multiscale level.
 const FIRST_LEVEL_RESOLUTION: f64 = 0.70312359375;
 /// Stores the Web Mercator resolution equivalent to the first WGS84 level.
@@ -16,49 +13,34 @@ const FIRST_PROJECTED_LEVEL_RESOLUTION: f64 = 78_271.360_420_986_54;
 const FIRST_LEVEL_SCALE: f64 = 295_828_763.795_854_7;
 const MAX_MULTISCALE_LEVEL: u16 = 16;
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-/// Describes one generated multiscale geometry column.
-pub struct MultiscaleLevel {
-  /// Names the generated payload column.
-  pub column: String,
-  /// Stores the multiscale level.
-  pub level: u16,
-  /// Stores the coordinate resolution.
-  pub resolution: f64,
-  /// Stores the map scale denominator.
-  pub scale: f64,
-  /// Stores the payload quantization transform.
-  pub transform: QuantizationTransform,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq)]
 /// Describes the scale and translation used to quantize four-dimensional coordinates.
-pub struct QuantizationTransform {
+pub(in crate::optimized) struct QuantizationTransform {
   /// Stores per-axis quantization scale values.
-  pub scale: [f64; 4],
+  pub(in crate::optimized) scale: [f64; 4],
   /// Stores per-axis quantization origins.
-  pub translate: [f64; 4],
+  pub(in crate::optimized) translate: [f64; 4],
 }
 
 /// Stores the quantization and simplification settings for one output geometry column.
 #[derive(Debug, Clone, PartialEq)]
-pub struct GeometryEncoding {
+pub(in crate::optimized) struct GeometryEncoding {
   /// Stores the multiscale level represented by the column.
-  pub level: u16,
+  pub(in crate::optimized) level: u16,
   /// Stores the generated Parquet column name.
-  pub column: String,
+  pub(in crate::optimized) column: String,
   /// Stores the coordinate resolution at this level.
-  pub resolution: f64,
+  pub(in crate::optimized) resolution: f64,
   /// Stores the map scale denominator at this level.
-  pub scale: f64,
+  pub(in crate::optimized) scale: f64,
   /// Stores the quantization transform applied before PBF encoding.
-  pub transform: QuantizationTransform,
+  pub(in crate::optimized) transform: QuantizationTransform,
   /// Stores the minimum retained vertex count for the geometry family.
-  pub min_length: usize,
+  pub(in crate::optimized) min_length: usize,
 }
 
 /// Create the supported even-numbered multiscale encodings for the target spatial reference.
-pub fn create_geometry_encodings(
+pub(in crate::optimized) fn create_geometry_encodings(
   output_wkid: u32,
   geometry_type: OptimizedGeometryType,
 ) -> Result<Vec<GeometryEncoding>> {
@@ -92,21 +74,7 @@ pub fn create_geometry_encodings(
   Ok(encodings)
 }
 
-/// Convert runtime encoding plans into serializable output metadata.
-pub fn metadata_levels(encodings: &[GeometryEncoding]) -> Vec<MultiscaleLevel> {
-  encodings
-    .iter()
-    .map(|encoding| MultiscaleLevel {
-      column: encoding.column.clone(),
-      level: encoding.level,
-      resolution: encoding.resolution,
-      scale: encoding.scale,
-      transform: encoding.transform.clone(),
-    })
-    .collect()
-}
-
-pub(super) fn min_vertex_count(geometry_type: OptimizedGeometryType) -> usize {
+fn min_vertex_count(geometry_type: OptimizedGeometryType) -> usize {
   match geometry_type {
     OptimizedGeometryType::MultiPoint | OptimizedGeometryType::Point => 1,
     OptimizedGeometryType::Polyline => 2,

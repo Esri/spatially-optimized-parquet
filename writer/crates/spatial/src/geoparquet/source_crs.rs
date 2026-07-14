@@ -5,10 +5,10 @@ use gdal::spatial_ref::{AxisMappingStrategy, SpatialRef};
 use serde_json::Value;
 
 use crate::geometry::GeometryEncoding;
-use crate::geoparquet::metadata::source::{SourceDatasetMetadata, SourceGeometryMetadata};
+use crate::input::{SourceDatasetMetadata, SourceGeometryMetadata};
 use crate::output::SpatialReferenceInfo;
 
-pub(crate) fn apply_input_wkid(
+pub(super) fn apply_input_wkid(
   source_metadata: &mut SourceDatasetMetadata,
   geometry_column: &str,
   input_wkid: Option<u32>,
@@ -61,7 +61,7 @@ fn projjson_from_epsg(wkid: u32) -> Result<Value> {
   serde_json::from_str(&projjson).context("decode input CRS PROJJSON")
 }
 
-pub(crate) fn spatial_reference_info(projjson: &Value) -> Result<SpatialReferenceInfo> {
+pub(super) fn spatial_reference_info(projjson: &Value) -> Result<SpatialReferenceInfo> {
   let definition = serde_json::to_string(projjson).context("serialize input CRS PROJJSON")?;
   let mut spatial_ref =
     SpatialRef::from_definition(&definition).context("load input spatial reference")?;

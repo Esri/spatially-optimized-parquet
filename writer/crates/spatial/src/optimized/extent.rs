@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use arrow_array::{Array, Float64Array, RecordBatch};
+use datafusion::dataframe::DataFrame;
 use datafusion::functions::core::expr_ext::FieldAccessor;
 use datafusion::functions_aggregate::expr_fn::{max, min};
 use datafusion::logical_expr::{Expr, expr_fn::ident};
@@ -19,15 +20,13 @@ use crate::optimized::multiscale::{
   TEMP_XMIN_COLUMN, TEMP_YMAX_COLUMN, TEMP_YMIN_COLUMN,
 };
 use crate::optimized::{ClusteringFamily, OptimizedGeometry};
-use crate::output::reprojection::{
-  ReprojectionSpec, transformed_bounds_expr, transformed_point_coords_expr,
-};
+use crate::output::{ReprojectionSpec, transformed_bounds_expr, transformed_point_coords_expr};
 use crate::progress::{finish_row_bar, row_bar};
 
 /// Resolves one selected dataset extent in the output coordinate reference system.
-pub(crate) struct TargetExtentResolver<'a> {
+pub(super) struct TargetExtentResolver<'a> {
   input: &'a dyn InputSource,
-  input_dataframe: engine::DataFrame,
+  input_dataframe: DataFrame,
   total_input_rows: u64,
   row_range: RowRange,
   progress: bool,
@@ -36,9 +35,9 @@ pub(crate) struct TargetExtentResolver<'a> {
 
 impl<'a> TargetExtentResolver<'a> {
   /// Construct target-extent resolution for one prepared input selection.
-  pub(crate) fn new(
+  pub(super) fn new(
     input: &'a dyn InputSource,
-    input_dataframe: engine::DataFrame,
+    input_dataframe: DataFrame,
     total_input_rows: u64,
     row_range: RowRange,
     progress: bool,
@@ -55,7 +54,7 @@ impl<'a> TargetExtentResolver<'a> {
   }
 
   /// Resolve the selected-row extent in the output coordinate reference system.
-  pub(crate) async fn resolve(
+  pub(super) async fn resolve(
     self,
     source: &ResolvedGeoParquetSource,
     geometry: &OptimizedGeometry,
@@ -103,10 +102,10 @@ impl<'a> TargetExtentResolver<'a> {
 }
 
 fn target_extent_aggregate(
-  dataframe: engine::DataFrame,
+  dataframe: DataFrame,
   geometry: &OptimizedGeometry,
   reprojection: &ReprojectionSpec,
-) -> Result<engine::DataFrame> {
+) -> Result<DataFrame> {
   let dataframe = match geometry.clustering_family {
     ClusteringFamily::Point => {
       let coordinates = match reprojection.transform() {

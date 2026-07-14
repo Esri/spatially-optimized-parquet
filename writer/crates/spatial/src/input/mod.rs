@@ -4,10 +4,14 @@
 //! classification, and format routing. Parquet sources register HTTP object stores so DataFusion
 //! owns ranged reads, decoding, and reusable DataFrame caching.
 
-pub mod format;
-pub mod gpkg;
-pub mod parquet;
-pub mod source;
+mod format;
+mod gpkg;
+mod metadata;
+mod parquet;
+mod source;
 
-pub use format::{SourceFormat, resolve_source_format};
-pub use source::{InputBatchStream, InputOpenOptions, InputSource, RowRange, open_input};
+pub use format::SourceFormat;
+pub(crate) use format::resolve_source_format;
+pub(crate) use metadata::{SourceDatasetMetadata, SourceGeometryMetadata};
+pub use source::RowRange;
+pub(crate) use source::{InputOpenOptions, InputSource, open_input};

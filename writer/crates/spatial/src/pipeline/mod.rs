@@ -1,10 +1,12 @@
 //! Connects one spatial request to its complete DataFusion execution path.
 
-mod new;
 mod optimized;
 mod optimized_partitioned;
 mod optimized_single_file;
+mod options;
 mod plain;
+mod result;
+mod runner;
 
 use std::io::IsTerminal;
 use std::sync::Arc;
@@ -12,73 +14,62 @@ use std::time::Instant;
 
 use anyhow::Result;
 use arrow_schema::SchemaRef;
-use engine::output_layout::OutputLayout;
-use engine::session::DataFusionSession;
+use datafusion::dataframe::DataFrame;
+use engine::{DataFusionSession, OutputLayout};
 
 use crate::diagnostics::explain_timing;
 use crate::input::{InputSource, RowRange};
 use crate::progress::format_elapsed;
 
-pub use new::SpatialPipelineOptions;
+pub use options::{ExecutionOptions, InputOptions, OutputOptions, SpatialPipelineOptions};
+pub use result::SpatialPipelineResult;
+pub use runner::run;
 
-/// Represents one complete spatial execution path from opened input through durable output.
-pub enum SpatialPipeline {
-  /// Writes normalized GeoParquet without optimized clustering.
+enum Pipeline {
   Plain(PlainPipeline),
-  /// Writes globally sorted optimized GeoParquet to one file.
   OptimizedSingleFile(OptimizedSingleFilePipeline),
-  /// Writes range-partitioned optimized GeoParquet through concurrent sinks.
   OptimizedPartitioned(OptimizedPartitionedPipeline),
 }
 
-/// Executes normalized GeoParquet through the standard single-file writer.
-pub struct PlainPipeline {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PipelineKind {
+  Plain,
+  OptimizedSingleFile,
+  OptimizedPartitioned,
+}
+
+struct PlainPipeline {
   state: SpatialPipelineState,
 }
 
-/// Executes globally sorted optimized GeoParquet through the standard single-file writer.
-pub struct OptimizedSingleFilePipeline {
+struct OptimizedSingleFilePipeline {
   state: SpatialPipelineState,
 }
 
-/// Executes range-partitioned optimized GeoParquet through the custom physical writer.
-pub struct OptimizedPartitionedPipeline {
+struct OptimizedPartitionedPipeline {
   state: SpatialPipelineState,
 }
 
-/// Represents the durable result produced by one spatial pipeline.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SpatialPipelineResult {
-  /// Stores the number of rows accepted by the output writer.
-  pub rows_written: u64,
+struct SpatialPipelineState {
+  started_at: Instant,
+  _session: DataFusionSession,
+  input: Arc<dyn InputSource>,
+  input_dataframe: DataFrame,
+  output_layout: OutputLayout,
+  source_schema: SchemaRef,
+  total_input_rows: u64,
+  row_range: RowRange,
+  geometry_column: Option<String>,
+  input_wkid: Option<u32>,
+  output_wkid: u32,
+  covering: bool,
+  compression: Option<String>,
+  progress: bool,
+  explain: bool,
 }
 
-pub(crate) struct SpatialPipelineState {
-  pub(crate) started_at: Instant,
-  pub(crate) _session: DataFusionSession,
-  pub(crate) input: Arc<dyn InputSource>,
-  pub(crate) input_dataframe: engine::DataFrame,
-  pub(crate) output_layout: OutputLayout,
-  pub(crate) source_schema: SchemaRef,
-  pub(crate) total_input_rows: u64,
-  pub(crate) row_range: RowRange,
-  pub(crate) geometry_column: Option<String>,
-  pub(crate) input_wkid: Option<u32>,
-  pub(crate) output_wkid: u32,
-  pub(crate) covering: bool,
-  pub(crate) compression: Option<String>,
-  pub(crate) progress: bool,
-  pub(crate) explain: bool,
-}
-
-impl SpatialPipeline {
-  /// Construct and execute one complete spatial pipeline.
-  pub async fn run(options: SpatialPipelineOptions) -> Result<SpatialPipelineResult> {
-    Self::new(options).await?.execute().await
-  }
-
-  /// Execute the selected spatial and DataFusion pipeline.
-  pub async fn execute(self) -> Result<SpatialPipelineResult> {
+impl Pipeline {
+  async fn execute(self) -> Result<SpatialPipelineResult> {
     match self {
       Self::Plain(pipeline) => pipeline.execute().await,
       Self::OptimizedSingleFile(pipeline) => pipeline.execute().await,
@@ -111,6 +102,6 @@ impl SpatialPipelineState {
       eprintln!("Completed in {}", format_elapsed(self.started_at.elapsed()));
     }
     explain_timing(self.explain, "Total job", self.started_at.elapsed());
-    SpatialPipelineResult { rows_written }
+    SpatialPipelineResult::new(rows_written)
   }
 }

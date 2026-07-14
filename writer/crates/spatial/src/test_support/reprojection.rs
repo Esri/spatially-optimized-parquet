@@ -1,7 +1,7 @@
 use gdal::spatial_ref::{AxisMappingStrategy, CoordTransform, SpatialRef};
 
 #[allow(dead_code)]
-pub fn transform_point_between_epsg(
+pub(crate) fn transform_point_between_epsg(
   x: f64,
   y: f64,
   source_epsg: u32,

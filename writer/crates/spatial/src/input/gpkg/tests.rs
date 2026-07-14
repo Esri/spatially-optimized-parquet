@@ -1,20 +1,37 @@
 use std::collections::BTreeSet;
+use std::path::Path;
+use std::sync::Arc;
 
 use arrow_array::{Int32Array, StringArray, StringViewArray};
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
 use datafusion::physical_plan::ExecutionPlanProperties;
-use engine::session::new_datafusion_session;
+use engine::DataFusionSession;
 use futures_util::StreamExt;
 use gdal::vector::LayerAccess;
 use gdal_sys::OGRwkbGeometryType;
 use tempfile::TempDir;
+use tokio::runtime::Runtime;
 
-use spatial::geometry::Extent2D;
-use spatial::geometry::GeometryKind;
-use spatial::input::{InputOpenOptions, RowRange, SourceFormat, open_input};
+use crate::geometry::{Extent2D, GeometryKind};
+use crate::input::{InputOpenOptions, InputSource, RowRange, SourceFormat, open_input};
 
-mod common;
-use common::{GpkgFeature, GpkgLayerSpec, open_gpkg_dataset, open_gpkg_input, runtime, write_gpkg};
+use crate::test_support::{GpkgFeature, GpkgLayerSpec, open_gpkg_dataset, write_gpkg};
+
+fn runtime() -> Runtime {
+  Runtime::new().unwrap()
+}
+
+fn open_gpkg_input(path: &Path, layer: Option<&str>) -> Arc<dyn InputSource> {
+  runtime()
+    .block_on(open_input(
+      SourceFormat::GeoPackage,
+      &InputOpenOptions::new(
+        path.to_string_lossy().into_owned(),
+        layer.map(str::to_string),
+      ),
+    ))
+    .unwrap()
+}
 
 fn string_value(array: &dyn arrow_array::Array, index: usize) -> String {
   if let Some(array) = array.as_any().downcast_ref::<StringArray>() {
@@ -145,7 +162,7 @@ fn open_input_requires_layer_for_multi_layer_geopackage() {
 
   let err = match runtime().block_on(open_input(
     SourceFormat::GeoPackage,
-    &InputOpenOptions::new(path.clone()),
+    &InputOpenOptions::new(path.to_string_lossy().into_owned(), None),
   )) {
     Ok(_) => panic!("expected multi-layer GeoPackage without --layer to fail"),
     Err(err) => err,
@@ -222,16 +239,10 @@ fn geopackage_input_can_produce_dataframe_for_execution() {
   );
 
   let input = open_gpkg_input(&path, None);
-  let session = new_datafusion_session().unwrap();
+  let session = DataFusionSession::new().unwrap();
   let rows = runtime().block_on(async {
     let df = input
-      .to_dataframe(
-        session.context(),
-        RowRange {
-          start: 0,
-          num: Some(1),
-        },
-      )
+      .to_dataframe(session.context(), RowRange::new(0, Some(1)))
       .await
       .unwrap();
     let batches = df.collect().await.unwrap();
@@ -277,7 +288,7 @@ fn geopackage_dataframe_uses_partitioned_scan_for_full_reads() {
   );
 
   let input = open_gpkg_input(&path, None);
-  let session = new_datafusion_session().unwrap();
+  let session = DataFusionSession::new().unwrap();
   let (ids, saw_partitioned_node) = runtime().block_on(async {
     let df = input
       .to_dataframe(session.context(), RowRange::default())
@@ -366,16 +377,10 @@ fn geopackage_dataframe_limit_uses_partitioned_scan_path() {
   );
 
   let input = open_gpkg_input(&path, None);
-  let session = new_datafusion_session().unwrap();
+  let session = DataFusionSession::new().unwrap();
   let (row_count, ids, saw_partitioned_node) = runtime().block_on(async {
     let df = input
-      .to_dataframe(
-        session.context(),
-        RowRange {
-          start: 0,
-          num: Some(3),
-        },
-      )
+      .to_dataframe(session.context(), RowRange::new(0, Some(3)))
       .await
       .unwrap();
     let physical_plan = df.clone().create_physical_plan().await.unwrap();
@@ -454,10 +459,10 @@ fn open_input_reports_layer_metadata_for_unknown_layer_name() {
 
   let err = match runtime().block_on(open_input(
     SourceFormat::GeoPackage,
-    &InputOpenOptions {
-      location: path.to_string_lossy().into_owned(),
-      layer: Some("missing".to_string()),
-    },
+    &InputOpenOptions::new(
+      path.to_string_lossy().into_owned(),
+      Some("missing".to_string()),
+    ),
   )) {
     Ok(_) => panic!("expected unknown GeoPackage layer to fail"),
     Err(err) => err,
@@ -497,7 +502,7 @@ fn open_input_reports_generic_and_non_spatial_layer_hints() {
 
   let err = match runtime().block_on(open_input(
     SourceFormat::GeoPackage,
-    &InputOpenOptions::new(path.clone()),
+    &InputOpenOptions::new(path.to_string_lossy().into_owned(), None),
   )) {
     Ok(_) => panic!("expected mixed GeoPackage without --layer to fail"),
     Err(err) => err,
@@ -582,13 +587,7 @@ fn gpkg_input_respects_batch_limit() {
 
   let input = open_gpkg_input(&path, None);
   let rows = runtime().block_on(async {
-    let mut stream = input
-      .read_batches(RowRange {
-        start: 0,
-        num: Some(2),
-      })
-      .await
-      .unwrap();
+    let mut stream = input.read_batches(RowRange::new(0, Some(2))).await.unwrap();
     let mut rows = 0usize;
     while let Some(batch) = stream.next().await {
       rows += batch.unwrap().num_rows();

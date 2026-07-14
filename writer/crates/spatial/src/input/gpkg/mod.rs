@@ -11,4 +11,7 @@ mod open;
 mod partition;
 mod source;
 
-pub use source::{GpkgInputSource, open_source};
+pub(super) use source::open_source;
+
+#[cfg(test)]
+mod tests;

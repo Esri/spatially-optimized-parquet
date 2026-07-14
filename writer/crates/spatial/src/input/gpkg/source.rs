@@ -3,27 +3,33 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use datafusion::catalog::streaming::StreamingTable;
+use datafusion::dataframe::DataFrame;
+use datafusion::execution::context::SessionContext;
 use datafusion::physical_plan::streaming::PartitionStream;
-use engine::session::configured_target_partitions;
-use engine::{DataFrame, SessionContext};
+use engine::DataFusionSession;
+#[cfg(test)]
 use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use gdal::vector::LayerAccess;
 
 use crate::geometry::{GeometryEncoding, GeometrySpec};
-use crate::geoparquet::metadata::source::{SourceDatasetMetadata, SourceGeometryMetadata};
-use crate::input::{InputBatchStream, InputOpenOptions, InputSource, RowRange};
+#[cfg(test)]
+use crate::input::source::InputBatchStream;
+use crate::input::{
+  InputOpenOptions, InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata,
+};
 
-use super::batch_reader::{batch_stream, load_schema, open_gpkg_batch_reader};
+use super::batch_reader::load_schema;
+#[cfg(test)]
+use super::batch_reader::{batch_stream, open_gpkg_batch_reader};
 use super::metadata::{collect_layer_summaries, select_layer_name};
 use super::open::{is_gpkg_path, open_gpkg_dataset};
 use super::partition::{GpkgPartitionStream, plan_gpkg_scan_partitions};
 
 #[derive(Debug, Clone)]
 /// Stores normalized GeoPackage metadata and constructs GDAL-backed batch streams.
-pub struct GpkgInputSource {
+struct GpkgInputSource {
   input_path: PathBuf,
-  source_location: String,
   layer_name: String,
   schema: arrow_schema::SchemaRef,
   total_rows: u64,
@@ -32,7 +38,9 @@ pub struct GpkgInputSource {
 }
 
 /// Open one local GeoPackage layer through GDAL.
-pub async fn open_source(options: &InputOpenOptions) -> Result<Arc<dyn InputSource>> {
+pub(in crate::input) async fn open_source(
+  options: &InputOpenOptions,
+) -> Result<Arc<dyn InputSource>> {
   let path = options
     .local_path()
     .ok_or_else(|| anyhow::anyhow!("gpkg input does not support HTTP locations"))?;
@@ -64,7 +72,6 @@ pub async fn open_source(options: &InputOpenOptions) -> Result<Arc<dyn InputSour
 
   Ok(Arc::new(GpkgInputSource {
     input_path: path.to_path_buf(),
-    source_location: options.location.clone(),
     layer_name,
     schema,
     total_rows,
@@ -76,10 +83,6 @@ pub async fn open_source(options: &InputOpenOptions) -> Result<Arc<dyn InputSour
 impl InputSource for GpkgInputSource {
   fn format_name(&self) -> &'static str {
     "GeoPackage"
-  }
-
-  fn source_location(&self) -> &str {
-    &self.source_location
   }
 
   fn schema(&self) -> Result<arrow_schema::SchemaRef> {
@@ -98,15 +101,18 @@ impl InputSource for GpkgInputSource {
     Ok(self.source_metadata.clone())
   }
 
+  #[cfg(test)]
   fn read_batches(&self, row_range: RowRange) -> BoxFuture<'_, Result<InputBatchStream>> {
     let input_path = self.input_path.clone();
     let layer_name = self.layer_name.clone();
     let schema = self.schema.clone();
     Box::pin(async move {
-      let rows_to_read = row_range.num.map(|num| num.saturating_add(row_range.start));
+      let rows_to_read = row_range
+        .num()
+        .map(|num| num.saturating_add(row_range.start()));
       let reader = open_gpkg_batch_reader(&input_path, &layer_name, schema, None, rows_to_read)
         .with_context(|| format!("failed to stream GeoPackage layer {layer_name}"))?;
-      let mut rows_to_skip = row_range.start;
+      let mut rows_to_skip = row_range.start();
       let stream = batch_stream(reader).filter_map(move |batch| {
         let out = match batch {
           Ok(batch) if rows_to_skip >= batch.num_rows() => {
@@ -141,7 +147,7 @@ impl InputSource for GpkgInputSource {
         &layer_name,
         total_rows,
         row_range,
-        configured_target_partitions(),
+        DataFusionSession::target_partition_count(),
       )?;
       let streams: Vec<_> = partitions
         .into_iter()
@@ -156,7 +162,7 @@ impl InputSource for GpkgInputSource {
         .collect();
       let table = StreamingTable::try_new(schema, streams)?;
       let mut df = ctx.read_table(Arc::new(table))?;
-      if let Some(num) = row_range.num {
+      if let Some(num) = row_range.num() {
         df = df.limit(0, Some(num))?;
       }
       Ok(df)

@@ -15,7 +15,7 @@ use datafusion::logical_expr::{
 use datafusion::prelude::col;
 
 use crate::geometry::to_datafusion_error;
-use crate::optimized::multiscale::COVERING_BBOX_COLUMN;
+use crate::optimized::COVERING_BBOX_COLUMN;
 
 /// Reject covering output that would overwrite an existing source column.
 pub(crate) fn validate_covering_configuration(covering: bool, schema: &Schema) -> Result<()> {
@@ -26,7 +26,7 @@ pub(crate) fn validate_covering_configuration(covering: bool, schema: &Schema) -
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct FeatureBboxUdf;
+struct FeatureBboxUdf;
 
 impl ScalarUDFImpl for FeatureBboxUdf {
   fn as_any(&self) -> &dyn Any {
@@ -69,7 +69,7 @@ impl ScalarUDFImpl for FeatureBboxUdf {
   }
 }
 
-pub(crate) fn feature_bbox_udf() -> ScalarUDF {
+fn feature_bbox_udf() -> ScalarUDF {
   ScalarUDF::new_from_impl(FeatureBboxUdf)
 }
 

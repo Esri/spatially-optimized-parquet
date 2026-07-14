@@ -25,7 +25,7 @@ use crate::optimized::multiscale::{POINT_Z_CODE_COLUMN, point_xy_from_wkb};
 use super::algorithm::{DEFAULT_COORDINATE_PRECISION, point_z_code};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct PointUdf;
+struct PointUdf;
 
 impl ScalarUDFImpl for PointUdf {
   fn as_any(&self) -> &dyn Any {
@@ -64,7 +64,7 @@ impl ScalarUDFImpl for PointUdf {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct ZGeometryClusterKeyUdf;
+struct ZGeometryClusterKeyUdf;
 
 impl ScalarUDFImpl for ZGeometryClusterKeyUdf {
   fn as_any(&self) -> &dyn Any {
@@ -101,7 +101,7 @@ impl ScalarUDFImpl for ZGeometryClusterKeyUdf {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct ZPointClusterKeyUdf;
+struct ZPointClusterKeyUdf;
 
 impl ScalarUDFImpl for ZPointClusterKeyUdf {
   fn as_any(&self) -> &dyn Any {
@@ -145,15 +145,15 @@ impl ScalarUDFImpl for ZPointClusterKeyUdf {
   }
 }
 
-pub(crate) fn point_udf() -> ScalarUDF {
+fn point_udf() -> ScalarUDF {
   ScalarUDF::new_from_impl(PointUdf)
 }
 
-pub(crate) fn point_zcode_udf() -> ScalarUDF {
+fn point_zcode_udf() -> ScalarUDF {
   ScalarUDF::new_from_impl(ZGeometryClusterKeyUdf)
 }
 
-pub(crate) fn point_zcode_from_xy_udf() -> ScalarUDF {
+fn point_zcode_from_xy_udf() -> ScalarUDF {
   ScalarUDF::new_from_impl(ZPointClusterKeyUdf)
 }
 
@@ -228,23 +228,11 @@ fn z_cluster_signature() -> &'static Signature {
   SIGNATURE.get_or_init(|| Signature::exact(vec![DataType::Float64; 6], Volatility::Immutable))
 }
 
-pub(crate) fn point_zcode_expr(geometry_column: &str, full_extent: Extent2D) -> Expr {
-  point_zcode_udf()
-    .call(vec![
-      col(geometry_column),
-      lit(full_extent.xmin),
-      lit(full_extent.ymin),
-      lit(full_extent.xmax),
-      lit(full_extent.ymax),
-    ])
-    .alias(POINT_Z_CODE_COLUMN)
-}
-
 pub(crate) fn point_expr(geometry_column: &str) -> Expr {
   point_udf().call(vec![col(geometry_column)])
 }
 
-pub(crate) fn point_zcode_from_xy_expr(
+pub(in crate::optimized) fn point_zcode_from_xy_expr(
   x_column: &str,
   y_column: &str,
   full_extent: Extent2D,

@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use arrow_array::{Array, UInt64Array};
+use datafusion::dataframe::DataFrame;
 use datafusion::functions_aggregate::approx_percentile_cont::approx_percentile_cont;
 use datafusion::functions_aggregate::expr_fn::min;
 use datafusion::logical_expr::expr_fn::ident;
@@ -9,11 +10,11 @@ use datafusion::prelude::lit;
 use indicatif::ProgressBar;
 
 use super::aggregate::collect_aggregate_with_progress;
-use super::clustering::{ClusterKey, ClusterRangeBoundaries};
+use super::clustering::ClusterRangeBoundaries;
 
 /// Estimate balanced cluster-key ranges with one minimum and approximate percentiles.
-pub(crate) async fn compute_cluster_range_boundaries(
-  dataframe: engine::DataFrame,
+pub(super) async fn compute_cluster_range_boundaries(
+  dataframe: DataFrame,
   cluster_key_column: &str,
   bucket_count: usize,
   progress_bar: &ProgressBar,
@@ -21,10 +22,7 @@ pub(crate) async fn compute_cluster_range_boundaries(
   explain: bool,
 ) -> Result<ClusterRangeBoundaries> {
   if bucket_count <= 1 {
-    return Ok(ClusterRangeBoundaries {
-      min_value: ClusterKey::new(0),
-      boundaries: Vec::new(),
-    });
+    return Ok(ClusterRangeBoundaries::new(0, Vec::new()));
   }
 
   let mut aggregate_expressions = vec![min(ident(cluster_key_column)).alias("range_min")];
@@ -45,16 +43,10 @@ pub(crate) async fn compute_cluster_range_boundaries(
   )
   .await?;
   let Some(batch) = batches.first() else {
-    return Ok(ClusterRangeBoundaries {
-      min_value: ClusterKey::new(0),
-      boundaries: Vec::new(),
-    });
+    return Ok(ClusterRangeBoundaries::new(0, Vec::new()));
   };
   if batch.num_rows() == 0 {
-    return Ok(ClusterRangeBoundaries {
-      min_value: ClusterKey::new(0),
-      boundaries: Vec::new(),
-    });
+    return Ok(ClusterRangeBoundaries::new(0, Vec::new()));
   }
 
   let minimum_values = batch
@@ -63,9 +55,9 @@ pub(crate) async fn compute_cluster_range_boundaries(
     .downcast_ref::<UInt64Array>()
     .context("range partition minimum aggregate did not return UInt64")?;
   let min_value = if minimum_values.is_null(0) {
-    ClusterKey::new(0)
+    0
   } else {
-    ClusterKey::new(minimum_values.value(0))
+    minimum_values.value(0)
   };
 
   let mut boundaries = Vec::with_capacity(batch.num_columns().saturating_sub(1));
@@ -75,12 +67,9 @@ pub(crate) async fn compute_cluster_range_boundaries(
       .downcast_ref::<UInt64Array>()
       .context("range boundary aggregate did not return UInt64")?;
     if !values.is_null(0) {
-      boundaries.push(ClusterKey::new(values.value(0)));
+      boundaries.push(values.value(0));
     }
   }
   boundaries.sort_unstable();
-  Ok(ClusterRangeBoundaries {
-    min_value,
-    boundaries,
-  })
+  Ok(ClusterRangeBoundaries::new(min_value, boundaries))
 }

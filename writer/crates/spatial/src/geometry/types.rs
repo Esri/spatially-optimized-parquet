@@ -2,33 +2,16 @@ use anyhow::Result;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Groups geometry shapes by point-specific or general geometry processing.
-pub enum GeometryCategory {
+pub(crate) enum GeometryCategory {
   /// Uses direct point coordinate extraction.
   Point,
   /// Uses general geometry bounds extraction.
   NonPoint,
 }
 
-impl GeometryCategory {
-  /// Classify one concrete source geometry kind.
-  pub fn from_kind(kind: GeometryKind) -> Result<Self> {
-    match kind {
-      GeometryKind::Point => Ok(Self::Point),
-      GeometryKind::LineString
-      | GeometryKind::MultiPoint
-      | GeometryKind::MultiLineString
-      | GeometryKind::Polygon
-      | GeometryKind::MultiPolygon => Ok(Self::NonPoint),
-      GeometryKind::GeometryCollection | GeometryKind::Unknown => {
-        anyhow::bail!("unsupported geometry kind: {kind:?}")
-      }
-    }
-  }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Normalizes concrete geometry kinds into format-independent shape groups.
-pub enum GeometryShape {
+pub(crate) enum GeometryShape {
   /// Represents single-point features.
   Point,
   /// Represents multipoint features.
@@ -41,7 +24,7 @@ pub enum GeometryShape {
 
 impl GeometryShape {
   /// Classify one concrete source geometry kind.
-  pub fn from_kind(kind: GeometryKind) -> Result<Self> {
+  pub(crate) fn from_kind(kind: GeometryKind) -> Result<Self> {
     match kind {
       GeometryKind::Point => Ok(Self::Point),
       GeometryKind::MultiPoint => Ok(Self::MultiPoint),
@@ -54,7 +37,7 @@ impl GeometryShape {
   }
 
   /// Classify source geometry kinds while rejecting mixed shape groups.
-  pub fn from_kinds(kinds: &[GeometryKind]) -> Result<Self> {
+  pub(crate) fn from_kinds(kinds: &[GeometryKind]) -> Result<Self> {
     let mut shape = None;
     for kind in kinds {
       let next = Self::from_kind(*kind)?;
@@ -67,7 +50,7 @@ impl GeometryShape {
   }
 
   /// Return the processing category shared by output mechanics.
-  pub fn category(self) -> GeometryCategory {
+  pub(crate) fn category(self) -> GeometryCategory {
     match self {
       Self::Point => GeometryCategory::Point,
       Self::MultiPoint | Self::Polyline | Self::Polygon => GeometryCategory::NonPoint,
@@ -77,7 +60,7 @@ impl GeometryShape {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Identifies the concrete geometry shape represented by source metadata or WKB.
-pub enum GeometryKind {
+pub(crate) enum GeometryKind {
   /// Represents one point.
   Point,
   /// Represents one line string.
@@ -98,24 +81,24 @@ pub enum GeometryKind {
 
 #[derive(Debug, Clone, PartialEq)]
 /// Describes the selected geometry column and its source encoding.
-pub struct GeometrySpec {
+pub(crate) struct GeometrySpec {
   /// Stores the Arrow column containing geometry values.
-  pub column: String,
+  pub(crate) column: String,
   /// Stores the physical encoding used by that column.
-  pub encoding: GeometryEncoding,
+  pub(crate) encoding: GeometryEncoding,
   /// Stores the known source geometry kind when metadata can determine it.
-  pub geometry_kind: Option<GeometryKind>,
+  pub(crate) geometry_kind: Option<GeometryKind>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Identifies supported physical geometry encodings.
-pub enum GeometryEncoding {
+pub(crate) enum GeometryEncoding {
   /// Represents Open Geospatial Consortium Well-Known Binary.
   Wkb,
 }
 
 /// Map a decoded WKB geometry type into the repository geometry taxonomy.
-pub fn geometry_kind_from_wkb_type(geometry_type: wkb::reader::GeometryType) -> GeometryKind {
+fn geometry_kind_from_wkb_type(geometry_type: wkb::reader::GeometryType) -> GeometryKind {
   match geometry_type {
     wkb::reader::GeometryType::Point => GeometryKind::Point,
     wkb::reader::GeometryType::LineString => GeometryKind::LineString,
@@ -129,7 +112,7 @@ pub fn geometry_kind_from_wkb_type(geometry_type: wkb::reader::GeometryType) -> 
 }
 
 /// Decode WKB and return its geometry kind.
-pub fn geometry_kind_from_wkb(bytes: &[u8]) -> Result<GeometryKind> {
+pub(crate) fn geometry_kind_from_wkb(bytes: &[u8]) -> Result<GeometryKind> {
   let wkb_geom = wkb::reader::read_wkb(bytes)?;
   Ok(geometry_kind_from_wkb_type(wkb_geom.geometry_type()))
 }

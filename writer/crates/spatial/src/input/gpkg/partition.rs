@@ -145,7 +145,7 @@ fn fallback_gpkg_scan_partitions(
   total_rows: u64,
   row_range: RowRange,
 ) -> Result<Vec<GpkgScanPartition>> {
-  let start = row_range.start as u64;
+  let start = row_range.start() as u64;
   let end = start + row_range.effective_rows(total_rows);
   Ok(vec![GpkgScanPartition {
     lower_rowid: rowid_at_offset(dataset, layer_name, total_rows, start)?,
@@ -173,7 +173,7 @@ pub(super) fn plan_gpkg_scan_partitions(
   }
 
   let mut partitions = Vec::with_capacity(partition_count);
-  let start = row_range.start as u64;
+  let start = row_range.start() as u64;
   let end = start + effective_rows;
   let mut lower_rowid = rowid_at_offset(&dataset, layer_name, total_rows, start)?;
   for index in 1..partition_count {
@@ -216,14 +216,7 @@ mod tests {
   #[test]
   fn partition_count_does_not_exceed_requested_rows() {
     assert_eq!(
-      effective_gpkg_scan_partition_count(
-        100,
-        RowRange {
-          start: 10,
-          num: Some(2),
-        },
-        8,
-      ),
+      effective_gpkg_scan_partition_count(100, RowRange::new(10, Some(2)), 8,),
       2
     );
   }
@@ -231,25 +224,11 @@ mod tests {
   #[test]
   fn partition_count_uses_one_partition_for_empty_or_single_row_ranges() {
     assert_eq!(
-      effective_gpkg_scan_partition_count(
-        100,
-        RowRange {
-          start: 100,
-          num: None,
-        },
-        8,
-      ),
+      effective_gpkg_scan_partition_count(100, RowRange::new(100, None), 8,),
       1
     );
     assert_eq!(
-      effective_gpkg_scan_partition_count(
-        100,
-        RowRange {
-          start: 10,
-          num: Some(1),
-        },
-        8,
-      ),
+      effective_gpkg_scan_partition_count(100, RowRange::new(10, Some(1)), 8,),
       1
     );
   }

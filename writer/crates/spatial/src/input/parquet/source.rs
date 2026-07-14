@@ -2,28 +2,28 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use arrow_schema::SchemaRef;
-use engine::parquet_scan::scan_parquet;
-use engine::{DataFrame, SessionContext};
+use datafusion::dataframe::DataFrame;
+use datafusion::execution::context::SessionContext;
+#[cfg(test)]
+use engine::scan_parquet;
+#[cfg(test)]
 use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use geoparquet::metadata::GeoParquetColumnEncoding;
 use object_store::ObjectStore;
 use parquet::arrow::arrow_reader::ArrowReaderMetadata;
-use parquet::file::metadata::KeyValue;
 use url::Url;
 
 use crate::geometry::{GeometryEncoding, GeometrySpec};
-use crate::geoparquet::metadata::source::{SourceDatasetMetadata, SourceGeometryMetadata};
-use crate::input::{InputBatchStream, InputSource, RowRange};
+#[cfg(test)]
+use crate::input::source::InputBatchStream;
+use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata};
 
-use super::metadata::{
-  file_metadata, load_geo_metadata, map_geo_geometry_type, passthrough_metadata,
-};
+use super::metadata::{load_geo_metadata, map_geo_geometry_type, passthrough_metadata};
 
 /// Stores Parquet footer metadata and the location needed to construct future scans.
-pub struct ParquetInputSource {
+pub(super) struct ParquetInputSource {
   location: ParquetInputLocation,
-  source_location: String,
   metadata: Vec<ArrowReaderMetadata>,
 }
 
@@ -40,26 +40,14 @@ pub(super) enum ParquetInputLocation {
 }
 
 impl ParquetInputSource {
-  pub(super) fn new(
-    location: ParquetInputLocation,
-    source_location: String,
-    metadata: Vec<ArrowReaderMetadata>,
-  ) -> Self {
-    Self {
-      location,
-      source_location,
-      metadata,
-    }
+  pub(super) fn new(location: ParquetInputLocation, metadata: Vec<ArrowReaderMetadata>) -> Self {
+    Self { location, metadata }
   }
 }
 
 impl InputSource for ParquetInputSource {
   fn format_name(&self) -> &'static str {
     "parquet"
-  }
-
-  fn source_location(&self) -> &str {
-    &self.source_location
   }
 
   fn schema(&self) -> Result<SchemaRef> {
@@ -124,10 +112,7 @@ impl InputSource for ParquetInputSource {
     })
   }
 
-  fn file_metadata(&self) -> Result<Vec<KeyValue>> {
-    Ok(file_metadata(&self.metadata))
-  }
-
+  #[cfg(test)]
   fn read_batches(&self, row_range: RowRange) -> BoxFuture<'_, Result<InputBatchStream>> {
     match &self.location {
       ParquetInputLocation::Local { input_path } => {
@@ -135,7 +120,7 @@ impl InputSource for ParquetInputSource {
         Box::pin(async move {
           let mut dataframe = scan_parquet(&input_path).await?;
           if !row_range.is_full() {
-            dataframe = dataframe.limit(row_range.start, row_range.num)?;
+            dataframe = dataframe.limit(row_range.start(), row_range.num())?;
           }
 
           let stream = dataframe.execute_stream().await.context("execute stream")?;
@@ -156,7 +141,7 @@ impl InputSource for ParquetInputSource {
           context.register_object_store(&store_url, store);
           let mut dataframe = context.read_parquet(&input_url, Default::default()).await?;
           if !row_range.is_full() {
-            dataframe = dataframe.limit(row_range.start, row_range.num)?;
+            dataframe = dataframe.limit(row_range.start(), row_range.num())?;
           }
           let stream = dataframe.execute_stream().await.context("execute stream")?;
           Ok(Box::pin(stream.map(|batch| batch.map_err(Into::into))) as InputBatchStream)
@@ -176,7 +161,7 @@ impl InputSource for ParquetInputSource {
         Box::pin(async move {
           let mut dataframe = ctx.read_parquet(&input_path, Default::default()).await?;
           if !row_range.is_full() {
-            dataframe = dataframe.limit(row_range.start, row_range.num)?;
+            dataframe = dataframe.limit(row_range.start(), row_range.num())?;
           }
           Ok(dataframe)
         })
@@ -194,7 +179,7 @@ impl InputSource for ParquetInputSource {
           ctx.register_object_store(&store_url, store);
           let mut dataframe = ctx.read_parquet(&input_url, Default::default()).await?;
           if !row_range.is_full() {
-            dataframe = dataframe.limit(row_range.start, row_range.num)?;
+            dataframe = dataframe.limit(row_range.start(), row_range.num())?;
           }
           Ok(dataframe)
         })

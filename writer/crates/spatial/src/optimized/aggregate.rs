@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use arrow_array::RecordBatch;
+use datafusion::dataframe::DataFrame;
 use datafusion::execution::TaskContext;
 use datafusion::physical_plan::collect;
 use indicatif::ProgressBar;
@@ -18,8 +19,8 @@ use crate::diagnostics::{
 use crate::progress::{collect_plan_progress, update_metric_count_bar};
 
 /// Execute an aggregate DataFrame while polling physical-plan metrics.
-pub(crate) async fn collect_aggregate_with_progress(
-  dataframe: engine::DataFrame,
+pub(super) async fn collect_aggregate_with_progress(
+  dataframe: DataFrame,
   progress_bar: &ProgressBar,
   total_input_rows: u64,
   base_message: &str,

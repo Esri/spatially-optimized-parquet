@@ -10,21 +10,21 @@ use super::PreparedTransform;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Stores source and target CRS definitions for deferred transform construction.
-pub struct CoordinateTransformSpec {
+pub(crate) struct CoordinateTransformSpec {
   source_definition: String,
   target_definition: String,
 }
 
 #[derive(Debug, Clone)]
 /// Stores target CRS metadata and the optional transform required to produce it.
-pub struct ReprojectionSpec {
+pub(crate) struct ReprojectionSpec {
   transform: Option<CoordinateTransformSpec>,
   target_spatial_reference: SpatialReferenceInfo,
 }
 
 impl ReprojectionSpec {
   /// Resolve target CRS metadata and transformation from source PROJJSON.
-  pub fn from_source_projjson(source_projjson: &Value, target_wkid: u32) -> Result<Self> {
+  pub(crate) fn from_source_projjson(source_projjson: &Value, target_wkid: u32) -> Result<Self> {
     let source_definition =
       serde_json::to_string(source_projjson).context("serialize source CRS as PROJJSON")?;
     let source_spatial_ref = spatial_ref_from_definition(&source_definition)?;
@@ -53,24 +53,24 @@ impl ReprojectionSpec {
   }
 
   /// Return whether source and target spatial references differ.
-  pub fn requires_reprojection(&self) -> bool {
+  pub(crate) fn requires_reprojection(&self) -> bool {
     self.transform.is_some()
   }
 
   /// Return the deferred transform when reprojection is required.
-  pub fn transform(&self) -> Option<&CoordinateTransformSpec> {
+  pub(crate) fn transform(&self) -> Option<&CoordinateTransformSpec> {
     self.transform.as_ref()
   }
 
   /// Return metadata describing the target coordinate reference system.
-  pub fn target_spatial_reference(&self) -> &SpatialReferenceInfo {
+  pub(crate) fn target_spatial_reference(&self) -> &SpatialReferenceInfo {
     &self.target_spatial_reference
   }
 }
 
 impl CoordinateTransformSpec {
   /// Construct reusable transformation state from the stored CRS definitions.
-  pub fn prepare(&self) -> Result<PreparedTransform> {
+  pub(super) fn prepare(&self) -> Result<PreparedTransform> {
     PreparedTransform::new(
       spatial_ref_from_definition(&self.source_definition)?,
       spatial_ref_from_definition(&self.target_definition)?,

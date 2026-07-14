@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use datafusion::common::{
   DataFusionError, Result as DataFusionResult, config::TableParquetOptions,
 };
+use datafusion::dataframe::DataFrame;
 use datafusion::datasource::file_format::parquet::ParquetSink;
 use datafusion::datasource::listing::ListingTableUrl;
 use datafusion::datasource::physical_plan::FileSinkConfig;
@@ -29,7 +30,7 @@ use datafusion::physical_plan::{
   metrics::{Count, ExecutionPlanMetricsSet, MetricBuilder, MetricsSet},
   stream::RecordBatchStreamAdapter,
 };
-use engine::parquet_write::written_row_count;
+use engine::written_row_count;
 use futures_util::StreamExt;
 use indicatif::ProgressBar;
 use tokio::task::JoinSet;
@@ -321,97 +322,113 @@ fn make_count_batch(count: u64) -> RecordBatch {
   .expect("count batch should always be valid")
 }
 
-pub(crate) struct PartitionedWriteRequest<'a> {
-  pub(crate) write_path: String,
-  pub(crate) partition_by: Vec<String>,
-  pub(crate) partitioned_sort: PartitionedSortConfig,
-  pub(crate) writer_options: TableParquetOptions,
-  pub(crate) progress_bar: &'a ProgressBar,
-  pub(crate) total_input_rows: u64,
-  pub(crate) explain: bool,
+pub(super) struct PartitionedParquetWriter<'a> {
+  write_path: String,
+  partition_by: Vec<String>,
+  partitioned_sort: PartitionedSortConfig,
+  writer_options: TableParquetOptions,
+  progress_bar: &'a ProgressBar,
+  total_input_rows: u64,
+  explain: bool,
 }
 
-pub(crate) async fn write_partitioned_parquet(
-  dataframe: engine::DataFrame,
-  request: PartitionedWriteRequest<'_>,
-) -> Result<u64> {
-  let (state, logical_plan) = dataframe.into_parts();
-  explain_dataframe_verbose(
-    request.explain,
-    "Writing parquet output input query",
-    &state,
-    &logical_plan,
-    false,
-  )
-  .await?;
-  let task_context = Arc::new(TaskContext::from(&state));
-  let input_plan = state.create_physical_plan(&logical_plan).await?;
-  let rewritten_input = request
-    .partitioned_sort
-    .insert_into(input_plan)
-    .map_err(anyhow::Error::from)?;
-  let parsed_url = ListingTableUrl::parse(&request.write_path)?;
-  let sink_config = FileSinkConfig {
-    original_url: request.write_path.clone(),
-    object_store_url: parsed_url.object_store(),
-    file_group: Default::default(),
-    table_paths: vec![parsed_url],
-    output_schema: rewritten_input.schema(),
-    table_partition_cols: request
-      .partition_by
-      .iter()
-      .map(|column| (column.to_string(), DataType::Null))
-      .collect(),
-    insert_op: InsertOp::Append,
-    keep_partition_by_columns: state.config_options().execution.keep_partition_by_columns,
-    file_extension: "parquet".to_string(),
-  };
-  let sink = Arc::new(TrackingParquetSink::new(
-    sink_config,
-    request.writer_options,
-  ));
-  let physical_plan: Arc<dyn ExecutionPlan> = Arc::new(ConcurrentPartitionedParquetSinkExec::new(
-    rewritten_input,
-    sink,
-    None,
-  ));
-  explain_physical_plan(request.explain, "Writing parquet output", &physical_plan);
-  let stage_start = Instant::now();
-  let total_input_rows = request.total_input_rows;
-
-  let done = Arc::new(AtomicBool::new(false));
-  let poller = if request.progress_bar.is_hidden() {
-    None
-  } else {
-    let plan = Arc::clone(&physical_plan);
-    let bar = request.progress_bar.clone();
-    let done = Arc::clone(&done);
-    Some(std::thread::spawn(move || {
-      let mut current_phase = None;
-      while !done.load(Ordering::Relaxed) {
-        update_write_stage_bar(
-          &bar,
-          collect_plan_progress(plan.as_ref()),
-          total_input_rows,
-          true,
-          &mut current_phase,
-        );
-        std::thread::sleep(Duration::from_millis(500));
-      }
-    }))
-  };
-
-  let result = collect(Arc::clone(&physical_plan), task_context).await;
-  done.store(true, Ordering::Relaxed);
-  if let Some(poller) = poller {
-    let _ = poller.join();
+impl<'a> PartitionedParquetWriter<'a> {
+  /// Construct one partitioned Parquet sink execution.
+  pub(super) fn new(
+    write_path: String,
+    partition_by: Vec<String>,
+    partitioned_sort: PartitionedSortConfig,
+    writer_options: TableParquetOptions,
+    progress_bar: &'a ProgressBar,
+    total_input_rows: u64,
+    explain: bool,
+  ) -> Self {
+    Self {
+      write_path,
+      partition_by,
+      partitioned_sort,
+      writer_options,
+      progress_bar,
+      total_input_rows,
+      explain,
+    }
   }
-  explain_stage_completion(
-    request.explain,
-    "Writing parquet output",
-    stage_start.elapsed(),
-    &physical_plan,
-    collect_plan_progress(physical_plan.as_ref()),
-  );
-  written_row_count(&result?)
+
+  /// Write one prepared DataFrame through the partitioned Parquet sink.
+  pub(super) async fn write(self, dataframe: DataFrame) -> Result<u64> {
+    let (state, logical_plan) = dataframe.into_parts();
+    explain_dataframe_verbose(
+      self.explain,
+      "Writing parquet output input query",
+      &state,
+      &logical_plan,
+      false,
+    )
+    .await?;
+    let task_context = Arc::new(TaskContext::from(&state));
+    let input_plan = state.create_physical_plan(&logical_plan).await?;
+    let rewritten_input = self
+      .partitioned_sort
+      .insert_into(input_plan)
+      .map_err(anyhow::Error::from)?;
+    let parsed_url = ListingTableUrl::parse(&self.write_path)?;
+    let sink_config = FileSinkConfig {
+      original_url: self.write_path.clone(),
+      object_store_url: parsed_url.object_store(),
+      file_group: Default::default(),
+      table_paths: vec![parsed_url],
+      output_schema: rewritten_input.schema(),
+      table_partition_cols: self
+        .partition_by
+        .iter()
+        .map(|column| (column.to_string(), DataType::Null))
+        .collect(),
+      insert_op: InsertOp::Append,
+      keep_partition_by_columns: state.config_options().execution.keep_partition_by_columns,
+      file_extension: "parquet".to_string(),
+    };
+    let sink = Arc::new(TrackingParquetSink::new(sink_config, self.writer_options));
+    let physical_plan: Arc<dyn ExecutionPlan> = Arc::new(
+      ConcurrentPartitionedParquetSinkExec::new(rewritten_input, sink, None),
+    );
+    explain_physical_plan(self.explain, "Writing parquet output", &physical_plan);
+    let stage_start = Instant::now();
+    let total_input_rows = self.total_input_rows;
+
+    let done = Arc::new(AtomicBool::new(false));
+    let poller = if self.progress_bar.is_hidden() {
+      None
+    } else {
+      let plan = Arc::clone(&physical_plan);
+      let bar = self.progress_bar.clone();
+      let done = Arc::clone(&done);
+      Some(std::thread::spawn(move || {
+        let mut current_phase = None;
+        while !done.load(Ordering::Relaxed) {
+          update_write_stage_bar(
+            &bar,
+            collect_plan_progress(plan.as_ref()),
+            total_input_rows,
+            true,
+            &mut current_phase,
+          );
+          std::thread::sleep(Duration::from_millis(500));
+        }
+      }))
+    };
+
+    let result = collect(Arc::clone(&physical_plan), task_context).await;
+    done.store(true, Ordering::Relaxed);
+    if let Some(poller) = poller {
+      let _ = poller.join();
+    }
+    explain_stage_completion(
+      self.explain,
+      "Writing parquet output",
+      stage_start.elapsed(),
+      &physical_plan,
+      collect_plan_progress(physical_plan.as_ref()),
+    );
+    written_row_count(&result?)
+  }
 }

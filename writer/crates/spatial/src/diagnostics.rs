@@ -9,6 +9,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use datafusion::common::format::{ExplainAnalyzeLevel, ExplainFormat};
+use datafusion::dataframe::DataFrame;
+use datafusion::execution::context::SessionContext;
 use datafusion::execution::context::SessionState;
 use datafusion::logical_expr::{ExplainOption, LogicalPlan};
 use datafusion::physical_plan::{
@@ -23,7 +25,7 @@ pub(crate) fn explain_stage_note(explain: bool, stage: &str, note: &str) {
   }
 }
 
-pub(crate) fn configure_explain_session(ctx: &engine::SessionContext, explain: bool) {
+pub(crate) fn configure_explain_session(ctx: &SessionContext, explain: bool) {
   if !explain {
     return;
   }
@@ -49,7 +51,7 @@ pub(crate) async fn explain_dataframe_verbose(
   if !explain {
     return Ok(());
   }
-  let verbose = engine::DataFrame::new(state.clone(), logical_plan.clone())
+  let verbose = DataFrame::new(state.clone(), logical_plan.clone())
     .explain_with_options(
       ExplainOption::default()
         .with_verbose(true)
@@ -61,7 +63,7 @@ pub(crate) async fn explain_dataframe_verbose(
   eprintln!("[explain] {stage} DataFusion EXPLAIN VERBOSE:");
   eprintln!("{verbose}");
   if run_analyze_verbose {
-    let analyzed = engine::DataFrame::new(state.clone(), logical_plan.clone())
+    let analyzed = DataFrame::new(state.clone(), logical_plan.clone())
       .explain_with_options(
         ExplainOption::default()
           .with_verbose(true)

@@ -1,6 +1,6 @@
 //! Creates the DataFusion execution environment used by analysis, sorting, and Parquet output.
 //!
-//! [`new_datafusion_session`] creates a session-scoped spill directory, applies a bounded
+//! [`DataFusionSession::new`] creates a session-scoped spill directory, applies a bounded
 //! memory pool, enables sort repartitioning and disk spilling, and preserves existing sort
 //! order where possible. File-scan repartitioning stays disabled because input providers
 //! either expose their own partitions or rely on DataFusion's native Parquet planning.
@@ -35,34 +35,39 @@ pub struct DataFusionSession {
 }
 
 impl DataFusionSession {
+  /// Create the DataFusion session used by spatial analysis and output execution.
+  ///
+  /// File-scan repartitioning stays disabled because input providers define their own
+  /// partition behavior, while sort repartitioning and disk spilling remain enabled.
+  pub fn new() -> Result<Self> {
+    let spill_dir = tempfile::Builder::new()
+      .prefix("opt-parquet-datafusion-spill-")
+      .tempdir()?;
+    let runtime = Arc::new(new_runtime_env(spill_dir.path())?);
+    let session_config = SessionConfig::new()
+      .with_collect_statistics(false)
+      .with_target_partitions(Self::target_partition_count())
+      .with_repartition_file_scans(false)
+      .with_repartition_sorts(true)
+      .with_prefer_existing_sort(true)
+      .with_sort_spill_reservation_bytes(configured_sort_spill_reservation_bytes())
+      .with_sort_in_place_threshold_bytes(NO_IN_PLACE_SORT_THRESHOLD_BYTES);
+    let ctx = SessionContext::new_with_config_rt(session_config, runtime);
+    Ok(Self {
+      ctx,
+      _spill_dir: spill_dir,
+    })
+  }
+
   /// Return the configured DataFusion context.
   pub fn context(&self) -> &SessionContext {
     &self.ctx
   }
-}
 
-/// Create the DataFusion session used by spatial analysis and output execution.
-///
-/// File-scan repartitioning stays disabled because input providers define their own
-/// partition behavior, while sort repartitioning and disk spilling remain enabled.
-pub fn new_datafusion_session() -> Result<DataFusionSession> {
-  let spill_dir = tempfile::Builder::new()
-    .prefix("opt-parquet-datafusion-spill-")
-    .tempdir()?;
-  let runtime = Arc::new(new_runtime_env(spill_dir.path())?);
-  let session_config = SessionConfig::new()
-    .with_collect_statistics(false)
-    .with_target_partitions(configured_target_partitions())
-    .with_repartition_file_scans(false)
-    .with_repartition_sorts(true)
-    .with_prefer_existing_sort(true)
-    .with_sort_spill_reservation_bytes(configured_sort_spill_reservation_bytes())
-    .with_sort_in_place_threshold_bytes(NO_IN_PLACE_SORT_THRESHOLD_BYTES);
-  let ctx = SessionContext::new_with_config_rt(session_config, runtime);
-  Ok(DataFusionSession {
-    ctx,
-    _spill_dir: spill_dir,
-  })
+  /// Resolve the configured execution partition count.
+  pub fn target_partition_count() -> usize {
+    env_usize(TARGET_PARTITIONS_ENV).unwrap_or(SORT_TARGET_PARTITIONS)
+  }
 }
 
 fn new_runtime_env(spill_dir: &std::path::Path) -> Result<RuntimeEnv> {
@@ -82,14 +87,24 @@ fn configured_sort_spill_reservation_bytes() -> usize {
   env_usize(SORT_SPILL_RESERVATION_ENV).unwrap_or(DEFAULT_SORT_SPILL_RESERVATION_BYTES)
 }
 
-/// Resolve the configured execution partition count.
-pub fn configured_target_partitions() -> usize {
-  env_usize(TARGET_PARTITIONS_ENV).unwrap_or(SORT_TARGET_PARTITIONS)
-}
-
 fn env_usize(name: &str) -> Option<usize> {
   std::env::var(name)
     .ok()
     .and_then(|value| value.parse::<usize>().ok())
     .filter(|value| *value > 0)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::DataFusionSession;
+
+  #[test]
+  fn session_owns_spill_directory_for_its_lifetime() {
+    let session = DataFusionSession::new().unwrap();
+    let spill_path = session._spill_dir.path().to_path_buf();
+
+    assert!(spill_path.is_dir());
+    drop(session);
+    assert!(!spill_path.exists());
+  }
 }

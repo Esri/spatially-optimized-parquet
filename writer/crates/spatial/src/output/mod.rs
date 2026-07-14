@@ -2,12 +2,21 @@
 //!
 //! Product contracts and pipelines live in [`crate::geoparquet`] and [`crate::pipeline`].
 
+mod metadata;
 mod mode;
-mod parquet_metadata;
-pub(crate) mod reprojection;
+mod reprojection;
 mod spatial_reference;
 
-pub use mode::GeoParquetOutputMode;
-pub use parquet_metadata::{ParquetMetadata, ParquetMetadataSet};
-pub(crate) use spatial_reference::validate_output_wkid;
-pub use spatial_reference::{DEFAULT_OUTPUT_WKID, SpatialReferenceInfo, WEB_MERCATOR_OUTPUT_WKID};
+pub(crate) use metadata::{
+  GeoMetadataInput, MultiscaleLevelInput, XzClusteringIndexInput, ZClusteringIndexInput,
+  geoparquet_metadata, optimized_point_metadata, optimized_xz_metadata,
+};
+pub use mode::OutputMode;
+pub(crate) use reprojection::{
+  CoordinateTransformSpec, ReprojectionSpec, reproject_geometry_expr, transformed_bounds_expr,
+  transformed_point_coords_expr,
+};
+pub use spatial_reference::DEFAULT_OUTPUT_WKID;
+pub(crate) use spatial_reference::{
+  SpatialReferenceInfo, WEB_MERCATOR_OUTPUT_WKID, validate_output_wkid,
+};

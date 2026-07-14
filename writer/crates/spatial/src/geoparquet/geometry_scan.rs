@@ -4,10 +4,10 @@ use anyhow::{Context, Result, bail};
 use futures_util::StreamExt;
 
 use crate::geometry::{BinaryValueAccess, Extent2D, GeometryKind, geometry_kind_from_wkb};
-use crate::optimized::multiscale::geometry_extent_from_wkb;
+use crate::optimized::geometry_extent_from_wkb;
 
-pub(crate) async fn scan_geometry_metadata(
-  dataframe: engine::DataFrame,
+pub(super) async fn scan_geometry_metadata(
+  dataframe: datafusion::dataframe::DataFrame,
   geometry_column: &str,
 ) -> Result<(Vec<GeometryKind>, Extent2D)> {
   let mut geometry_types = Vec::new();

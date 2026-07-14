@@ -1,4 +1,4 @@
-//! Defines the GeoParquet JSON contract and Parquet key-value metadata.
+//! Defines the GeoParquet JSON contract.
 
 use std::collections::BTreeMap;
 
@@ -6,33 +6,34 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::geometry::Extent2D;
-use crate::geometry::GeometryKind;
-use crate::output::{ParquetMetadata, SpatialReferenceInfo};
+use crate::geometry::{Extent2D, GeometryKind};
+use crate::output::SpatialReferenceInfo;
+
+use super::parquet::ParquetMetadata;
 
 /// Stores values serialized into one GeoParquet geometry-column contract.
-pub struct GeoMetadataInput<'a> {
+pub(crate) struct GeoMetadataInput<'a> {
   /// Names the primary geometry column.
-  pub geometry_column: &'a str,
+  pub(crate) geometry_column: &'a str,
   /// Stores exact geometry kinds present in the output.
-  pub geometry_types: &'a [GeometryKind],
+  pub(crate) geometry_types: &'a [GeometryKind],
   /// Stores the geometry extent in output coordinates.
-  pub output_extent: Extent2D,
+  pub(crate) output_extent: Extent2D,
   /// Stores the output coordinate reference system.
-  pub output_spatial_reference: &'a SpatialReferenceInfo,
+  pub(crate) output_spatial_reference: &'a SpatialReferenceInfo,
   /// Indicates whether geometry values contain Z ordinates.
-  pub has_z: bool,
+  pub(crate) has_z: bool,
   /// Indicates whether geometry values contain M ordinates.
-  pub has_m: bool,
+  pub(crate) has_m: bool,
   /// Enables GeoParquet covering metadata.
-  pub covering: bool,
+  pub(crate) covering: bool,
   /// Names the covering struct column.
-  pub covering_column: &'a str,
+  pub(crate) covering_column: &'a str,
 }
 
 /// Represents the GeoParquet 1.1 file metadata contract.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct GeoMetadata {
+pub(super) struct GeoMetadata {
   version: &'static str,
   primary_column: String,
   columns: BTreeMap<String, GeoColumnMetadata>,
@@ -62,8 +63,7 @@ struct GeoCoveringBbox {
 }
 
 impl GeoMetadata {
-  /// Construct GeoParquet metadata for one geometry column and optional covering bbox.
-  pub fn new(input: GeoMetadataInput<'_>) -> Result<Self> {
+  pub(super) fn new(input: GeoMetadataInput<'_>) -> Result<Self> {
     let geometry_types = input
       .geometry_types
       .iter()

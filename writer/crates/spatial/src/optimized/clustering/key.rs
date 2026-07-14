@@ -2,16 +2,16 @@
 
 /// Stores a sortable Z or XZ clustering key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct ClusterKey(u64);
+pub(super) struct ClusterKey(u64);
 
 impl ClusterKey {
   /// Construct a clustering key from its encoded value.
-  pub(crate) const fn new(value: u64) -> Self {
+  pub(super) const fn new(value: u64) -> Self {
     Self(value)
   }
 
   /// Return the encoded clustering value.
-  pub(crate) const fn value(self) -> u64 {
+  pub(super) const fn value(self) -> u64 {
     self.0
   }
 }

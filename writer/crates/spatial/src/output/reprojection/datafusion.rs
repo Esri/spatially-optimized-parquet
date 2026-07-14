@@ -20,18 +20,18 @@ use crate::geometry::{
 use super::{CoordinateTransformSpec, PreparedTransform};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct TransformedPointCoordsUdf {
+struct TransformedPointCoordsUdf {
   transform: CoordinateTransformSpec,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct TransformedBoundsUdf {
+struct TransformedBoundsUdf {
   transform: CoordinateTransformSpec,
   geometry_category: GeometryCategory,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct ReprojectGeometryUdf {
+struct ReprojectGeometryUdf {
   transform: CoordinateTransformSpec,
 }
 
@@ -161,11 +161,11 @@ impl ScalarUDFImpl for ReprojectGeometryUdf {
   }
 }
 
-pub(crate) fn transformed_point_coords_udf(transform: CoordinateTransformSpec) -> ScalarUDF {
+fn transformed_point_coords_udf(transform: CoordinateTransformSpec) -> ScalarUDF {
   ScalarUDF::new_from_impl(TransformedPointCoordsUdf { transform })
 }
 
-pub(crate) fn transformed_bounds_udf(
+fn transformed_bounds_udf(
   transform: CoordinateTransformSpec,
   geometry_category: GeometryCategory,
 ) -> ScalarUDF {
@@ -175,7 +175,7 @@ pub(crate) fn transformed_bounds_udf(
   })
 }
 
-pub(crate) fn reproject_geometry_udf(transform: CoordinateTransformSpec) -> ScalarUDF {
+fn reproject_geometry_udf(transform: CoordinateTransformSpec) -> ScalarUDF {
   ScalarUDF::new_from_impl(ReprojectGeometryUdf { transform })
 }
 

@@ -6,22 +6,22 @@ use gdal::{Dataset, DriverManager};
 use gdal_sys::{OGRFieldType, OGRwkbGeometryType};
 
 #[allow(dead_code)]
-pub struct GpkgFeature<'a> {
-  pub id: i32,
-  pub name: Option<&'a str>,
-  pub geometry_wkt: &'a str,
+pub(crate) struct GpkgFeature<'a> {
+  pub(crate) id: i32,
+  pub(crate) name: Option<&'a str>,
+  pub(crate) geometry_wkt: &'a str,
 }
 
 #[allow(dead_code)]
-pub struct GpkgLayerSpec<'a> {
-  pub name: &'a str,
-  pub geometry_type: OGRwkbGeometryType::Type,
-  pub epsg: Option<u32>,
-  pub features: &'a [GpkgFeature<'a>],
+pub(crate) struct GpkgLayerSpec<'a> {
+  pub(crate) name: &'a str,
+  pub(crate) geometry_type: OGRwkbGeometryType::Type,
+  pub(crate) epsg: Option<u32>,
+  pub(crate) features: &'a [GpkgFeature<'a>],
 }
 
 #[allow(dead_code)]
-pub fn write_gpkg(path: &Path, layers: &[GpkgLayerSpec<'_>]) {
+pub(crate) fn write_gpkg(path: &Path, layers: &[GpkgLayerSpec<'_>]) {
   if path.exists() {
     std::fs::remove_file(path).unwrap();
   }
@@ -68,6 +68,6 @@ pub fn write_gpkg(path: &Path, layers: &[GpkgLayerSpec<'_>]) {
 }
 
 #[allow(dead_code)]
-pub fn open_gpkg_dataset(path: &Path) -> Dataset {
+pub(crate) fn open_gpkg_dataset(path: &Path) -> Dataset {
   Dataset::open(path).unwrap()
 }

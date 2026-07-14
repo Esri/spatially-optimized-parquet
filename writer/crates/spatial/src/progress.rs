@@ -141,14 +141,14 @@ pub(crate) fn row_bar(enabled: bool, message: &str, total_rows: u64) -> Progress
   count_bar(enabled, message, total_rows, "rows")
 }
 
-pub(crate) fn count_bar(enabled: bool, message: &str, total: u64, unit: &str) -> ProgressBar {
+fn count_bar(enabled: bool, message: &str, total: u64, unit: &str) -> ProgressBar {
   if !enabled || !std::io::stderr().is_terminal() {
     return ProgressBar::hidden();
   }
   count_bar_with_parent(message, total, unit, None)
 }
 
-pub(crate) fn count_bar_with_parent(
+fn count_bar_with_parent(
   message: &str,
   total: u64,
   unit: &str,
@@ -176,7 +176,7 @@ pub(crate) fn finish_row_bar(bar: &ProgressBar, total_rows: u64, message: String
   finish_count_bar(bar, total_rows, message);
 }
 
-pub(crate) fn finish_count_bar(bar: &ProgressBar, total: u64, message: String) {
+fn finish_count_bar(bar: &ProgressBar, total: u64, message: String) {
   if bar.is_hidden() {
     return;
   }
@@ -237,7 +237,7 @@ fn message_only_style() -> ProgressStyle {
   ProgressStyle::with_template("{msg}").expect("message progress template should be valid")
 }
 
-pub(crate) fn format_metric_progress_message(
+fn format_metric_progress_message(
   base_message: &str,
   post_read_message: &str,
   metrics: PlanProgressMetrics,

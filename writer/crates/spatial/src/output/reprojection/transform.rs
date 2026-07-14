@@ -9,7 +9,7 @@ use crate::geometry::{Extent2D, GeometryCategory};
 
 #[derive(Debug)]
 /// Owns a prepared GDAL coordinate transform and the spatial references backing it.
-pub struct PreparedTransform {
+pub(super) struct PreparedTransform {
   _source: SpatialRef,
   _target: SpatialRef,
   coord_transform: CoordTransform,
@@ -28,7 +28,7 @@ impl PreparedTransform {
   }
 
   /// Transform one point with the prepared GDAL coordinate operation.
-  pub fn transform_point(&self, x: f64, y: f64) -> Result<(f64, f64)> {
+  fn transform_point(&self, x: f64, y: f64) -> Result<(f64, f64)> {
     let mut xs = [x];
     let mut ys = [y];
     self
@@ -39,13 +39,13 @@ impl PreparedTransform {
   }
 
   /// Decode one point from WKB and transform its coordinates.
-  pub(crate) fn transform_point_from_wkb(&self, bytes: &[u8]) -> Result<(f64, f64)> {
+  pub(super) fn transform_point_from_wkb(&self, bytes: &[u8]) -> Result<(f64, f64)> {
     let (x, y) = point_xy_from_wkb(bytes)?;
     self.transform_point(x, y)
   }
 
   /// Calculate target-CRS bounds, using a direct point path when possible.
-  pub fn transform_geometry_bounds_from_wkb(
+  pub(super) fn transform_geometry_bounds_from_wkb(
     &self,
     bytes: &[u8],
     geometry_category: GeometryCategory,
@@ -74,7 +74,7 @@ impl PreparedTransform {
   }
 
   /// Reproject one WKB geometry and return target-CRS WKB.
-  pub fn reproject_wkb(&self, bytes: &[u8]) -> Result<Vec<u8>> {
+  pub(super) fn reproject_wkb(&self, bytes: &[u8]) -> Result<Vec<u8>> {
     let geometry = Geometry::from_wkb(bytes).context("decode geometry for reprojection")?;
     let geometry = geometry
       .transform(&self.coord_transform)

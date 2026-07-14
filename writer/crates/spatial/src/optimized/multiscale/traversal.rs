@@ -10,20 +10,18 @@ use crate::geometry::Extent2D;
 use crate::optimized::OptimizedGeometryType;
 
 /// Decode a WKB point and return its x/y coordinate.
-pub fn point_xy_from_wkb(bytes: &[u8]) -> Result<(f64, f64)> {
+pub(in crate::optimized) fn point_xy_from_wkb(bytes: &[u8]) -> Result<(f64, f64)> {
   let geometry = wkb::reader::read_wkb(bytes)?;
   point_xy_from_geometry_trait(&geometry)
 }
 
 /// Decode WKB and calculate its axis-aligned extent.
-pub fn geometry_extent_from_wkb(bytes: &[u8]) -> Result<Extent2D> {
+pub(crate) fn geometry_extent_from_wkb(bytes: &[u8]) -> Result<Extent2D> {
   let geometry = wkb::reader::read_wkb(bytes)?;
   geometry_extent_from_trait(&geometry).context("geometry missing bounding rectangle")
 }
 
-pub(crate) fn geometry_extent_from_trait<G: GeometryTrait<T = f64>>(
-  geometry: &G,
-) -> Option<Extent2D> {
+fn geometry_extent_from_trait<G: GeometryTrait<T = f64>>(geometry: &G) -> Option<Extent2D> {
   let mut collector = BoundsCollector::default();
   match geometry.as_type() {
     GeometryType::Point(point) => visit_point(point, &mut collector),

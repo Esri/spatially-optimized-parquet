@@ -103,7 +103,7 @@ fn is_collinear_delta(previous_dx: i64, previous_dy: i64, dx: i64, dy: i64) -> b
 
 #[cfg(test)]
 mod tests {
-  use crate::optimized::multiscale::QuantizationTransform;
+  use super::super::levels::QuantizationTransform;
 
   use super::*;
 

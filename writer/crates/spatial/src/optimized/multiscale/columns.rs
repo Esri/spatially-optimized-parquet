@@ -4,17 +4,17 @@ use anyhow::{Result, bail};
 use arrow_schema::Schema;
 
 /// Names the generated point Z-order code column.
-pub(crate) const POINT_Z_CODE_COLUMN: &str = "zCode";
+pub(in crate::optimized) const POINT_Z_CODE_COLUMN: &str = "zCode";
 /// Names the generated point x-coordinate column.
-pub(crate) const POINT_X_COLUMN: &str = "x";
+pub(in crate::optimized) const POINT_X_COLUMN: &str = "x";
 /// Names the generated point y-coordinate column.
-pub(crate) const POINT_Y_COLUMN: &str = "y";
+pub(in crate::optimized) const POINT_Y_COLUMN: &str = "y";
 /// Names the generated non-point geodisplay struct column.
-pub(crate) const GEODISPLAY_COLUMN: &str = "geodisplay";
+pub(in crate::optimized) const GEODISPLAY_COLUMN: &str = "geodisplay";
 /// Names the XZ-order field within the geodisplay struct.
-pub(crate) const XZ_CODE_COLUMN: &str = "xzCode";
+pub(in crate::optimized) const XZ_CODE_COLUMN: &str = "xzCode";
 /// Names the bounds field within the geodisplay struct.
-pub(crate) const BOUNDS_COLUMN: &str = "bounds";
+pub(in crate::optimized) const BOUNDS_COLUMN: &str = "bounds";
 /// Names the optional GeoParquet 1.1 covering bbox column.
 pub(crate) const COVERING_BBOX_COLUMN: &str = "bbox";
 /// Names the temporary transformed point-coordinate struct.
@@ -24,7 +24,7 @@ pub(crate) const TEMP_BOUNDS_COLUMN: &str = "__clustering_bounds";
 /// Names the temporary target-CRS WKB column.
 pub(crate) const TEMP_REPROJECTED_GEOMETRY_COLUMN: &str = "__reprojected_geometry";
 /// Names the temporary XZ-order scalar column.
-pub(crate) const TEMP_XZ_CODE_COLUMN: &str = "__clustering_xzcode";
+pub(in crate::optimized) const TEMP_XZ_CODE_COLUMN: &str = "__clustering_xzcode";
 /// Names the temporary minimum-x scalar column.
 pub(crate) const TEMP_XMIN_COLUMN: &str = "__clustering_xmin";
 /// Names the temporary minimum-y scalar column.

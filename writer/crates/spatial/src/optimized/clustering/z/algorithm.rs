@@ -5,10 +5,10 @@ use crate::geometry::Extent2D;
 use super::super::ClusterKey;
 
 /// Stores the default number of quantization bits per point coordinate axis.
-pub(crate) const DEFAULT_COORDINATE_PRECISION: u32 = 20;
+pub(in crate::optimized) const DEFAULT_COORDINATE_PRECISION: u32 = 20;
 
 /// Quantize a point within the full extent and interleave its x/y bits.
-pub(crate) fn point_z_code(
+pub(super) fn point_z_code(
   full_extent: Extent2D,
   x: f64,
   y: f64,
@@ -20,7 +20,7 @@ pub(crate) fn point_z_code(
 }
 
 /// Interleave x and y bits into one Morton-order code.
-pub(crate) fn swizzle_bits(x: u32, y: u32, coordinate_precision: u32) -> ClusterKey {
+fn swizzle_bits(x: u32, y: u32, coordinate_precision: u32) -> ClusterKey {
   let mut code = 0;
   for bit in 0..coordinate_precision.min(32) {
     let x_bit = ((x >> bit) & 1) as u64;

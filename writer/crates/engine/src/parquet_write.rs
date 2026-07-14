@@ -1,8 +1,7 @@
 //! Centralizes Parquet writer policy and single-file execution.
 //!
-//! The module parses supported compression names, disables dictionary encoding, applies
-//! consistent row-group and write-batch sizes, and propagates key-value metadata through
-//! [`create_datafusion_parquet_options`].
+//! [`ParquetWriterOptions`] parses supported compression names, disables dictionary encoding,
+//! applies consistent row-group and write-batch sizes, and propagates key-value metadata.
 //!
 //! Row-group and batch sizes can be tuned through `OPT_PARQUET_ROW_GROUP_SIZE` and
 //! `OPT_PARQUET_WRITE_BATCH_SIZE`. Larger values can improve compression and throughput at
@@ -21,8 +20,34 @@ const DEFAULT_WRITE_BATCH_SIZE: usize = 8 * 1024;
 const ROW_GROUP_SIZE_ENV: &str = "OPT_PARQUET_ROW_GROUP_SIZE";
 const WRITE_BATCH_SIZE_ENV: &str = "OPT_PARQUET_WRITE_BATCH_SIZE";
 
-/// Parse a user-facing compression name into a Parquet codec.
-pub fn parse_compression(compression: &str) -> Result<Compression> {
+/// Owns the configured DataFusion options for one Parquet write.
+pub struct ParquetWriterOptions {
+  options: TableParquetOptions,
+}
+
+impl ParquetWriterOptions {
+  /// Build Parquet writer options from a compression name and key-value metadata.
+  pub fn new(compression: &str, kv_metadata: &[KeyValue]) -> Result<Self> {
+    let compression = parse_compression(compression)?;
+    let mut options = TableParquetOptions::new();
+    options.global.compression = Some(compression_to_datafusion_string(compression));
+    options.global.dictionary_enabled = Some(false);
+    options.global.max_row_group_size = configured_max_row_group_size();
+    options.global.write_batch_size = configured_write_batch_size();
+    options.key_value_metadata = kv_metadata
+      .iter()
+      .map(|kv| (kv.key.clone(), kv.value.clone()))
+      .collect();
+    Ok(Self { options })
+  }
+
+  /// Consume the typed options for a custom DataFusion Parquet sink.
+  pub fn into_datafusion(self) -> TableParquetOptions {
+    self.options
+  }
+}
+
+fn parse_compression(compression: &str) -> Result<Compression> {
   let codec = match compression.to_ascii_lowercase().as_str() {
     "snappy" => Compression::SNAPPY,
     "gzip" => Compression::GZIP(GzipLevel::default()),
@@ -42,34 +67,17 @@ pub fn parse_compression(compression: &str) -> Result<Compression> {
   Ok(codec)
 }
 
-/// Create repository-wide DataFusion Parquet options.
-pub fn create_datafusion_parquet_options(
-  compression: Compression,
-  kv_metadata: &[KeyValue],
-) -> TableParquetOptions {
-  let mut options = TableParquetOptions::new();
-  options.global.compression = Some(compression_to_datafusion_string(compression));
-  options.global.dictionary_enabled = Some(false);
-  options.global.max_row_group_size = configured_max_row_group_size();
-  options.global.write_batch_size = configured_write_batch_size();
-  options.key_value_metadata = kv_metadata
-    .iter()
-    .map(|kv| (kv.key.clone(), kv.value.clone()))
-    .collect();
-  options
-}
-
 /// Write one DataFrame to a single Parquet file and return its row count.
 pub async fn write_single_file(
   dataframe: DataFrame,
   output_path: &str,
-  options: TableParquetOptions,
+  options: ParquetWriterOptions,
 ) -> Result<u64> {
   let batches = dataframe
     .write_parquet(
       output_path,
       DataFrameWriteOptions::new().with_single_file_output(true),
-      Some(options),
+      Some(options.into_datafusion()),
     )
     .await?;
   written_row_count(&batches)
@@ -123,8 +131,46 @@ mod tests {
 
   use arrow_array::{RecordBatch, StringArray, UInt64Array};
   use arrow_schema::{DataType, Field, Schema};
+  use parquet::basic::Compression;
+  use parquet::file::metadata::KeyValue;
 
-  use super::written_row_count;
+  use super::{ParquetWriterOptions, parse_compression, written_row_count};
+
+  #[test]
+  fn compression_parser_accepts_known_codecs() {
+    let codec = parse_compression("snappy").unwrap();
+    assert!(matches!(codec, Compression::SNAPPY));
+    let codec = parse_compression("gzip").unwrap();
+    assert!(matches!(codec, Compression::GZIP(_)));
+    let codec = parse_compression("uncompressed").unwrap();
+    assert!(matches!(codec, Compression::UNCOMPRESSED));
+  }
+
+  #[test]
+  fn compression_parser_rejects_invalid_codec() {
+    let error = parse_compression("bogus").unwrap_err();
+    assert!(error.to_string().contains("compression"));
+  }
+
+  #[test]
+  fn writer_options_preserve_tuning_and_metadata() {
+    let options = ParquetWriterOptions::new(
+      "gzip",
+      &[KeyValue::new("geo".to_string(), Some("{}".to_string()))],
+    )
+    .unwrap()
+    .into_datafusion();
+
+    assert_eq!(options.global.compression.as_deref(), Some("gzip(6)"));
+    assert_eq!(options.global.dictionary_enabled, Some(false));
+    assert_eq!(
+      options
+        .key_value_metadata
+        .get("geo")
+        .and_then(|value| value.as_deref()),
+      Some("{}")
+    );
+  }
 
   #[test]
   fn written_row_count_decodes_valid_and_empty_arrays() {

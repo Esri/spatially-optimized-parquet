@@ -4,12 +4,14 @@ use anyhow::Result;
 use prost::Message;
 
 use super::GeometryEncoding;
-use super::payload::{FlatGeometryPayload, GeometryPayload};
+use super::payload::FlatGeometryPayload;
+#[cfg(test)]
+use super::payload::GeometryPayload;
 use super::quantize::encode_quantized_payload_into;
 
 /// Reuses quantization vectors and serialization storage across geometry encodes.
 #[derive(Debug, Default)]
-pub struct GeometryEncodeScratch {
+pub(super) struct GeometryEncodeScratch {
   quantized_coords: Vec<i64>,
   quantized_lengths: Vec<u32>,
   buffer: Vec<u8>,
@@ -24,7 +26,8 @@ struct PbfGeometry {
 }
 
 /// Quantize and encode a complete geometry payload into a new byte buffer.
-pub fn encode_geometry(payload: &GeometryPayload, encoding: &GeometryEncoding) -> Result<Vec<u8>> {
+#[cfg(test)]
+fn encode_geometry(payload: &GeometryPayload, encoding: &GeometryEncoding) -> Result<Vec<u8>> {
   let mut scratch = GeometryEncodeScratch::default();
   encode_geometry_owned_with_scratch_impl(&payload.coords, &payload.lengths, encoding, &mut scratch)
 }
@@ -32,21 +35,12 @@ pub fn encode_geometry(payload: &GeometryPayload, encoding: &GeometryEncoding) -
 /// Quantize and encode a flat payload into reusable scratch storage.
 ///
 /// The returned slice remains valid until the scratch value is mutated again.
-pub fn encode_flat_geometry_with_scratch<'a>(
+pub(super) fn encode_flat_geometry_with_scratch<'a>(
   payload: &FlatGeometryPayload,
   encoding: &GeometryEncoding,
   scratch: &'a mut GeometryEncodeScratch,
 ) -> Result<&'a [u8]> {
   encode_geometry_with_scratch_impl(&payload.coords, &payload.lengths, encoding, scratch)
-}
-
-/// Quantize with reusable scratch vectors and return an owned encoded buffer.
-pub fn encode_flat_geometry_owned_with_scratch(
-  payload: &FlatGeometryPayload,
-  encoding: &GeometryEncoding,
-  scratch: &mut GeometryEncodeScratch,
-) -> Result<Vec<u8>> {
-  encode_geometry_owned_with_scratch_impl(&payload.coords, &payload.lengths, encoding, scratch)
 }
 
 fn encode_geometry_with_scratch_impl<'a>(
@@ -64,6 +58,7 @@ fn encode_geometry_with_scratch_impl<'a>(
   Ok(scratch.buffer.as_slice())
 }
 
+#[cfg(test)]
 fn encode_geometry_owned_with_scratch_impl(
   coords: &[f64],
   lengths: &[u32],
@@ -104,9 +99,9 @@ mod tests {
 
   use geo_types::{Geometry, polygon};
 
+  use super::super::{geometry_payload_from_geometry, levels::QuantizationTransform};
   use super::*;
   use crate::optimized::OptimizedGeometryType;
-  use crate::optimized::multiscale::{QuantizationTransform, geometry_payload_from_geometry};
 
   #[derive(Clone, PartialEq, Message)]
   struct EsriPbfGeometry {

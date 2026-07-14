@@ -12,89 +12,91 @@ use crate::optimized::multiscale::{
   TEMP_XZ_CODE_COLUMN, TEMP_YMAX_COLUMN, TEMP_YMIN_COLUMN,
 };
 use crate::optimized::{ClusteringFamily, OptimizedGeometry, ResolvedOptimization};
-use crate::output::reprojection::{CoordinateTransformSpec, reproject_geometry_expr};
+use crate::output::{CoordinateTransformSpec, reproject_geometry_expr};
 use anyhow::Result;
+use datafusion::dataframe::DataFrame;
 use datafusion::functions::core::expr_ext::FieldAccessor;
 use datafusion::logical_expr::Expr;
 use datafusion::logical_expr::expr_fn::ident;
 
-impl ResolvedOptimization {
-  /// Create the globally sorted lazy projection for single-file output.
-  pub(crate) fn single_file_projection(
-    &self,
-    input_dataframe: engine::DataFrame,
-    source_schema: &arrow_schema::Schema,
-    covering: bool,
-  ) -> Result<engine::DataFrame> {
-    let ordered_dataframe = helper_projection(input_dataframe, source_schema, self)?
-      .sort(vec![cluster_sort_expr(self.geometry.clustering_family)])?;
-    ordered_dataframe
-      .select(output_projection_expressions(
-        source_schema,
-        self,
-        None,
-        None,
-        self
-          .reprojection
-          .requires_reprojection()
-          .then_some(TEMP_REPROJECTED_GEOMETRY_COLUMN),
-        covering,
-      ))
-      .map_err(Into::into)
-  }
+/// Create the globally sorted lazy projection for single-file output.
+pub(super) fn single_file_projection(
+  context: &ResolvedOptimization,
+  input_dataframe: DataFrame,
+  source_schema: &arrow_schema::Schema,
+  covering: bool,
+) -> Result<DataFrame> {
+  let ordered_dataframe = helper_projection(input_dataframe, source_schema, context)?.sort(
+    vec![cluster_sort_expr(context.geometry().clustering_family)],
+  )?;
+  ordered_dataframe
+    .select(output_projection_expressions(
+      source_schema,
+      context,
+      None,
+      None,
+      context
+        .reprojection()
+        .requires_reprojection()
+        .then_some(TEMP_REPROJECTED_GEOMETRY_COLUMN),
+      covering,
+    ))
+    .map_err(Into::into)
+}
 
-  /// Create the cluster-key query consumed by partition-boundary analysis.
-  pub(crate) fn partitioned_range_source(
-    &self,
-    input_dataframe: engine::DataFrame,
-  ) -> Result<engine::DataFrame> {
-    add_sort_columns_dataframe(
-      narrow_helper_projection(
-        input_dataframe,
-        &self.geometry,
-        self.reprojection.transform(),
-      )?,
-      self,
-    )
-  }
+/// Create the cluster-key query consumed by partition-boundary analysis.
+pub(super) fn partitioned_range_source(
+  context: &ResolvedOptimization,
+  input_dataframe: DataFrame,
+) -> Result<DataFrame> {
+  add_sort_columns_dataframe(
+    narrow_helper_projection(
+      input_dataframe,
+      context.geometry(),
+      context.reprojection().transform(),
+    )?,
+    context,
+  )
+}
 
-  /// Create the range-key lazy projection consumed by partitioned physical output.
-  pub(crate) fn partitioned_projection(
-    &self,
-    input_dataframe: engine::DataFrame,
-    source_schema: &arrow_schema::Schema,
-    boundaries: &ClusterRangeBoundaries,
-    covering: bool,
-  ) -> Result<engine::DataFrame> {
-    let partition_column = cluster_partition_column(self.geometry.clustering_family);
-    let dataframe = helper_projection(input_dataframe, source_schema, self)?.with_column(
-      partition_column,
-      boundaries.partition_expr(cluster_key_column(self.geometry.clustering_family))?,
-    )?;
-    let retained_cluster_key_column =
-      matches!(self.geometry.clustering_family, ClusteringFamily::NonPoint)
-        .then_some(cluster_key_column(self.geometry.clustering_family));
-    dataframe
-      .select(output_projection_expressions(
-        source_schema,
-        self,
-        Some(partition_column),
-        retained_cluster_key_column,
-        self
-          .reprojection
-          .requires_reprojection()
-          .then_some(TEMP_REPROJECTED_GEOMETRY_COLUMN),
-        covering,
-      ))
-      .map_err(Into::into)
-  }
+/// Create the range-key lazy projection consumed by partitioned physical output.
+pub(super) fn partitioned_projection(
+  context: &ResolvedOptimization,
+  input_dataframe: DataFrame,
+  source_schema: &arrow_schema::Schema,
+  boundaries: &ClusterRangeBoundaries,
+  covering: bool,
+) -> Result<DataFrame> {
+  let partition_column = cluster_partition_column(context.geometry().clustering_family);
+  let dataframe = helper_projection(input_dataframe, source_schema, context)?.with_column(
+    partition_column,
+    boundaries.partition_expr(cluster_key_column(context.geometry().clustering_family))?,
+  )?;
+  let retained_cluster_key_column = matches!(
+    context.geometry().clustering_family,
+    ClusteringFamily::NonPoint
+  )
+  .then_some(cluster_key_column(context.geometry().clustering_family));
+  dataframe
+    .select(output_projection_expressions(
+      source_schema,
+      context,
+      Some(partition_column),
+      retained_cluster_key_column,
+      context
+        .reprojection()
+        .requires_reprojection()
+        .then_some(TEMP_REPROJECTED_GEOMETRY_COLUMN),
+      covering,
+    ))
+    .map_err(Into::into)
 }
 
 fn narrow_helper_projection(
-  dataframe: engine::DataFrame,
+  dataframe: DataFrame,
   geometry: &OptimizedGeometry,
   transform: Option<&CoordinateTransformSpec>,
-) -> Result<engine::DataFrame> {
+) -> Result<DataFrame> {
   let projected = dataframe.select(vec![ident(&geometry.geometry_spec.column)])?;
   add_geometry_helper_columns_dataframe(projected, geometry, transform)
 }
@@ -111,10 +113,10 @@ fn output_projection_expressions(
     .fields()
     .iter()
     .filter(|field| {
-      !is_generated_optimized_output_column(field.name(), context.geometry.clustering_family)
+      !is_generated_optimized_output_column(field.name(), context.geometry().clustering_family)
     })
     .map(|field| {
-      if field.name() == &context.geometry.geometry_spec.column
+      if field.name() == &context.geometry().geometry_spec.column
         && let Some(projected_geometry_column) = projected_geometry_column
       {
         return ident(projected_geometry_column).alias(field.name());
@@ -124,8 +126,8 @@ fn output_projection_expressions(
     .collect::<Vec<_>>();
   if covering {
     let geometry_column =
-      projected_geometry_column.unwrap_or(&context.geometry.geometry_spec.column);
-    match context.geometry.clustering_family {
+      projected_geometry_column.unwrap_or(&context.geometry().geometry_spec.column);
+    match context.geometry().clustering_family {
       ClusteringFamily::Point => expressions.push(feature_bbox_expr(
         geometry_column,
         POINT_X_COLUMN,
@@ -142,16 +144,16 @@ fn output_projection_expressions(
       )),
     }
   }
-  match context.geometry.clustering_family {
+  match context.geometry().clustering_family {
     ClusteringFamily::Point => {
       expressions.push(ident(POINT_Z_CODE_COLUMN));
       expressions.push(ident(POINT_X_COLUMN));
       expressions.push(ident(POINT_Y_COLUMN));
     }
     ClusteringFamily::NonPoint => expressions.push(non_point_geodisplay_expr(
-      projected_geometry_column.unwrap_or(&context.geometry.geometry_spec.column),
-      context.geometry.geometry_type,
-      &context.encodings,
+      projected_geometry_column.unwrap_or(&context.geometry().geometry_spec.column),
+      context.geometry().geometry_type,
+      context.encodings(),
     )),
   }
   if let Some(partition_column) = partition_column {
@@ -164,11 +166,11 @@ fn output_projection_expressions(
 }
 
 fn base_helper_projection(
-  dataframe: engine::DataFrame,
+  dataframe: DataFrame,
   source_schema: &arrow_schema::Schema,
   geometry: &OptimizedGeometry,
   transform: Option<&CoordinateTransformSpec>,
-) -> Result<engine::DataFrame> {
+) -> Result<DataFrame> {
   let projected = dataframe.select(
     source_schema
       .fields()
@@ -180,10 +182,10 @@ fn base_helper_projection(
 }
 
 fn add_geometry_helper_columns_dataframe(
-  mut projected: engine::DataFrame,
+  mut projected: DataFrame,
   geometry: &OptimizedGeometry,
   transform: Option<&CoordinateTransformSpec>,
-) -> Result<engine::DataFrame> {
+) -> Result<DataFrame> {
   let geometry_column = if let Some(transform) = transform {
     projected = projected.with_column(
       TEMP_REPROJECTED_GEOMETRY_COLUMN,
@@ -217,13 +219,13 @@ fn add_geometry_helper_columns_dataframe(
 }
 
 fn add_sort_columns_dataframe(
-  dataframe: engine::DataFrame,
+  dataframe: DataFrame,
   context: &ResolvedOptimization,
-) -> Result<engine::DataFrame> {
-  match context.geometry.clustering_family {
+) -> Result<DataFrame> {
+  match context.geometry().clustering_family {
     ClusteringFamily::Point => Ok(dataframe.with_column(
       POINT_Z_CODE_COLUMN,
-      point_zcode_from_xy_expr(POINT_X_COLUMN, POINT_Y_COLUMN, context.target_extent),
+      point_zcode_from_xy_expr(POINT_X_COLUMN, POINT_Y_COLUMN, context.target_extent()),
     )?),
     ClusteringFamily::NonPoint => Ok(dataframe.with_column(
       TEMP_XZ_CODE_COLUMN,
@@ -232,22 +234,22 @@ fn add_sort_columns_dataframe(
         TEMP_YMIN_COLUMN,
         TEMP_XMAX_COLUMN,
         TEMP_YMAX_COLUMN,
-        context.target_extent,
+        context.target_extent(),
       ),
     )?),
   }
 }
 
 fn helper_projection(
-  dataframe: engine::DataFrame,
+  dataframe: DataFrame,
   source_schema: &arrow_schema::Schema,
   context: &ResolvedOptimization,
-) -> Result<engine::DataFrame> {
+) -> Result<DataFrame> {
   let projected = base_helper_projection(
     dataframe,
     source_schema,
-    &context.geometry,
-    context.reprojection.transform(),
+    context.geometry(),
+    context.reprojection().transform(),
   )?;
   add_sort_columns_dataframe(projected, context)
 }

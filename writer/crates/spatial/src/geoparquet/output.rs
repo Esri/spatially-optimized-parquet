@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result, bail};
 use arrow_array::{Array, Float64Array, RecordBatch};
+use datafusion::dataframe::DataFrame;
 use datafusion::functions::core::expr_ext::FieldAccessor;
 use datafusion::functions_aggregate::expr_fn::{max, min};
 use datafusion::logical_expr::Expr;
@@ -9,18 +10,17 @@ use datafusion::logical_expr::expr_fn::ident;
 
 use crate::geometry::{Extent2D, GeometryCategory};
 use crate::geoparquet::feature_bbox_expr;
-use crate::optimized::clustering::{bounds_expr, point_expr};
-use crate::optimized::multiscale::{
+use crate::optimized::{
   TEMP_BOUNDS_COLUMN, TEMP_POINT_COORDS_COLUMN, TEMP_REPROJECTED_GEOMETRY_COLUMN, TEMP_XMAX_COLUMN,
-  TEMP_XMIN_COLUMN, TEMP_YMAX_COLUMN, TEMP_YMIN_COLUMN,
+  TEMP_XMIN_COLUMN, TEMP_YMAX_COLUMN, TEMP_YMIN_COLUMN, bounds_expr, point_expr,
 };
-use crate::output::reprojection::{
+use crate::output::{
   CoordinateTransformSpec, reproject_geometry_expr, transformed_bounds_expr,
   transformed_point_coords_expr,
 };
 
-pub(crate) async fn analyze_plain_target_extent(
-  dataframe: engine::DataFrame,
+pub(super) async fn analyze_plain_target_extent(
+  dataframe: DataFrame,
   geometry_column: &str,
   geometry_category: GeometryCategory,
   transform: Option<&CoordinateTransformSpec>,
@@ -40,14 +40,14 @@ pub(crate) async fn analyze_plain_target_extent(
   extract_extent(&batches)
 }
 
-pub(crate) fn plain_output_dataframe(
-  mut dataframe: engine::DataFrame,
+pub(super) fn plain_output_dataframe(
+  mut dataframe: DataFrame,
   source_schema: &arrow_schema::Schema,
   geometry_column: &str,
   geometry_category: GeometryCategory,
   transform: Option<&CoordinateTransformSpec>,
   covering: bool,
-) -> Result<engine::DataFrame> {
+) -> Result<DataFrame> {
   if covering {
     dataframe =
       add_target_coordinate_columns(dataframe, geometry_column, geometry_category, transform)?;
@@ -85,11 +85,11 @@ pub(crate) fn plain_output_dataframe(
 }
 
 fn add_target_coordinate_columns(
-  mut dataframe: engine::DataFrame,
+  mut dataframe: DataFrame,
   geometry_column: &str,
   geometry_category: GeometryCategory,
   transform: Option<&CoordinateTransformSpec>,
-) -> Result<engine::DataFrame> {
+) -> Result<DataFrame> {
   match geometry_category {
     GeometryCategory::Point => {
       let point_coordinates = match transform {

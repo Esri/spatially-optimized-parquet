@@ -17,8 +17,8 @@ pub(crate) use binary_array::{
   BinaryValueAccess, geometry_signature, map_geometry_to_binary, map_geometry_to_u64,
   to_datafusion_error,
 };
-pub use extent::Extent2D;
-pub use types::{
+pub(crate) use extent::Extent2D;
+pub(crate) use types::{
   GeometryCategory, GeometryEncoding, GeometryKind, GeometryShape, GeometrySpec,
-  geometry_kind_from_wkb, geometry_kind_from_wkb_type,
+  geometry_kind_from_wkb,
 };

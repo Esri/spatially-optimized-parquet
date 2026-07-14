@@ -15,14 +15,16 @@ use crate::input::{InputOpenOptions, InputSource};
 use super::source::{ParquetInputLocation, ParquetInputSource};
 
 /// Open a local Parquet file set or one direct HTTP Parquet object.
-pub async fn open_source(options: &InputOpenOptions) -> Result<Arc<dyn InputSource>> {
-  if let Some(layer) = options.layer.as_deref() {
+pub(in crate::input) async fn open_source(
+  options: &InputOpenOptions,
+) -> Result<Arc<dyn InputSource>> {
+  if let Some(layer) = options.layer() {
     return Err(anyhow::anyhow!(
       "parquet input does not support --layer (got '{layer}')"
     ));
   }
   if options.is_http() {
-    return open_http_parquet(&options.location).await;
+    return open_http_parquet(options.location()).await;
   }
 
   let path = options
@@ -41,9 +43,8 @@ pub async fn open_source(options: &InputOpenOptions) -> Result<Arc<dyn InputSour
 
   Ok(Arc::new(ParquetInputSource::new(
     ParquetInputLocation::Local {
-      input_path: options.location.clone(),
+      input_path: options.location().to_string(),
     },
-    options.location.clone(),
     metadata,
   )))
 }
@@ -86,7 +87,6 @@ async fn open_http_parquet(location: &str) -> Result<Arc<dyn InputSource>> {
       store_url,
       store,
     },
-    location.to_string(),
     vec![metadata],
   )))
 }

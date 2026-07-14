@@ -5,36 +5,35 @@ use arrow_schema::Schema;
 
 use crate::geometry::{Extent2D, GeometryEncoding, GeometryKind, GeometryShape, GeometrySpec};
 use crate::geoparquet::geometry_scan::scan_geometry_metadata;
-use crate::geoparquet::metadata::source::{SourceDatasetMetadata, SourceGeometryMetadata};
 use crate::geoparquet::source_crs::{apply_input_wkid, spatial_reference_info};
-use crate::input::{InputSource, RowRange};
+use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata};
 use crate::output::SpatialReferenceInfo;
 
 /// Stores normalized source geometry facts required by either GeoParquet output workflow.
 #[derive(Debug, Clone)]
-pub struct ResolvedGeoParquetSource {
+pub(crate) struct ResolvedGeoParquetSource {
   /// Stores the selected WKB geometry column.
-  pub geometry_spec: GeometrySpec,
+  pub(crate) geometry_spec: GeometrySpec,
   /// Stores the exact source geometry kinds.
-  pub geometry_types: Vec<GeometryKind>,
+  pub(crate) geometry_types: Vec<GeometryKind>,
   /// Stores the selected-row extent in source coordinates.
-  pub source_extent: Extent2D,
+  pub(crate) source_extent: Extent2D,
   /// Stores the source coordinate reference system.
-  pub source_spatial_reference: SpatialReferenceInfo,
+  pub(crate) source_spatial_reference: SpatialReferenceInfo,
   /// Stores the normalized geometry shape used by plain output mechanics.
-  pub geometry_shape: GeometryShape,
+  pub(crate) geometry_shape: GeometryShape,
   /// Indicates whether source metadata declares Z ordinates.
-  pub has_z: bool,
+  pub(crate) has_z: bool,
   /// Indicates whether source metadata declares M ordinates.
-  pub has_m: bool,
+  pub(crate) has_m: bool,
   /// Stores normalized metadata with completed geometry facts.
-  pub source_metadata: SourceDatasetMetadata,
+  pub(crate) source_metadata: SourceDatasetMetadata,
 }
 
 /// Resolve geometry, CRS, exact type, and extent for the selected rows.
-pub async fn resolve_source(
+pub(crate) async fn resolve_source(
   input: &dyn InputSource,
-  input_dataframe: engine::DataFrame,
+  input_dataframe: datafusion::dataframe::DataFrame,
   schema: &Schema,
   explicit_geometry_column: Option<&str>,
   input_wkid: Option<u32>,

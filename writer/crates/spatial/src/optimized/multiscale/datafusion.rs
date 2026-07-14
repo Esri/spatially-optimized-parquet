@@ -32,7 +32,7 @@ use super::{
 ///
 /// Equality and hashing include every encoding parameter because DataFusion uses UDF
 /// identity when comparing and optimizing logical expressions.
-pub(crate) struct NonPointGeodisplayUdf {
+struct NonPointGeodisplayUdf {
   geometry_type: OptimizedGeometryType,
   encodings: Vec<GeometryEncoding>,
   geodisplay_fields: Fields,
@@ -256,7 +256,7 @@ impl ScalarUDFImpl for NonPointGeodisplayUdf {
     Ok(ColumnarValue::Array(Arc::new(output) as ArrayRef))
   }
 }
-pub(crate) fn non_point_geodisplay_udf(
+fn non_point_geodisplay_udf(
   geometry_type: OptimizedGeometryType,
   encodings: Vec<GeometryEncoding>,
 ) -> ScalarUDF {
@@ -289,7 +289,7 @@ fn multiscale_signature() -> &'static Signature {
   })
 }
 
-pub(crate) fn non_point_geodisplay_expr(
+pub(in crate::optimized) fn non_point_geodisplay_expr(
   geometry_column: &str,
   geometry_type: OptimizedGeometryType,
   encodings: &[GeometryEncoding],

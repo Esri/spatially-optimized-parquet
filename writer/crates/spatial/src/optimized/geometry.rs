@@ -7,7 +7,7 @@ use crate::geoparquet::ResolvedGeoParquetSource;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Groups optimized geometry types by their clustering strategy.
-pub enum ClusteringFamily {
+pub(super) enum ClusteringFamily {
   /// Uses scalar x/y columns and Morton Z-order indexing.
   Point,
   /// Uses bounds, XZ-order indexing, and multiscale geometry payloads.
@@ -16,7 +16,7 @@ pub enum ClusteringFamily {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Identifies geometry types supported by spatial optimization.
-pub enum OptimizedGeometryType {
+pub(super) enum OptimizedGeometryType {
   /// Represents single-point features.
   Point,
   /// Represents multipoint features.
@@ -29,7 +29,7 @@ pub enum OptimizedGeometryType {
 
 impl OptimizedGeometryType {
   /// Return the canonical geodisplay metadata label.
-  pub fn as_str(self) -> &'static str {
+  pub(super) fn as_str(self) -> &'static str {
     match self {
       Self::Point => "point",
       Self::MultiPoint => "multipoint",
@@ -39,7 +39,7 @@ impl OptimizedGeometryType {
   }
 
   /// Return the clustering strategy for this optimized geometry type.
-  pub fn clustering_family(self) -> ClusteringFamily {
+  pub(super) fn clustering_family(self) -> ClusteringFamily {
     match self {
       Self::Point => ClusteringFamily::Point,
       Self::MultiPoint | Self::Polyline | Self::Polygon => ClusteringFamily::NonPoint,
@@ -47,7 +47,7 @@ impl OptimizedGeometryType {
   }
 
   /// Return the generic processing category used by shared geometry mechanics.
-  pub fn category(self) -> GeometryCategory {
+  pub(super) fn category(self) -> GeometryCategory {
     match self.clustering_family() {
       ClusteringFamily::Point => GeometryCategory::Point,
       ClusteringFamily::NonPoint => GeometryCategory::NonPoint,
@@ -55,7 +55,7 @@ impl OptimizedGeometryType {
   }
 
   /// Classify one source geometry kind for optimized output.
-  pub fn from_kind(kind: GeometryKind) -> Result<Self> {
+  fn from_kind(kind: GeometryKind) -> Result<Self> {
     match kind {
       GeometryKind::Point => Ok(Self::Point),
       GeometryKind::MultiPoint => Ok(Self::MultiPoint),
@@ -68,7 +68,7 @@ impl OptimizedGeometryType {
   }
 
   /// Classify source geometry kinds while rejecting mixed optimized types.
-  pub fn from_kinds(kinds: &[GeometryKind]) -> Result<Self> {
+  fn from_kinds(kinds: &[GeometryKind]) -> Result<Self> {
     let mut geometry_type = None;
     for kind in kinds {
       merge_optimized_geometry_type(&mut geometry_type, *kind)?;
@@ -79,22 +79,22 @@ impl OptimizedGeometryType {
 
 #[derive(Debug, Clone, PartialEq)]
 /// Stores geometry facts required by optimized clustering and encoding.
-pub struct OptimizedGeometry {
+pub(super) struct OptimizedGeometry {
   /// Stores the selected source geometry column.
-  pub geometry_spec: GeometrySpec,
+  pub(super) geometry_spec: GeometrySpec,
   /// Stores the optimized geometry type used by metadata and encoders.
-  pub geometry_type: OptimizedGeometryType,
+  pub(super) geometry_type: OptimizedGeometryType,
   /// Stores the clustering strategy family.
-  pub clustering_family: ClusteringFamily,
+  pub(super) clustering_family: ClusteringFamily,
   /// Indicates whether source metadata declares Z ordinates.
-  pub has_z: bool,
+  pub(super) has_z: bool,
   /// Indicates whether source metadata declares M ordinates.
-  pub has_m: bool,
+  pub(super) has_m: bool,
 }
 
 impl OptimizedGeometry {
   /// Resolve optimized geometry from normalized source geometry facts.
-  pub(crate) fn resolve(source: &ResolvedGeoParquetSource) -> Result<Self> {
+  pub(super) fn resolve(source: &ResolvedGeoParquetSource) -> Result<Self> {
     let geometry_type = OptimizedGeometryType::from_kinds(&source.geometry_types)?;
     let geometry = Self {
       geometry_spec: source.geometry_spec.clone(),
@@ -120,7 +120,7 @@ impl OptimizedGeometry {
 }
 
 /// Merge one source kind into an observed optimized geometry type.
-pub(crate) fn merge_optimized_geometry_type(
+fn merge_optimized_geometry_type(
   observed_type: &mut Option<OptimizedGeometryType>,
   kind: GeometryKind,
 ) -> Result<OptimizedGeometryType> {

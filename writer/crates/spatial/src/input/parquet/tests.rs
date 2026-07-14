@@ -2,14 +2,18 @@ use std::sync::Arc;
 
 use arrow_array::RecordBatch;
 use arrow_schema::{DataType, Field, Schema};
-use engine::session::new_datafusion_session;
+use engine::DataFusionSession;
 use futures_util::StreamExt;
 use tempfile::TempDir;
+use tokio::runtime::Runtime;
 
-use spatial::input::{InputOpenOptions, RowRange, SourceFormat, open_input};
+use crate::input::{InputOpenOptions, RowRange, SourceFormat, open_input};
 
-mod common;
-use common::{runtime, sample_batch_with_geometry, sample_schema_with_geometry, write_parquet};
+use crate::test_support::{sample_batch_with_geometry, sample_schema_with_geometry, write_parquet};
+
+fn runtime() -> Runtime {
+  Runtime::new().unwrap()
+}
 
 fn string_value(array: &dyn arrow_array::Array, index: usize) -> String {
   if let Some(array) = array.as_any().downcast_ref::<arrow_array::StringArray>() {
@@ -41,11 +45,10 @@ fn open_input_accepts_single_parquet_file() {
   let input = runtime()
     .block_on(open_input(
       SourceFormat::Parquet,
-      &InputOpenOptions::new(path.clone()),
+      &InputOpenOptions::new(path.to_string_lossy().into_owned(), None),
     ))
     .unwrap();
   assert_eq!(input.format_name(), "parquet");
-  assert_eq!(input.source_location(), path.to_str().unwrap());
   assert_eq!(input.total_rows().unwrap(), 3);
 }
 
@@ -72,7 +75,7 @@ fn open_input_accepts_directory_of_parquet_files() {
   let input = runtime()
     .block_on(open_input(
       SourceFormat::Parquet,
-      &InputOpenOptions::new(temp.path().to_path_buf()),
+      &InputOpenOptions::new(temp.path().to_string_lossy().into_owned(), None),
     ))
     .unwrap();
   assert_eq!(input.format_name(), "parquet");
@@ -87,7 +90,7 @@ fn open_input_rejects_non_parquet_file() {
 
   let err = match runtime().block_on(open_input(
     SourceFormat::Parquet,
-    &InputOpenOptions::new(path.clone()),
+    &InputOpenOptions::new(path.to_string_lossy().into_owned(), None),
   )) {
     Ok(_) => panic!("expected non-parquet input to be rejected"),
     Err(err) => err,
@@ -122,7 +125,7 @@ fn input_schema_and_batch_limit_work() {
   let input = runtime()
     .block_on(open_input(
       SourceFormat::Parquet,
-      &InputOpenOptions::new(path.clone()),
+      &InputOpenOptions::new(path.to_string_lossy().into_owned(), None),
     ))
     .unwrap();
   let schema = input.schema().unwrap();
@@ -130,13 +133,7 @@ fn input_schema_and_batch_limit_work() {
   assert!(schema.field_with_name("geometry").is_ok());
 
   let rows = runtime().block_on(async {
-    let mut stream = input
-      .read_batches(RowRange {
-        start: 0,
-        num: Some(2),
-      })
-      .await
-      .unwrap();
+    let mut stream = input.read_batches(RowRange::new(0, Some(2))).await.unwrap();
     let mut rows = 0usize;
     while let Some(batch) = stream.next().await {
       rows += batch.unwrap().num_rows();
@@ -173,20 +170,14 @@ fn parquet_input_can_produce_dataframe_for_execution() {
   let input = runtime()
     .block_on(open_input(
       SourceFormat::Parquet,
-      &InputOpenOptions::new(path.clone()),
+      &InputOpenOptions::new(path.to_string_lossy().into_owned(), None),
     ))
     .unwrap();
-  let session = new_datafusion_session().unwrap();
+  let session = DataFusionSession::new().unwrap();
 
   let rows = runtime().block_on(async {
     let df = input
-      .to_dataframe(
-        session.context(),
-        RowRange {
-          start: 1,
-          num: Some(1),
-        },
-      )
+      .to_dataframe(session.context(), RowRange::new(1, Some(1)))
       .await
       .unwrap();
     let batches = df.collect().await.unwrap();

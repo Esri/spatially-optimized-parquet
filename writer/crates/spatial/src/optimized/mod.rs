@@ -1,17 +1,26 @@
 //! Implements optimized spatial analysis, projection, and physical output mechanics.
 
-pub(crate) mod aggregate;
-pub(crate) mod clustering;
-pub(crate) mod extent;
-pub mod geometry;
-pub mod metadata;
-pub mod multiscale;
-pub(crate) mod partitioned_sink;
-pub(crate) mod partitioned_sort;
-pub(crate) mod projection;
-pub(crate) mod range_boundaries;
+mod aggregate;
+mod clustering;
+mod extent;
+mod geometry;
+mod metadata;
+mod multiscale;
+mod output;
+mod partitioned_sink;
+mod partitioned_sort;
+mod projection;
+mod range_boundaries;
 mod state;
-pub(crate) mod write;
+mod write;
 
-pub use geometry::{ClusteringFamily, OptimizedGeometry, OptimizedGeometryType};
-pub use state::ResolvedOptimization;
+pub(crate) use clustering::{bounds_expr, point_expr};
+pub(crate) use multiscale::{
+  COVERING_BBOX_COLUMN, TEMP_BOUNDS_COLUMN, TEMP_POINT_COORDS_COLUMN,
+  TEMP_REPROJECTED_GEOMETRY_COLUMN, TEMP_XMAX_COLUMN, TEMP_XMIN_COLUMN, TEMP_YMAX_COLUMN,
+  TEMP_YMIN_COLUMN, geometry_extent_from_wkb, validate_internal_projection_columns,
+};
+pub(crate) use output::OptimizedOutput;
+
+use geometry::{ClusteringFamily, OptimizedGeometry, OptimizedGeometryType};
+use state::ResolvedOptimization;

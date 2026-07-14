@@ -26,7 +26,7 @@ use crate::optimized::multiscale::geometry_extent_from_wkb;
 use super::algorithm::{DEFAULT_XZ_MAX_LEVEL, extent_xz_code};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct BoundsUdf;
+struct BoundsUdf;
 
 impl ScalarUDFImpl for BoundsUdf {
   fn as_any(&self) -> &dyn Any {
@@ -65,7 +65,7 @@ impl ScalarUDFImpl for BoundsUdf {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct XZGeometryClusterKeyUdf;
+struct XZGeometryClusterKeyUdf;
 
 impl ScalarUDFImpl for XZGeometryClusterKeyUdf {
   fn as_any(&self) -> &dyn Any {
@@ -106,7 +106,7 @@ impl ScalarUDFImpl for XZGeometryClusterKeyUdf {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct XZBoundsClusterKeyUdf;
+struct XZBoundsClusterKeyUdf;
 
 impl ScalarUDFImpl for XZBoundsClusterKeyUdf {
   fn as_any(&self) -> &dyn Any {
@@ -159,15 +159,15 @@ impl ScalarUDFImpl for XZBoundsClusterKeyUdf {
   }
 }
 
-pub(crate) fn bounds_udf() -> ScalarUDF {
+fn bounds_udf() -> ScalarUDF {
   ScalarUDF::new_from_impl(BoundsUdf)
 }
 
-pub(crate) fn non_point_xzcode_udf() -> ScalarUDF {
+fn non_point_xzcode_udf() -> ScalarUDF {
   ScalarUDF::new_from_impl(XZGeometryClusterKeyUdf)
 }
 
-pub(crate) fn non_point_xzcode_from_bounds_udf() -> ScalarUDF {
+fn non_point_xzcode_from_bounds_udf() -> ScalarUDF {
   ScalarUDF::new_from_impl(XZBoundsClusterKeyUdf)
 }
 
@@ -261,19 +261,7 @@ pub(crate) fn bounds_expr(geometry_column: &str) -> Expr {
   bounds_udf().call(vec![col(geometry_column)])
 }
 
-pub(crate) fn non_point_xzcode_expr(geometry_column: &str, full_extent: Extent2D) -> Expr {
-  non_point_xzcode_udf()
-    .call(vec![
-      col(geometry_column),
-      lit(full_extent.xmin),
-      lit(full_extent.ymin),
-      lit(full_extent.xmax),
-      lit(full_extent.ymax),
-    ])
-    .alias(TEMP_XZ_CODE_COLUMN)
-}
-
-pub(crate) fn non_point_xzcode_from_bounds_expr(
+pub(in crate::optimized) fn non_point_xzcode_from_bounds_expr(
   xmin_column: &str,
   ymin_column: &str,
   xmax_column: &str,

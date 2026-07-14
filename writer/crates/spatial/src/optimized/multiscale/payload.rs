@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use geo_traits::GeometryTrait;
+#[cfg(test)]
 use geo_types::Geometry;
 
 use super::traversal::{ExtentAccumulator, GeometryPartSink, visit_geometry_for_display};
@@ -10,26 +11,28 @@ use crate::optimized::OptimizedGeometryType;
 
 /// Stores flattened coordinate and part-length sequences without computed bounds.
 #[derive(Debug, Clone, PartialEq)]
-pub struct FlatGeometryPayload {
+pub(super) struct FlatGeometryPayload {
   /// Stores interleaved x/y coordinates for every traversed part.
-  pub coords: Vec<f64>,
+  pub(super) coords: Vec<f64>,
   /// Stores the coordinate-pair count of each geometry part.
-  pub lengths: Vec<u32>,
+  pub(super) lengths: Vec<u32>,
 }
 
 /// Stores flattened geometry sequences together with their source extent.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
-pub struct GeometryPayload {
+pub(super) struct GeometryPayload {
   /// Stores interleaved x/y coordinates for every traversed part.
-  pub coords: Vec<f64>,
+  pub(super) coords: Vec<f64>,
   /// Stores the coordinate-pair count of each geometry part.
-  pub lengths: Vec<u32>,
+  pub(super) lengths: Vec<u32>,
   /// Stores the extent observed while flattening coordinates.
-  pub bounds: Extent2D,
+  pub(super) bounds: Extent2D,
 }
 
 /// Decode WKB into flattened optimized geometry and bounds.
-pub fn geometry_payload_from_wkb(
+#[cfg(test)]
+fn geometry_payload_from_wkb(
   bytes: &[u8],
   geometry_type: OptimizedGeometryType,
 ) -> Result<GeometryPayload> {
@@ -42,7 +45,7 @@ pub fn geometry_payload_from_wkb(
 }
 
 /// Decode WKB into flattened optimized geometry without calculating bounds.
-pub fn flat_geometry_payload_from_wkb(
+pub(super) fn flat_geometry_payload_from_wkb(
   bytes: &[u8],
   geometry_type: OptimizedGeometryType,
 ) -> Result<FlatGeometryPayload> {
@@ -50,7 +53,8 @@ pub fn flat_geometry_payload_from_wkb(
 }
 
 /// Flatten an owned `geo_types` geometry and calculate its bounds.
-pub fn geometry_payload_from_geometry(
+#[cfg(test)]
+pub(super) fn geometry_payload_from_geometry(
   geometry: &Geometry<f64>,
   geometry_type: OptimizedGeometryType,
 ) -> Result<GeometryPayload> {

@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use crate::geometry::Extent2D;
 use crate::geometry::{GeometryEncoding, GeometryKind};
-use crate::geoparquet::metadata::source::SourceGeometryMetadata;
+use crate::input::SourceGeometryMetadata;
 
 /// Parse and require consistent GeoParquet metadata across all discovered files.
 pub(super) fn load_geo_metadata(
@@ -158,26 +158,6 @@ pub(super) fn passthrough_metadata(metadata_items: &[ArrowReaderMetadata]) -> Ve
     if let Some(kv_metadata) = metadata.metadata().file_metadata().key_value_metadata() {
       for kv in kv_metadata {
         if kv.key == "geo" || kv.key == "geodisplay" || kv.key == "ARROW:schema" {
-          continue;
-        }
-        let identity = (kv.key.clone(), kv.value.clone());
-        if seen.insert(identity) {
-          out.push(kv.clone());
-        }
-      }
-    }
-  }
-  out
-}
-
-/// Collect all file metadata needed by callers, including reserved keys.
-pub(super) fn file_metadata(metadata_items: &[ArrowReaderMetadata]) -> Vec<KeyValue> {
-  let mut seen = BTreeSet::new();
-  let mut out = Vec::new();
-  for metadata in metadata_items {
-    if let Some(kv_metadata) = metadata.metadata().file_metadata().key_value_metadata() {
-      for kv in kv_metadata {
-        if kv.key == "ARROW:schema" {
           continue;
         }
         let identity = (kv.key.clone(), kv.value.clone());

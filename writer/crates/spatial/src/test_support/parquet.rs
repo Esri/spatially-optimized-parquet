@@ -10,7 +10,7 @@ use parquet::file::metadata::KeyValue;
 use parquet::file::properties::WriterProperties;
 
 #[allow(dead_code)]
-pub fn write_parquet(
+pub(crate) fn write_parquet(
   path: &Path,
   schema: &SchemaRef,
   batches: &[RecordBatch],
@@ -32,12 +32,12 @@ pub fn write_parquet(
 }
 
 #[allow(dead_code)]
-pub fn geoparquet_kv(primary_column: &str, geometry_types: &[&str]) -> KeyValue {
+pub(crate) fn geoparquet_kv(primary_column: &str, geometry_types: &[&str]) -> KeyValue {
   geoparquet_kv_with_epsg(primary_column, geometry_types, 4326)
 }
 
 #[allow(dead_code)]
-pub fn geoparquet_kv_with_epsg(
+pub(crate) fn geoparquet_kv_with_epsg(
   primary_column: &str,
   geometry_types: &[&str],
   epsg: u32,

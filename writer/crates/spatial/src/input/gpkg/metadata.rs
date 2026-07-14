@@ -6,8 +6,7 @@ use gdal_sys::OGRwkbGeometryType;
 
 use crate::geometry::Extent2D;
 use crate::geometry::{GeometryEncoding, GeometryKind};
-use crate::geoparquet::metadata::source::SourceGeometryMetadata;
-use crate::input::InputOpenOptions;
+use crate::input::{InputOpenOptions, SourceGeometryMetadata};
 
 const MAX_GEOMETRY_TYPE_SAMPLE_FEATURES: usize = 64;
 
@@ -68,14 +67,14 @@ pub(super) fn select_layer_name(
   layer_summaries: &[GpkgLayerSummary],
 ) -> Result<String> {
   let available = format_layer_summaries(layer_summaries);
-  if let Some(requested) = &options.layer {
-    if layer_summaries.iter().any(|layer| &layer.name == requested) {
-      return Ok(requested.clone());
+  if let Some(requested) = options.layer() {
+    if layer_summaries.iter().any(|layer| layer.name == requested) {
+      return Ok(requested.to_string());
     }
     bail!(
       "GeoPackage layer {:?} was not found in {}\nAvailable layers:\n{}",
       requested,
-      options.location,
+      options.location(),
       available
     );
   }
@@ -86,7 +85,7 @@ pub(super) fn select_layer_name(
 
   bail!(
     "GeoPackage {} contains multiple layers; pass --layer <NAME>\nAvailable layers:\n{}",
-    options.location,
+    options.location(),
     available
   )
 }

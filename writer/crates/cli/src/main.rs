@@ -14,9 +14,10 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-use spatial::input::{RowRange, SourceFormat};
-use spatial::output::{DEFAULT_OUTPUT_WKID, GeoParquetOutputMode};
-use spatial::pipeline::{SpatialPipeline, SpatialPipelineOptions};
+use spatial::{
+  DEFAULT_OUTPUT_WKID, ExecutionOptions, InputOptions, OutputMode, OutputOptions, RowRange,
+  SourceFormat, SpatialPipelineOptions,
+};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -90,32 +91,38 @@ async fn main() -> Result<()> {
 }
 
 async fn run(cli: Cli) -> Result<()> {
-  let options = SpatialPipelineOptions {
-    input: cli.input,
-    input_format: cli.input_format,
-    output: cli.output,
-    output_files: cli.output_files,
-    compression: cli.compression,
-    row_range: RowRange {
-      start: cli.start.unwrap_or(0),
-      num: cli.num,
-    },
-    layer: cli.layer,
-    geometry_column: cli.geometry_column,
-    input_wkid: cli.in_sr,
-    output_wkid: cli.out_sr,
-    covering: cli.covering,
-    overwrite: cli.overwrite,
-    progress: !cli.explain,
-    explain: cli.explain,
-    output_mode: if cli.no_optimization {
-      GeoParquetOutputMode::Plain
-    } else {
-      GeoParquetOutputMode::Optimized
-    },
-  };
-  SpatialPipeline::run(options).await?;
+  spatial::run(cli.into()).await?;
   Ok(())
+}
+
+impl From<Cli> for SpatialPipelineOptions {
+  fn from(cli: Cli) -> Self {
+    let output_mode = if cli.no_optimization {
+      OutputMode::Plain
+    } else {
+      OutputMode::Optimized
+    };
+    Self::new(
+      InputOptions::new(
+        cli.input,
+        cli.input_format,
+        RowRange::new(cli.start.unwrap_or(0), cli.num),
+        cli.layer,
+        cli.geometry_column,
+        cli.in_sr,
+      ),
+      OutputOptions::new(
+        cli.output,
+        output_mode,
+        cli.output_files,
+        cli.compression,
+        cli.out_sr,
+        cli.covering,
+        cli.overwrite,
+      ),
+      ExecutionOptions::new(!cli.explain, cli.explain),
+    )
+  }
 }
 
 /// Parse a zero-based input row offset.

@@ -1,22 +1,29 @@
-//! Implements the geospatial semantics of the Spatially Optimized Parquet writer.
+//! Runs the Spatially Optimized Parquet writer through one stable request façade.
 //!
-//! The crate follows one data-flow boundary. [`input`] providers normalize GeoPackage and
-//! Parquet sources into Arrow schemas, metadata, batch streams, and DataFrames. [`geoparquet`]
-//! resolves source geometry facts and the plain output contract. [`pipeline`] opens validated
-//! resources and routes them through one explicit DataFusion execution path.
+//! Construct [`SpatialPipelineOptions`] from [`InputOptions`], [`OutputOptions`], and
+//! [`ExecutionOptions`], then pass the request to [`run`]. [`RowRange`] selects source rows,
+//! [`SourceFormat`] overrides source detection, and [`OutputMode`] chooses plain or optimized
+//! GeoParquet output. [`DEFAULT_OUTPUT_WKID`] provides the default output spatial reference.
 //!
-//! Lower-level modules isolate the algorithms behind that flow. [`geoparquet`] owns the
-//! GeoParquet product contract and plain output computations. [`optimized`] owns spatial clustering,
-//! multiscale geometry encoding, geodisplay metadata, and optimized planning. [`output`] retains
-//! mechanics shared by both products.
+//! [`run`] validates the request, executes the complete DataFusion workflow, writes durable output,
+//! and returns [`SpatialPipelineResult`]. The root façade keeps storage adapters, geometry
+//! processing, optimization algorithms, and output mechanics private.
 
 #![warn(missing_docs)]
 
-pub mod diagnostics;
-pub mod geometry;
-pub mod geoparquet;
-pub mod input;
-pub mod optimized;
-pub mod output;
-pub mod pipeline;
-pub mod progress;
+mod diagnostics;
+mod geometry;
+mod geoparquet;
+mod input;
+mod optimized;
+mod output;
+mod pipeline;
+mod progress;
+#[cfg(test)]
+mod test_support;
+
+pub use input::{RowRange, SourceFormat};
+pub use output::{DEFAULT_OUTPUT_WKID, OutputMode};
+pub use pipeline::{
+  ExecutionOptions, InputOptions, OutputOptions, SpatialPipelineOptions, SpatialPipelineResult, run,
+};

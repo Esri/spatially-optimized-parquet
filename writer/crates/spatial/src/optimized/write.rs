@@ -1,20 +1,18 @@
 //! Applies optimized Parquet writer policy to concrete output paths.
 
 use anyhow::{Context, Result};
-use engine::output_layout::{OutputLayout, resolved_output_paths};
-use engine::parquet_write::{
-  create_datafusion_parquet_options, parse_compression, write_single_file,
-};
+use datafusion::dataframe::DataFrame;
+use engine::{OutputLayout, ParquetWriterOptions, write_single_file};
 
 use crate::optimized::clustering::{cluster_key_column, cluster_partition_column};
 use crate::optimized::{ClusteringFamily, ResolvedOptimization};
 use crate::progress::{WriteStagePhase, finish_spinner, row_bar, write_stage_message};
 
-use super::partitioned_sink::{PartitionedWriteRequest, write_partitioned_parquet};
+use super::partitioned_sink::PartitionedParquetWriter;
 use super::partitioned_sort::PartitionedSortConfig;
 
 /// Writes one range-partitioned optimized dataset through the custom sink plan.
-pub(crate) struct PartitionedOutputWriter<'a> {
+pub(super) struct PartitionedOutputWriter<'a> {
   output_layout: &'a OutputLayout,
   compression: Option<&'a str>,
   optimization: &'a ResolvedOptimization,
@@ -24,24 +22,22 @@ pub(crate) struct PartitionedOutputWriter<'a> {
 }
 
 /// Write globally sorted optimized rows through DataFusion's standard single-file API.
-pub(crate) async fn write_optimized_single_file(
-  dataframe: engine::DataFrame,
+pub(super) async fn write_optimized_single_file(
+  dataframe: DataFrame,
   output_layout: &OutputLayout,
   compression: Option<&str>,
   metadata: Vec<parquet::file::metadata::KeyValue>,
   progress: bool,
   total_input_rows: u64,
 ) -> Result<u64> {
-  let writer_options = create_datafusion_parquet_options(
-    parse_compression(compression.unwrap_or("snappy"))?,
-    &metadata,
-  );
+  let writer_options = ParquetWriterOptions::new(compression.unwrap_or("snappy"), &metadata)?;
   let write_bar = row_bar(
     progress,
     write_stage_message(WriteStagePhase::Reading, false),
     total_input_rows,
   );
-  let output_path = resolved_output_paths(output_layout)?
+  let output_path = output_layout
+    .paths()?
     .into_iter()
     .next()
     .context("missing output path")?
@@ -57,7 +53,7 @@ pub(crate) async fn write_optimized_single_file(
 
 impl<'a> PartitionedOutputWriter<'a> {
   /// Construct partitioned output writing for one resolved optimization.
-  pub(crate) fn new(
+  pub(super) fn new(
     output_layout: &'a OutputLayout,
     compression: Option<&'a str>,
     optimization: &'a ResolvedOptimization,
@@ -76,42 +72,38 @@ impl<'a> PartitionedOutputWriter<'a> {
   }
 
   /// Write range-partitioned optimized rows through the custom physical sink plan.
-  pub(crate) async fn write(
+  pub(super) async fn write(
     self,
-    dataframe: engine::DataFrame,
+    dataframe: DataFrame,
     metadata: Vec<parquet::file::metadata::KeyValue>,
   ) -> Result<u64> {
-    let writer_options = create_datafusion_parquet_options(
-      parse_compression(self.compression.unwrap_or("snappy"))?,
-      &metadata,
-    );
+    let writer_options =
+      ParquetWriterOptions::new(self.compression.unwrap_or("snappy"), &metadata)?.into_datafusion();
     let write_bar = row_bar(
       self.progress,
       write_stage_message(WriteStagePhase::Reading, true),
       self.total_input_rows,
     );
-    let partition_column = cluster_partition_column(self.optimization.geometry.clustering_family);
+    let partition_column = cluster_partition_column(self.optimization.geometry().clustering_family);
     let drop_cluster_key_after_sort = matches!(
-      self.optimization.geometry.clustering_family,
+      self.optimization.geometry().clustering_family,
       ClusteringFamily::NonPoint
     );
-    let rows_written = write_partitioned_parquet(
-      dataframe,
-      PartitionedWriteRequest {
-        write_path: self.output_layout.path.to_string_lossy().into_owned(),
-        partition_by: vec![partition_column.to_string()],
-        partitioned_sort: PartitionedSortConfig::new(
-          partition_column,
-          cluster_key_column(self.optimization.geometry.clustering_family),
-          self.output_layout.parts,
-          drop_cluster_key_after_sort,
-        ),
-        writer_options,
-        progress_bar: &write_bar,
-        total_input_rows: self.total_input_rows,
-        explain: self.explain,
-      },
+    let rows_written = PartitionedParquetWriter::new(
+      self.output_layout.path().to_string_lossy().into_owned(),
+      vec![partition_column.to_string()],
+      PartitionedSortConfig::new(
+        partition_column,
+        cluster_key_column(self.optimization.geometry().clustering_family),
+        self.output_layout.part_count(),
+        drop_cluster_key_after_sort,
+      ),
+      writer_options,
+      &write_bar,
+      self.total_input_rows,
+      self.explain,
     )
+    .write(dataframe)
     .await?;
     finish_spinner(
       &write_bar,

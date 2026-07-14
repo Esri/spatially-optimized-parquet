@@ -1,31 +1,76 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use anyhow::{Context, Result, bail};
 use arrow_array::{
   Array, BinaryArray, BinaryViewArray, Float64Array, Int32Array, LargeBinaryArray, RecordBatch,
   StringArray, StringViewArray, StructArray, UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema};
-use engine::parquet_scan::scan_parquet;
+use engine::scan_parquet;
 use gdal_sys::OGRwkbGeometryType;
+use geo_traits::{CoordTrait, GeometryTrait, GeometryType, PointTrait};
 use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions};
 use parquet::file::metadata::KeyValue;
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
-use spatial::geometry::Extent2D;
-use spatial::input::RowRange;
-use spatial::optimized::multiscale::{geometry_extent_from_wkb, point_xy_from_wkb};
-use spatial::output::GeoParquetOutputMode;
-use spatial::pipeline::{SpatialPipeline, SpatialPipelineOptions};
+use crate::geometry::Extent2D;
+use crate::input::{RowRange, SourceFormat};
+use crate::optimized::geometry_extent_from_wkb;
+use crate::output::OutputMode;
+use crate::pipeline::{
+  ExecutionOptions, InputOptions, OutputOptions, SpatialPipelineOptions, SpatialPipelineResult,
+};
 use wkb::writer::WriteOptions;
 
-mod common;
-use common::{
+use crate::test_support::{
   GpkgFeature, GpkgLayerSpec, geoparquet_kv, geoparquet_kv_with_epsg, transform_point_between_epsg,
   wkb_point, write_gpkg, write_parquet,
 };
+
+struct PipelineTestRequest {
+  input: String,
+  input_format: Option<SourceFormat>,
+  output: PathBuf,
+  output_files: Option<usize>,
+  compression: Option<String>,
+  row_range: RowRange,
+  layer: Option<String>,
+  geometry_column: Option<String>,
+  input_wkid: Option<u32>,
+  output_wkid: u32,
+  covering: bool,
+  overwrite: bool,
+  progress: bool,
+  explain: bool,
+  output_mode: OutputMode,
+}
+
+async fn run_test_pipeline(request: PipelineTestRequest) -> Result<SpatialPipelineResult> {
+  crate::pipeline::run(SpatialPipelineOptions::new(
+    InputOptions::new(
+      request.input,
+      request.input_format,
+      request.row_range,
+      request.layer,
+      request.geometry_column,
+      request.input_wkid,
+    ),
+    OutputOptions::new(
+      request.output,
+      request.output_mode,
+      request.output_files,
+      request.compression,
+      request.output_wkid,
+      request.covering,
+      request.overwrite,
+    ),
+    ExecutionOptions::new(request.progress, request.explain),
+  ))
+  .await
+}
 
 fn runtime() -> Runtime {
   Runtime::new().unwrap()
@@ -59,6 +104,17 @@ fn wkb_polygon(coords: &[(f64, f64)]) -> Vec<u8> {
   let mut buffer = Vec::new();
   wkb::writer::write_geometry(&mut buffer, &polygon, &WriteOptions::default()).unwrap();
   buffer
+}
+
+fn point_xy_from_wkb(bytes: &[u8]) -> Result<(f64, f64)> {
+  let geometry = wkb::reader::read_wkb(bytes)?;
+  match geometry.as_type() {
+    GeometryType::Point(point) => point
+      .coord()
+      .map(|coord| coord.x_y())
+      .context("point missing coordinate"),
+    _ => bail!("expected point geometry"),
+  }
 }
 
 fn string_value(array: &dyn arrow_array::Array, index: usize) -> String {
@@ -171,7 +227,7 @@ fn spatial_pipeline_preserves_same_crs_wkb_and_writes_sorted_metadata() {
   );
 
   runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -186,7 +242,7 @@ fn spatial_pipeline_preserves_same_crs_wkb_and_writes_sorted_metadata() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Optimized,
+      output_mode: OutputMode::Optimized,
     }))
     .unwrap();
 
@@ -256,7 +312,7 @@ fn spatial_pipeline_writes_covering_bbox_for_reprojected_points() {
   );
 
   runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -271,7 +327,7 @@ fn spatial_pipeline_writes_covering_bbox_for_reprojected_points() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Optimized,
+      output_mode: OutputMode::Optimized,
     }))
     .unwrap();
 
@@ -333,16 +389,13 @@ fn spatial_pipeline_reprojects_geoparquet_point_output_to_wgs84() {
   );
 
   runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
-      row_range: RowRange {
-        start: 1,
-        num: Some(1),
-      },
+      row_range: RowRange::new(1, Some(1)),
       layer: None,
       geometry_column: None,
       input_wkid: None,
@@ -351,7 +404,7 @@ fn spatial_pipeline_reprojects_geoparquet_point_output_to_wgs84() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Optimized,
+      output_mode: OutputMode::Optimized,
     }))
     .unwrap();
 
@@ -439,7 +492,7 @@ fn spatial_pipeline_writes_non_point_geodisplay_struct_and_metadata() {
   );
 
   runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -454,7 +507,7 @@ fn spatial_pipeline_writes_non_point_geodisplay_struct_and_metadata() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Optimized,
+      output_mode: OutputMode::Optimized,
     }))
     .unwrap();
 
@@ -514,12 +567,12 @@ fn spatial_pipeline_writes_non_point_geodisplay_struct_and_metadata() {
 #[test]
 fn non_wgs84_output_panics_before_filesystem_mutation_in_both_modes() {
   for output_wkid in [3857, 4269] {
-    for output_mode in [GeoParquetOutputMode::Plain, GeoParquetOutputMode::Optimized] {
+    for output_mode in [OutputMode::Plain, OutputMode::Optimized] {
       let temp = TempDir::new().unwrap();
       let input = temp.path().join("missing-input.parquet");
       let output = temp.path().join("must-not-exist.parquet");
       let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        runtime().block_on(SpatialPipeline::run(SpatialPipelineOptions {
+        runtime().block_on(run_test_pipeline(PipelineTestRequest {
           input: input.to_string_lossy().into_owned(),
           input_format: None,
           output: output.clone(),
@@ -573,7 +626,7 @@ fn spatial_pipeline_writes_covering_bbox_for_non_point_output() {
   );
 
   runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -588,7 +641,7 @@ fn spatial_pipeline_writes_covering_bbox_for_non_point_output() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Optimized,
+      output_mode: OutputMode::Optimized,
     }))
     .unwrap();
 
@@ -646,7 +699,7 @@ fn spatial_pipeline_replaces_existing_non_point_geodisplay_column() {
   );
 
   runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -661,7 +714,7 @@ fn spatial_pipeline_replaces_existing_non_point_geodisplay_column() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Optimized,
+      output_mode: OutputMode::Optimized,
     }))
     .unwrap();
 
@@ -732,7 +785,7 @@ fn spatial_pipeline_sorts_non_point_rows_across_multiple_input_batches() {
   );
 
   runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -747,7 +800,7 @@ fn spatial_pipeline_sorts_non_point_rows_across_multiple_input_batches() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Optimized,
+      output_mode: OutputMode::Optimized,
     }))
     .unwrap();
 
@@ -813,7 +866,7 @@ fn spatial_pipeline_writes_range_partitioned_multi_file_output() {
   );
 
   runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output_dir.clone(),
@@ -828,7 +881,7 @@ fn spatial_pipeline_writes_range_partitioned_multi_file_output() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Optimized,
+      output_mode: OutputMode::Optimized,
     }))
     .unwrap();
 
@@ -967,16 +1020,13 @@ fn spatial_pipeline_row_range_writes_requested_input_rows() {
   );
 
   runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
-      row_range: RowRange {
-        start: 1,
-        num: Some(1),
-      },
+      row_range: RowRange::new(1, Some(1)),
       layer: None,
       geometry_column: None,
       input_wkid: None,
@@ -985,7 +1035,7 @@ fn spatial_pipeline_row_range_writes_requested_input_rows() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Optimized,
+      output_mode: OutputMode::Optimized,
     }))
     .unwrap();
 
@@ -1054,16 +1104,13 @@ fn plain_geoparquet_preserves_same_crs_wkb_and_rows_without_sop_metadata() {
   );
 
   runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
-      row_range: RowRange {
-        start: 0,
-        num: Some(2),
-      },
+      row_range: RowRange::new(0, Some(2)),
       layer: None,
       geometry_column: None,
       input_wkid: None,
@@ -1072,7 +1119,7 @@ fn plain_geoparquet_preserves_same_crs_wkb_and_rows_without_sop_metadata() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Plain,
+      output_mode: OutputMode::Plain,
     }))
     .unwrap();
 
@@ -1133,7 +1180,7 @@ fn plain_geoparquet_writes_covering_bbox() {
   );
 
   runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -1148,7 +1195,7 @@ fn plain_geoparquet_writes_covering_bbox() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Plain,
+      output_mode: OutputMode::Plain,
     }))
     .unwrap();
   let dataframe = runtime()
@@ -1198,16 +1245,13 @@ fn plain_geoparquet_reprojects_wkb_covering_extent_and_crs() {
   );
 
   runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
       output_files: None,
       compression: None,
-      row_range: RowRange {
-        start: 1,
-        num: Some(2),
-      },
+      row_range: RowRange::new(1, Some(2)),
       layer: None,
       geometry_column: None,
       input_wkid: None,
@@ -1216,7 +1260,7 @@ fn plain_geoparquet_reprojects_wkb_covering_extent_and_crs() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Plain,
+      output_mode: OutputMode::Plain,
     }))
     .unwrap();
 
@@ -1290,7 +1334,7 @@ fn spatial_pipeline_rejects_covering_when_bbox_column_exists() {
   );
 
   let err = runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -1305,7 +1349,7 @@ fn spatial_pipeline_rejects_covering_when_bbox_column_exists() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Optimized,
+      output_mode: OutputMode::Optimized,
     }))
     .unwrap_err();
   assert!(
@@ -1348,7 +1392,7 @@ fn spatial_pipeline_errors_when_explicit_geometry_column_lacks_crs_metadata() {
   );
 
   let err = runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -1363,13 +1407,13 @@ fn spatial_pipeline_errors_when_explicit_geometry_column_lacks_crs_metadata() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Optimized,
+      output_mode: OutputMode::Optimized,
     }))
     .unwrap_err();
   assert!(err.to_string().contains("pass --in-sr"), "{err:#}");
 
   runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -1384,7 +1428,7 @@ fn spatial_pipeline_errors_when_explicit_geometry_column_lacks_crs_metadata() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Plain,
+      output_mode: OutputMode::Plain,
     }))
     .unwrap();
   let geo: serde_json::Value = serde_json::from_str(kv_map(&output).get("geo").unwrap()).unwrap();
@@ -1426,7 +1470,7 @@ fn spatial_pipeline_scans_when_geometry_type_metadata_is_missing() {
   );
 
   runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -1441,7 +1485,7 @@ fn spatial_pipeline_scans_when_geometry_type_metadata_is_missing() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Optimized,
+      output_mode: OutputMode::Optimized,
     }))
     .unwrap();
   let metadata = kv_map(&output);
@@ -1477,7 +1521,7 @@ fn spatial_pipeline_rejects_input_wkid_when_crs_metadata_exists() {
   );
 
   let error = runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output,
@@ -1492,7 +1536,7 @@ fn spatial_pipeline_rejects_input_wkid_when_crs_metadata_exists() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Optimized,
+      output_mode: OutputMode::Optimized,
     }))
     .unwrap_err();
   assert!(error.to_string().contains("already has CRS metadata"));
@@ -1527,7 +1571,7 @@ fn spatial_pipeline_accepts_single_layer_geopackage_input() {
   );
 
   runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -1542,7 +1586,7 @@ fn spatial_pipeline_accepts_single_layer_geopackage_input() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Optimized,
+      output_mode: OutputMode::Optimized,
     }))
     .unwrap();
 
@@ -1598,7 +1642,7 @@ fn spatial_pipeline_reprojects_geopackage_polygon_output_to_wgs84() {
   );
 
   runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -1613,7 +1657,7 @@ fn spatial_pipeline_reprojects_geopackage_polygon_output_to_wgs84() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Optimized,
+      output_mode: OutputMode::Optimized,
     }))
     .unwrap();
 
@@ -1758,7 +1802,7 @@ fn spatial_pipeline_selects_requested_geopackage_layer() {
   );
 
   runtime()
-    .block_on(SpatialPipeline::run(SpatialPipelineOptions {
+    .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
       output: output.clone(),
@@ -1773,7 +1817,7 @@ fn spatial_pipeline_selects_requested_geopackage_layer() {
       overwrite: true,
       progress: false,
       explain: false,
-      output_mode: GeoParquetOutputMode::Optimized,
+      output_mode: OutputMode::Optimized,
     }))
     .unwrap();
 

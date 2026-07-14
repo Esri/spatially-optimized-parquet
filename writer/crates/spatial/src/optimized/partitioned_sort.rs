@@ -21,7 +21,7 @@ use datafusion::physical_plan::{
 
 /// Describes range partitioning and partition-local ordering for multi-file SOP output.
 #[derive(Clone)]
-pub(crate) struct PartitionedSortConfig {
+pub(super) struct PartitionedSortConfig {
   partition_column: String,
   cluster_key_column: String,
   bucket_count: usize,
@@ -30,7 +30,7 @@ pub(crate) struct PartitionedSortConfig {
 
 impl PartitionedSortConfig {
   /// Construct range partitioning and partition-local ordering configuration.
-  pub(crate) fn new(
+  pub(super) fn new(
     partition_column: impl Into<String>,
     cluster_key_column: impl Into<String>,
     bucket_count: usize,
@@ -45,7 +45,7 @@ impl PartitionedSortConfig {
   }
 
   /// Insert range repartitioning and spatial sorting into one physical plan.
-  pub(crate) fn insert_into(
+  pub(super) fn insert_into(
     &self,
     plan: Arc<dyn ExecutionPlan>,
   ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
@@ -149,17 +149,19 @@ mod tests {
   use arrow_array::{RecordBatch, UInt64Array};
   use arrow_schema::{DataType, Field, Schema};
   use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
-  use engine::session::new_datafusion_session;
+  use engine::DataFusionSession;
 
-  use crate::optimized::clustering::partition::POINT_RANGE_COLUMN;
+  use crate::optimized::clustering::cluster_partition_column;
+  use crate::optimized::geometry::ClusteringFamily;
   use crate::optimized::multiscale::POINT_Z_CODE_COLUMN;
 
   #[test]
   fn preserves_partitioned_sort_for_multi_file_writes() {
+    let point_range_column = cluster_partition_column(ClusteringFamily::Point);
     let batch = RecordBatch::try_new(
       Arc::new(Schema::new(vec![
         Field::new(POINT_Z_CODE_COLUMN, DataType::UInt64, false),
-        Field::new(POINT_RANGE_COLUMN, DataType::UInt64, false),
+        Field::new(point_range_column, DataType::UInt64, false),
       ])),
       vec![
         Arc::new(UInt64Array::from(vec![4_u64, 1, 3, 2])),
@@ -169,10 +171,10 @@ mod tests {
     .unwrap();
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
-      let session = new_datafusion_session().unwrap();
+      let session = DataFusionSession::new().unwrap();
       let dataframe = session.context().read_batch(batch).unwrap();
       let physical_plan = dataframe.create_physical_plan().await.unwrap();
-      let rewritten = PartitionedSortConfig::new(POINT_RANGE_COLUMN, POINT_Z_CODE_COLUMN, 2, false)
+      let rewritten = PartitionedSortConfig::new(point_range_column, POINT_Z_CODE_COLUMN, 2, false)
         .insert_into(physical_plan)
         .unwrap();
 

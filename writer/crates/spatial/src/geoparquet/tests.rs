@@ -1,26 +1,48 @@
 use std::collections::HashMap;
+use std::path::Path;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
-use engine::{DataFrame, SessionContext};
+use datafusion::dataframe::DataFrame;
+use datafusion::execution::context::SessionContext;
+use futures_util::Stream;
 use futures_util::future::BoxFuture;
 use futures_util::stream;
 use gdal::spatial_ref::SpatialRef;
 use parquet::file::metadata::KeyValue;
-use spatial::geometry::{Extent2D, GeometryEncoding, GeometryKind, GeometrySpec};
-use spatial::geoparquet::metadata::source::{SourceDatasetMetadata, SourceGeometryMetadata};
-use spatial::geoparquet::resolve_source;
-use spatial::input::{InputBatchStream, InputSource, RowRange};
 use tempfile::TempDir;
+use tokio::runtime::Runtime;
 
-mod common;
-use common::{
-  geoparquet_kv, open_parquet_input, sample_batch_with_geometry, sample_schema_with_geometry,
-  wkb_point, write_parquet,
+use crate::geometry::{Extent2D, GeometryEncoding, GeometryKind, GeometrySpec};
+use crate::input::{
+  InputOpenOptions, InputSource, RowRange, SourceDatasetMetadata, SourceFormat,
+  SourceGeometryMetadata, open_input,
 };
+
+use super::resolve_source;
+
+use crate::test_support::{
+  geoparquet_kv, sample_batch_with_geometry, sample_schema_with_geometry, wkb_point, write_parquet,
+};
+
+type InputBatchStream = Pin<Box<dyn Stream<Item = Result<RecordBatch>> + Send + 'static>>;
+
+fn runtime() -> Runtime {
+  Runtime::new().unwrap()
+}
+
+fn open_parquet_input(path: &Path) -> Arc<dyn InputSource> {
+  runtime()
+    .block_on(open_input(
+      SourceFormat::Parquet,
+      &InputOpenOptions::new(path.to_string_lossy().into_owned(), None),
+    ))
+    .unwrap()
+}
 
 struct MetadataInputSource {
   schema: SchemaRef,
@@ -30,10 +52,6 @@ struct MetadataInputSource {
 
 impl InputSource for MetadataInputSource {
   fn format_name(&self) -> &'static str {
-    "metadata-test"
-  }
-
-  fn source_location(&self) -> &str {
     "metadata-test"
   }
 
@@ -77,7 +95,7 @@ fn epsg_projjson(wkid: u32) -> serde_json::Value {
 
 fn source_dataframe(input: &dyn InputSource) -> DataFrame {
   let context = SessionContext::new();
-  common::runtime()
+  runtime()
     .block_on(input.to_dataframe(&context, RowRange::default()))
     .unwrap()
 }
@@ -106,10 +124,7 @@ fn inferred_geometry_spec_reads_geoparquet_primary_column() {
   let input = open_parquet_input(&path);
   let spec = input.inferred_geometry_spec().unwrap().unwrap();
   assert_eq!(spec.column, "geometry");
-  assert_eq!(
-    spec.geometry_kind,
-    Some(spatial::geometry::GeometryKind::Point)
-  );
+  assert_eq!(spec.geometry_kind, Some(GeometryKind::Point));
 }
 
 #[test]
@@ -185,10 +200,7 @@ fn source_metadata_tolerates_null_bbox_metadata() {
   let geometry = metadata.geometry.unwrap();
   assert_eq!(geometry.column, "geometry");
   assert!(geometry.bbox.is_none());
-  assert_eq!(
-    geometry.geometry_types,
-    vec![spatial::geometry::GeometryKind::Point]
-  );
+  assert_eq!(geometry.geometry_types, vec![GeometryKind::Point]);
 }
 
 #[test]
@@ -210,7 +222,7 @@ fn resolved_source_retains_crs_and_extent_in_source_metadata() {
   );
 
   let input = open_parquet_input(&path);
-  let context = common::runtime()
+  let context = runtime()
     .block_on(resolve_source(
       input.as_ref(),
       source_dataframe(input.as_ref()),
@@ -255,7 +267,7 @@ fn resolved_source_uses_complete_metadata_without_scanning_batches() {
     read_batch_calls: read_batch_calls.clone(),
   };
 
-  let context = common::runtime()
+  let context = runtime()
     .block_on(resolve_source(
       &input,
       empty_dataframe(input.schema().unwrap()),
@@ -300,7 +312,7 @@ fn resolved_source_prefers_top_level_crs_authority_code() {
     read_batch_calls: Arc::new(AtomicUsize::new(0)),
   };
 
-  let context = common::runtime()
+  let context = runtime()
     .block_on(resolve_source(
       &input,
       empty_dataframe(input.schema().unwrap()),
@@ -343,7 +355,7 @@ fn resolved_source_preserves_projjson_for_unknown_crs_authority() {
     read_batch_calls: Arc::new(AtomicUsize::new(0)),
   };
 
-  let context = common::runtime()
+  let context = runtime()
     .block_on(resolve_source(
       &input,
       empty_dataframe(input.schema().unwrap()),

@@ -44,7 +44,7 @@ impl fmt::Display for SourceFormat {
 }
 
 /// Resolve an input format from an override, directory, local extension, or URL path.
-pub fn resolve_source_format(
+pub(crate) fn resolve_source_format(
   location: &str,
   explicit_format: Option<SourceFormat>,
 ) -> Result<SourceFormat> {

@@ -1,6 +1,6 @@
 /// Selects which GeoParquet product a job writes.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum GeoParquetOutputMode {
+pub enum OutputMode {
   /// Writes Spatially Optimized GeoParquet.
   #[default]
   Optimized,
