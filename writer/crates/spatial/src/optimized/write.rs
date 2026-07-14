@@ -25,6 +25,7 @@ pub(super) async fn write_optimized_single_file(
   output_layout: &OutputLayout,
   compression: Option<&str>,
   metadata: Vec<parquet::file::metadata::KeyValue>,
+  hidden_sort_column: Option<&str>,
   total_input_rows: u64,
   write_reporter: Option<SharedWriteReporter>,
 ) -> Result<u64> {
@@ -38,7 +39,12 @@ pub(super) async fn write_optimized_single_file(
     .to_string_lossy()
     .into_owned();
   TrackingParquetWriter::new(total_input_rows, write_reporter)
-    .write_single(dataframe, output_path, writer_options)
+    .write_single(
+      dataframe,
+      output_path,
+      writer_options,
+      hidden_sort_column.into_iter().collect(),
+    )
     .await
 }
 

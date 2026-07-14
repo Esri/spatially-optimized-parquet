@@ -5,3 +5,7 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+
+[profile.bench]
+debug = true
+split-debuginfo = "packed"

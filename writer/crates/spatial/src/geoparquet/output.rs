@@ -112,7 +112,7 @@ impl<'a> PlainOutput<'a> {
       .to_string_lossy()
       .into_owned();
     TrackingParquetWriter::new(self.total_rows, self.write_reporter)
-      .write_single(dataframe, output_path, writer_options)
+      .write_single(dataframe, output_path, writer_options, Vec::new())
       .await
   }
 }

@@ -21,13 +21,16 @@ use datafusion::datasource::physical_plan::FileSinkConfig;
 use datafusion::datasource::sink::{DataSink, DataSinkExec};
 use datafusion::execution::TaskContext;
 use datafusion::logical_expr::dml::InsertOp;
-use datafusion::physical_expr::{Distribution, EquivalenceProperties};
+use datafusion::physical_expr::{
+  Distribution, EquivalenceProperties, expressions::Column as PhysicalColumn,
+};
 use datafusion::physical_plan::{
   DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties, Partitioning,
   PlanProperties, SendableRecordBatchStream,
   coalesce_partitions::CoalescePartitionsExec,
   collect, execute_input_stream,
   execution_plan::{EvaluationType, SchedulingType},
+  projection::{ProjectionExec, ProjectionExpr},
   sorts::sort_preserving_merge::SortPreservingMergeExec,
   stream::RecordBatchStreamAdapter,
 };
@@ -191,6 +194,7 @@ impl TrackingParquetWriter {
     dataframe: DataFrame,
     write_path: String,
     writer_options: TableParquetOptions,
+    hidden_columns: Vec<&str>,
   ) -> Result<u64> {
     let (state, logical_plan) = dataframe.into_parts();
     let context = Arc::new(TaskContext::from(&state));
@@ -201,11 +205,16 @@ impl TrackingParquetWriter {
         None => Arc::new(CoalescePartitionsExec::new(input)),
       };
     }
-    let sort_order = input
-      .properties()
-      .output_ordering()
-      .cloned()
-      .map(Into::into);
+    let sort_order = if hidden_columns.is_empty() {
+      input
+        .properties()
+        .output_ordering()
+        .cloned()
+        .map(Into::into)
+    } else {
+      input = Self::project_without_columns(input, &hidden_columns)?;
+      None
+    };
     let sink = create_sink(
       &state,
       write_path,
@@ -219,6 +228,24 @@ impl TrackingParquetWriter {
     let rows_written = execute_sink_plan(plan, sink, context).await?;
     self.tracker.finish(rows_written);
     Ok(rows_written)
+  }
+
+  fn project_without_columns(
+    input: Arc<dyn ExecutionPlan>,
+    hidden_columns: &[&str],
+  ) -> Result<Arc<dyn ExecutionPlan>> {
+    let expressions = input
+      .schema()
+      .fields()
+      .iter()
+      .enumerate()
+      .filter(|(_, field)| !hidden_columns.contains(&field.name().as_str()))
+      .map(|(index, field)| ProjectionExpr {
+        expr: Arc::new(PhysicalColumn::new(field.name(), index)),
+        alias: field.name().to_string(),
+      })
+      .collect::<Vec<_>>();
+    Ok(Arc::new(ProjectionExec::try_new(expressions, input)?))
   }
 
   /// Write one DataFrame through concurrent partition-local Parquet sinks.

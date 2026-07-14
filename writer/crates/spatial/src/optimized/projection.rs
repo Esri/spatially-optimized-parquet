@@ -24,6 +24,11 @@ pub(super) fn single_file_projection(
   source_schema: &arrow_schema::Schema,
   covering: bool,
 ) -> Result<DataFrame> {
+  let retained_cluster_key_column = matches!(
+    context.geometry().clustering_family,
+    ClusteringFamily::NonPoint
+  )
+  .then_some(cluster_key_column(context.geometry().clustering_family));
   let ordered_dataframe = helper_projection(input_dataframe, source_schema, context)?.sort(
     vec![cluster_sort_expr(context.geometry().clustering_family)],
   )?;
@@ -32,7 +37,7 @@ pub(super) fn single_file_projection(
       source_schema,
       context,
       None,
-      None,
+      retained_cluster_key_column,
       covering,
     ))
     .map_err(Into::into)
