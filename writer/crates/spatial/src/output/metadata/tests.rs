@@ -210,9 +210,9 @@ fn xz_geodisplay_metadata_serializes_multiscale_clustering() {
         levels: vec![MultiscaleLevelInput {
           column: "level_0".to_string(),
           level: 0,
-          resolution: 0.70312359375,
-          scale: 295_828_763.7958547,
-          transform_scale: [0.70312359375, 0.70312359375, 1.0, 1.0],
+          resolution: 0.703125,
+          scale: 295_829_355.4545656,
+          transform_scale: [0.703125, 0.703125, 1.0, 1.0],
           transform_translate: [0.0, 0.0, 0.0, 0.0],
         }],
       },
@@ -244,10 +244,10 @@ fn xz_geodisplay_metadata_serializes_multiscale_clustering() {
         "levels": [{
           "column": "level_0",
           "level": 0,
-          "resolution": 0.70312359375,
-          "scale": 295828763.7958547,
+          "resolution": 0.703125,
+          "scale": 295829355.4545656,
           "transform": {
-            "scale": [0.70312359375, 0.70312359375, 1.0, 1.0],
+            "scale": [0.703125, 0.703125, 1.0, 1.0],
             "translate": [0.0, 0.0, 0.0, 0.0]
           }
         }]

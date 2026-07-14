@@ -553,15 +553,15 @@ fn spatial_pipeline_writes_non_point_geodisplay_struct_and_metadata() {
   let levels = geodisplay["index"]["levels"].as_array().unwrap();
   assert_eq!(levels.len(), 9);
   assert_eq!(levels[0]["level"], 0);
-  assert_eq!(levels[0]["resolution"], 0.70312359375);
-  assert_eq!(levels[0]["scale"], 295828763.7958547);
-  assert_eq!(levels[0]["transform"]["scale"][0], 0.70312359375);
-  assert_eq!(levels[0]["transform"]["scale"][1], 0.70312359375);
+  assert_eq!(levels[0]["resolution"], 0.703125);
+  assert_eq!(levels[0]["scale"], 295829355.4545656);
+  assert_eq!(levels[0]["transform"]["scale"][0], 0.703125);
+  assert_eq!(levels[0]["transform"]["scale"][1], 0.703125);
   assert_eq!(levels[0]["transform"]["translate"][0], 0.0);
   assert_eq!(levels[0]["transform"]["translate"][1], 0.0);
   assert_eq!(levels[1]["level"], 2);
-  assert_eq!(levels[1]["resolution"], 0.1757808984375);
-  assert_eq!(levels[1]["scale"], 73957190.94896367);
+  assert_eq!(levels[1]["resolution"], 0.17578125);
+  assert_eq!(levels[1]["scale"], 73957338.8636414);
 }
 
 #[test]
@@ -1748,13 +1748,10 @@ fn spatial_pipeline_reprojects_geopackage_polygon_output_to_wgs84() {
       .contains("WGS 84")
   );
   assert_eq!(geodisplay["index"]["levels"][0]["column"], "level_0");
-  assert_eq!(
-    geodisplay["index"]["levels"][0]["resolution"],
-    0.70312359375
-  );
+  assert_eq!(geodisplay["index"]["levels"][0]["resolution"], 0.703125);
   assert_eq!(
     geodisplay["index"]["levels"][0]["transform"]["scale"][0],
-    0.70312359375
+    0.703125
   );
   assert!(!kv.get("geo").unwrap().contains("3857"));
   assert!(!kv.get("geodisplay").unwrap().contains("3857"));

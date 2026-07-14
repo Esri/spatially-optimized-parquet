@@ -5,12 +5,17 @@ use anyhow::Result;
 use crate::optimized::OptimizedGeometryType;
 use crate::output::{DEFAULT_OUTPUT_WKID, WEB_MERCATOR_OUTPUT_WKID};
 
+const WGS84_SEMI_MAJOR_AXIS: f64 = 6_378_137.0;
+const ROOT_GRID_SIZE: f64 = 512.0;
+const DISPLAY_DPI: f64 = 96.0;
+const WGS84_EQUATORIAL_CIRCUMFERENCE: f64 = WGS84_SEMI_MAJOR_AXIS * std::f64::consts::TAU;
 /// Stores the WGS84 angular resolution used for the first multiscale level.
-const FIRST_LEVEL_RESOLUTION: f64 = 0.70312359375;
+const FIRST_LEVEL_RESOLUTION: f64 = 360.0 / ROOT_GRID_SIZE;
 /// Stores the Web Mercator resolution equivalent to the first WGS84 level.
-const FIRST_PROJECTED_LEVEL_RESOLUTION: f64 = 78_271.360_420_986_54;
+const FIRST_PROJECTED_LEVEL_RESOLUTION: f64 = WGS84_EQUATORIAL_CIRCUMFERENCE / ROOT_GRID_SIZE;
 /// Stores the WGS84 map scale denominator used for the first multiscale level.
-const FIRST_LEVEL_SCALE: f64 = 295_828_763.795_854_7;
+const FIRST_LEVEL_SCALE: f64 =
+  WGS84_EQUATORIAL_CIRCUMFERENCE * DISPLAY_DPI * 10_000.0 / (254.0 * ROOT_GRID_SIZE);
 const MAX_MULTISCALE_LEVEL: u16 = 16;
 
 #[derive(Debug, Clone, PartialEq)]

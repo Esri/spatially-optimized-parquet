@@ -198,7 +198,7 @@ The following example shows XZ `geodisplay` metadata:
         "column": "multiscale-0",
         "level": 0,
         "resolution": 0.703125,
-        "scale": 295828763.7958547,
+        "scale": 295829355.4545656,
         "transform": {
           "scale": [0.703125, 0.703125, 1, 1],
           "translate": [0, 0, 0, 0]
@@ -208,7 +208,7 @@ The following example shows XZ `geodisplay` metadata:
         "column": "multiscale-2",
         "level": 2,
         "resolution": 0.17578125,
-        "scale": 73957190.94896367,
+        "scale": 73957338.8636414,
         "transform": {
           "scale": [0.17578125, 0.17578125, 1, 1],
           "translate": [0, 0, 0, 0]
@@ -244,7 +244,7 @@ For more information, look at the algorithm as defined in the [original paper](h
 
 Multiscale columns store quantized, delta-encoded geometries at powers-of-two levels. Each column snaps features to one pixel at the target level, with writers removing collinear vertices:
 1. Project features into the target spatial reference of the index.
-2. Generate powers-of-two multiscale levels from a starting scale of `295828763.79585470937713011037`.
+2. Generate powers-of-two multiscale levels from a starting scale of `295829355.4545656`.
 3. Optionally reduce the number of generated multiscale levels to no fewer than one.
 4. Create `QuantizedGeometry` with the quantization and delta-encoding algorithm.
 5. PBF-encode `QuantizedGeometry` according to the Esri FeatureCollection PBF encoding. Only `lengths` and `coords` are required.
@@ -257,7 +257,7 @@ Select multiscale levels by first picking a starting scale and resolution needed
 fn generate_levels_wgs84(max_levels: u32) -> Vec<MultiscaleLevel> {
   let mut levels = [];
   let mut resolution = 0.703125;
-  let mut scale = 295828763.79585470937713011037;
+  let mut scale = 295829355.4545656;
   let mut level = 0;
 
   while (level <= max_levels) {
