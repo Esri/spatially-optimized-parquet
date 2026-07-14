@@ -5,8 +5,6 @@ use arrow_schema::SchemaRef;
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
 #[cfg(test)]
-use engine::scan_parquet;
-#[cfg(test)]
 use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use geoparquet::metadata::GeoParquetColumnEncoding;
@@ -18,6 +16,8 @@ use crate::geometry::{GeometryEncoding, GeometrySpec};
 #[cfg(test)]
 use crate::input::source::InputBatchStream;
 use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata};
+#[cfg(test)]
+use crate::test_support::scan_parquet;
 
 use super::metadata::{load_geo_metadata, map_geo_geometry_type, passthrough_metadata};
 

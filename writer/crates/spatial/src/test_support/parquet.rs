@@ -1,13 +1,28 @@
 use std::fs::File;
 use std::path::Path;
 
+use anyhow::{Context, Result};
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
+use datafusion::dataframe::DataFrame;
+use datafusion::datasource::file_format::options::ParquetReadOptions;
+use datafusion::execution::context::SessionContext;
+use datafusion_execution::config::SessionConfig;
 use gdal::spatial_ref::SpatialRef;
 use parquet::arrow::arrow_writer::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::metadata::KeyValue;
 use parquet::file::properties::WriterProperties;
+
+#[allow(dead_code)]
+pub(crate) async fn scan_parquet(input_path: &str) -> Result<DataFrame> {
+  let session_config = SessionConfig::new().with_collect_statistics(false);
+  let context = SessionContext::new_with_config(session_config);
+  context
+    .read_parquet(input_path, ParquetReadOptions::default())
+    .await
+    .context("read parquet")
+}
 
 #[allow(dead_code)]
 pub(crate) fn write_parquet(

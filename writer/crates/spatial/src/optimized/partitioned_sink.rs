@@ -8,8 +8,8 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
-use arrow_array::{RecordBatch, UInt64Array};
+use anyhow::{Context, Result};
+use arrow_array::{Array, RecordBatch, UInt64Array};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use datafusion::common::{
@@ -30,7 +30,6 @@ use datafusion::physical_plan::{
   metrics::{Count, ExecutionPlanMetricsSet, MetricBuilder, MetricsSet},
   stream::RecordBatchStreamAdapter,
 };
-use engine::written_row_count;
 use futures_util::StreamExt;
 use indicatif::ProgressBar;
 use tokio::task::JoinSet;
@@ -429,6 +428,16 @@ impl<'a> PartitionedParquetWriter<'a> {
       &physical_plan,
       collect_plan_progress(physical_plan.as_ref()),
     );
-    written_row_count(&result?)
+    let batches = result?;
+    let batch = batches.first().context("write returned no row count")?;
+    let values = batch
+      .column(0)
+      .as_any()
+      .downcast_ref::<UInt64Array>()
+      .context("write result count column was not UInt64")?;
+    if values.is_empty() {
+      return Ok(0);
+    }
+    Ok(values.value(0))
   }
 }

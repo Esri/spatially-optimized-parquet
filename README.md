@@ -79,7 +79,7 @@ execution:
 
 - `spatial::input::{gpkg, parquet}` owns format-specific discovery and scanning. Each source splits
   metadata, opening, and streaming concerns into focused modules.
-- `spatial::job` stays thin. It validates resources and routes plain or optimized output.
+- `spatial::pipeline` stays thin. It validates resources and routes plain or optimized output.
 - `spatial::geoparquet` resolves geometry kinds, source extent, dimensions, and CRS after both
   sources converge on `InputSource`. It also owns GeoParquet JSON, covering behavior, and plain
   output.
@@ -87,7 +87,7 @@ execution:
   metadata, spatial ordering, and multiscale geometry encoding.
 - `spatial::output::reprojection` owns the shared CRS comparison, WKB transformation, point,
   bounds, and target-extent expressions used by both output modes.
-- `spatial::output` retains shared writing, geometry-array, output-mode, spatial-reference, and
-  reprojection mechanics.
+- `spatial::output` retains shared layout, Parquet writer policy, metadata, output-mode,
+  spatial-reference, and reprojection mechanics.
 
 See [architecture.md](architecture.md) for the complete execution flow and module map.

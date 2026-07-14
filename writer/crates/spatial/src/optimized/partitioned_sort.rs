@@ -149,11 +149,11 @@ mod tests {
   use arrow_array::{RecordBatch, UInt64Array};
   use arrow_schema::{DataType, Field, Schema};
   use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
-  use engine::DataFusionSession;
 
   use crate::optimized::clustering::cluster_partition_column;
   use crate::optimized::geometry::ClusteringFamily;
   use crate::optimized::multiscale::POINT_Z_CODE_COLUMN;
+  use crate::session::DataFusionSession;
 
   #[test]
   fn preserves_partitioned_sort_for_multi_file_writes() {

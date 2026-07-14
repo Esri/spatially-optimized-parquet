@@ -8,7 +8,6 @@ use arrow_array::{
   StringArray, StringViewArray, StructArray, UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema};
-use engine::scan_parquet;
 use gdal_sys::OGRwkbGeometryType;
 use geo_traits::{CoordTrait, GeometryTrait, GeometryType, PointTrait};
 use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions};
@@ -26,8 +25,8 @@ use crate::pipeline::{
 use wkb::writer::WriteOptions;
 
 use crate::test_support::{
-  GpkgFeature, GpkgLayerSpec, geoparquet_kv, geoparquet_kv_with_epsg, transform_point_between_epsg,
-  wkb_point, write_gpkg, write_parquet,
+  GpkgFeature, GpkgLayerSpec, geoparquet_kv, geoparquet_kv_with_epsg, scan_parquet,
+  transform_point_between_epsg, wkb_point, write_gpkg, write_parquet,
 };
 
 struct PipelineTestRequest {

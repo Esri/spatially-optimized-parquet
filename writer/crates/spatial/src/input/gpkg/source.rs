@@ -6,7 +6,6 @@ use datafusion::catalog::streaming::StreamingTable;
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
 use datafusion::physical_plan::streaming::PartitionStream;
-use engine::DataFusionSession;
 #[cfg(test)]
 use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
@@ -18,6 +17,7 @@ use crate::input::source::InputBatchStream;
 use crate::input::{
   InputOpenOptions, InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata,
 };
+use crate::session::DataFusionSession;
 
 use super::batch_reader::load_schema;
 #[cfg(test)]

@@ -15,11 +15,12 @@ use std::time::Instant;
 use anyhow::Result;
 use arrow_schema::SchemaRef;
 use datafusion::dataframe::DataFrame;
-use engine::{DataFusionSession, OutputLayout};
 
 use crate::diagnostics::explain_timing;
 use crate::input::{InputSource, RowRange};
+use crate::output::OutputLayout;
 use crate::progress::format_elapsed;
+use crate::session::DataFusionSession;
 
 pub use options::{ExecutionOptions, InputOptions, OutputOptions, SpatialPipelineOptions};
 pub use result::SpatialPipelineResult;

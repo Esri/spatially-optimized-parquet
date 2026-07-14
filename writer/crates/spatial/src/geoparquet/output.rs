@@ -1,148 +1,128 @@
-//! Writes GeoParquet without optimized clustering columns or spatial sorting.
+//! Coordinates plain GeoParquet resolution, projection, metadata, and writing.
 
-use anyhow::{Context, Result, bail};
-use arrow_array::{Array, Float64Array, RecordBatch};
-use datafusion::dataframe::DataFrame;
-use datafusion::functions::core::expr_ext::FieldAccessor;
-use datafusion::functions_aggregate::expr_fn::{max, min};
-use datafusion::logical_expr::Expr;
-use datafusion::logical_expr::expr_fn::ident;
+use anyhow::{Context, Result};
+use arrow_array::{Array, UInt64Array};
+use arrow_schema::Schema;
+use datafusion::dataframe::{DataFrame, DataFrameWriteOptions};
 
-use crate::geometry::{Extent2D, GeometryCategory};
-use crate::geoparquet::feature_bbox_expr;
-use crate::optimized::{
-  TEMP_BOUNDS_COLUMN, TEMP_POINT_COORDS_COLUMN, TEMP_REPROJECTED_GEOMETRY_COLUMN, TEMP_XMAX_COLUMN,
-  TEMP_XMIN_COLUMN, TEMP_YMAX_COLUMN, TEMP_YMIN_COLUMN, bounds_expr, point_expr,
-};
+use crate::input::{InputSource, RowRange};
+use crate::optimized::COVERING_BBOX_COLUMN;
 use crate::output::{
-  CoordinateTransformSpec, reproject_geometry_expr, transformed_bounds_expr,
-  transformed_point_coords_expr,
+  GeoMetadataInput, OutputLayout, ParquetWriterOptions, ReprojectionSpec, geoparquet_metadata,
 };
 
-pub(super) async fn analyze_plain_target_extent(
-  dataframe: DataFrame,
-  geometry_column: &str,
-  geometry_category: GeometryCategory,
-  transform: Option<&CoordinateTransformSpec>,
-) -> Result<Extent2D> {
-  let aggregate_dataframe =
-    add_target_coordinate_columns(dataframe, geometry_column, geometry_category, transform)?
-      .aggregate(
-        vec![],
-        vec![
-          min(ident(TEMP_XMIN_COLUMN)).alias(TEMP_XMIN_COLUMN),
-          min(ident(TEMP_YMIN_COLUMN)).alias(TEMP_YMIN_COLUMN),
-          max(ident(TEMP_XMAX_COLUMN)).alias(TEMP_XMAX_COLUMN),
-          max(ident(TEMP_YMAX_COLUMN)).alias(TEMP_YMAX_COLUMN),
-        ],
-      )?;
-  let batches = aggregate_dataframe.collect().await?;
-  extract_extent(&batches)
+use super::{
+  analyze_plain_target_extent, plain_output_dataframe, resolve_source,
+  validate_covering_configuration,
+};
+
+pub(crate) struct PlainOutput<'a> {
+  input: &'a dyn InputSource,
+  input_dataframe: DataFrame,
+  output_layout: &'a OutputLayout,
+  source_schema: &'a Schema,
+  geometry_column: Option<&'a str>,
+  input_wkid: Option<u32>,
+  row_range: RowRange,
 }
 
-pub(super) fn plain_output_dataframe(
-  mut dataframe: DataFrame,
-  source_schema: &arrow_schema::Schema,
-  geometry_column: &str,
-  geometry_category: GeometryCategory,
-  transform: Option<&CoordinateTransformSpec>,
-  covering: bool,
-) -> Result<DataFrame> {
-  if covering {
-    dataframe =
-      add_target_coordinate_columns(dataframe, geometry_column, geometry_category, transform)?;
+impl<'a> PlainOutput<'a> {
+  /// Construct plain output coordination for one prepared input selection.
+  pub(crate) fn new(
+    input: &'a dyn InputSource,
+    input_dataframe: DataFrame,
+    output_layout: &'a OutputLayout,
+    source_schema: &'a Schema,
+    geometry_column: Option<&'a str>,
+    input_wkid: Option<u32>,
+    row_range: RowRange,
+  ) -> Self {
+    Self {
+      input,
+      input_dataframe,
+      output_layout,
+      source_schema,
+      geometry_column,
+      input_wkid,
+      row_range,
+    }
   }
-  let output_geometry_column = if let Some(transform) = transform {
-    dataframe = dataframe.with_column(
-      TEMP_REPROJECTED_GEOMETRY_COLUMN,
-      reproject_geometry_expr(geometry_column, transform),
+
+  /// Write one plain GeoParquet file from a normalized input and prepared DataFrame.
+  pub(crate) async fn write(
+    self,
+    output_wkid: u32,
+    covering: bool,
+    compression: Option<&str>,
+  ) -> Result<u64> {
+    validate_covering_configuration(covering, self.source_schema)?;
+    let source = resolve_source(
+      self.input,
+      self.input_dataframe.clone(),
+      self.source_schema,
+      self.geometry_column,
+      self.input_wkid,
+      self.row_range,
+    )
+    .await?;
+    let source_projjson = source
+      .source_spatial_reference
+      .projjson
+      .as_ref()
+      .context("missing resolved source CRS PROJJSON")?;
+    let reprojection = ReprojectionSpec::from_source_projjson(source_projjson, output_wkid)?;
+    let target_extent = analyze_plain_target_extent(
+      self.input_dataframe.clone(),
+      &source.geometry_spec.column,
+      source.geometry_shape.category(),
+      reprojection.transform(),
+    )
+    .await?;
+    let dataframe = plain_output_dataframe(
+      self.input_dataframe,
+      self.source_schema,
+      &source.geometry_spec.column,
+      source.geometry_shape.category(),
+      reprojection.transform(),
+      covering,
     )?;
-    TEMP_REPROJECTED_GEOMETRY_COLUMN
-  } else {
-    geometry_column
-  };
-  let mut expressions: Vec<Expr> = source_schema
-    .fields()
-    .iter()
-    .map(|field| {
-      if field.name() == geometry_column {
-        ident(output_geometry_column).alias(geometry_column)
-      } else {
-        ident(field.name())
-      }
-    })
-    .collect();
-  if covering {
-    expressions.push(feature_bbox_expr(
-      output_geometry_column,
-      TEMP_XMIN_COLUMN,
-      TEMP_YMIN_COLUMN,
-      TEMP_XMAX_COLUMN,
-      TEMP_YMAX_COLUMN,
-    ));
-  }
-  dataframe.select(expressions).map_err(Into::into)
-}
+    let geo_metadata = GeoMetadataInput {
+      geometry_column: &source.geometry_spec.column,
+      geometry_types: &source.geometry_types,
+      output_extent: target_extent,
+      output_spatial_reference: reprojection.target_spatial_reference(),
+      has_z: source.has_z,
+      has_m: source.has_m,
+      covering,
+      covering_column: COVERING_BBOX_COLUMN,
+    };
+    let metadata = geoparquet_metadata(source.source_metadata.passthrough_kv, geo_metadata)?;
+    let writer_options = ParquetWriterOptions::new(compression.unwrap_or("snappy"), &metadata)?;
+    let output_path = self
+      .output_layout
+      .paths()?
+      .into_iter()
+      .next()
+      .context("missing output path")?
+      .to_string_lossy()
+      .into_owned();
 
-fn add_target_coordinate_columns(
-  mut dataframe: DataFrame,
-  geometry_column: &str,
-  geometry_category: GeometryCategory,
-  transform: Option<&CoordinateTransformSpec>,
-) -> Result<DataFrame> {
-  match geometry_category {
-    GeometryCategory::Point => {
-      let point_coordinates = match transform {
-        Some(transform) => transformed_point_coords_expr(geometry_column, transform),
-        None => point_expr(geometry_column),
-      };
-      dataframe = dataframe.with_column(TEMP_POINT_COORDS_COLUMN, point_coordinates)?;
-      dataframe =
-        dataframe.with_column(TEMP_XMIN_COLUMN, ident(TEMP_POINT_COORDS_COLUMN).field("x"))?;
-      dataframe =
-        dataframe.with_column(TEMP_YMIN_COLUMN, ident(TEMP_POINT_COORDS_COLUMN).field("y"))?;
-      dataframe = dataframe.with_column(TEMP_XMAX_COLUMN, ident(TEMP_XMIN_COLUMN))?;
-      dataframe = dataframe.with_column(TEMP_YMAX_COLUMN, ident(TEMP_YMIN_COLUMN))?;
+    let batches = dataframe
+      .write_parquet(
+        &output_path,
+        DataFrameWriteOptions::new().with_single_file_output(true),
+        Some(writer_options.into_datafusion()),
+      )
+      .await?;
+    let batch = batches.first().context("write returned no row count")?;
+    let values = batch
+      .column(0)
+      .as_any()
+      .downcast_ref::<UInt64Array>()
+      .context("write result count column was not UInt64")?;
+    if values.is_empty() {
+      return Ok(0);
     }
-    GeometryCategory::NonPoint => {
-      let bounds = match transform {
-        Some(transform) => transformed_bounds_expr(geometry_column, geometry_category, transform),
-        None => bounds_expr(geometry_column),
-      };
-      dataframe = dataframe.with_column(TEMP_BOUNDS_COLUMN, bounds)?;
-      dataframe =
-        dataframe.with_column(TEMP_XMIN_COLUMN, ident(TEMP_BOUNDS_COLUMN).field("xmin"))?;
-      dataframe =
-        dataframe.with_column(TEMP_YMIN_COLUMN, ident(TEMP_BOUNDS_COLUMN).field("ymin"))?;
-      dataframe =
-        dataframe.with_column(TEMP_XMAX_COLUMN, ident(TEMP_BOUNDS_COLUMN).field("xmax"))?;
-      dataframe =
-        dataframe.with_column(TEMP_YMAX_COLUMN, ident(TEMP_BOUNDS_COLUMN).field("ymax"))?;
-    }
+    Ok(values.value(0))
   }
-  Ok(dataframe)
-}
-
-fn extract_extent(batches: &[RecordBatch]) -> Result<Extent2D> {
-  let batch = batches
-    .first()
-    .context("unable to determine plain GeoParquet extent")?;
-  Ok(Extent2D {
-    xmin: aggregate_value(batch, 0, "xmin")?,
-    ymin: aggregate_value(batch, 1, "ymin")?,
-    xmax: aggregate_value(batch, 2, "xmax")?,
-    ymax: aggregate_value(batch, 3, "ymax")?,
-  })
-}
-
-fn aggregate_value(batch: &RecordBatch, column_index: usize, label: &str) -> Result<f64> {
-  let values = batch
-    .column(column_index)
-    .as_any()
-    .downcast_ref::<Float64Array>()
-    .with_context(|| format!("plain GeoParquet aggregate column '{label}' was not Float64"))?;
-  if values.is_null(0) {
-    bail!("unable to determine plain GeoParquet extent");
-  }
-  Ok(values.value(0))
 }

@@ -29,7 +29,7 @@ const TARGET_PARTITIONS_ENV: &str = "OPT_PARQUET_DF_TARGET_PARTITIONS";
 /// Owns a DataFusion context and the temporary spill directory required by its runtime.
 ///
 /// Keeping the directory in this value preserves spill files for the full session lifetime.
-pub struct DataFusionSession {
+pub(crate) struct DataFusionSession {
   ctx: SessionContext,
   _spill_dir: TempDir,
 }
@@ -39,7 +39,7 @@ impl DataFusionSession {
   ///
   /// File-scan repartitioning stays disabled because input providers define their own
   /// partition behavior, while sort repartitioning and disk spilling remain enabled.
-  pub fn new() -> Result<Self> {
+  pub(crate) fn new() -> Result<Self> {
     let spill_dir = tempfile::Builder::new()
       .prefix("opt-parquet-datafusion-spill-")
       .tempdir()?;
@@ -60,12 +60,12 @@ impl DataFusionSession {
   }
 
   /// Return the configured DataFusion context.
-  pub fn context(&self) -> &SessionContext {
+  pub(crate) fn context(&self) -> &SessionContext {
     &self.ctx
   }
 
   /// Resolve the configured execution partition count.
-  pub fn target_partition_count() -> usize {
+  pub(crate) fn target_partition_count() -> usize {
     env_usize(TARGET_PARTITIONS_ENV).unwrap_or(SORT_TARGET_PARTITIONS)
   }
 }

@@ -3,7 +3,6 @@
 use anyhow::{Context, Result};
 use arrow_schema::Schema;
 use datafusion::dataframe::DataFrame;
-use engine::OutputLayout;
 
 use crate::geoparquet::{resolve_source, validate_covering_configuration};
 use crate::input::{InputSource, RowRange};
@@ -19,7 +18,7 @@ use crate::optimized::projection::{
 use crate::optimized::range_boundaries::compute_cluster_range_boundaries;
 use crate::optimized::write::{PartitionedOutputWriter, write_optimized_single_file};
 use crate::optimized::{ClusteringFamily, OptimizedGeometry, ResolvedOptimization};
-use crate::output::ReprojectionSpec;
+use crate::output::{OutputLayout, ReprojectionSpec};
 use crate::progress::{finish_row_bar, row_bar};
 
 /// Coordinates optimized resolution and output behind one crate-private product boundary.

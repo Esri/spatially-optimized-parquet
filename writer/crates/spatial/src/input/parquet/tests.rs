@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use arrow_array::RecordBatch;
 use arrow_schema::{DataType, Field, Schema};
-use engine::DataFusionSession;
 use futures_util::StreamExt;
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
 use crate::input::{InputOpenOptions, RowRange, SourceFormat, open_input};
+use crate::session::DataFusionSession;
 
 use crate::test_support::{sample_batch_with_geometry, sample_schema_with_geometry, write_parquet};
 

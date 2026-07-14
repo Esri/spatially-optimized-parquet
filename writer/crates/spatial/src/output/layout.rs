@@ -16,7 +16,7 @@ use anyhow::Result;
 
 #[derive(Debug)]
 /// Describes the resolved output destination and number of Parquet parts.
-pub struct OutputLayout {
+pub(crate) struct OutputLayout {
   is_directory: bool,
   path: PathBuf,
   parts: usize,
@@ -42,7 +42,7 @@ impl OutputLayout {
   /// Resolve the output layout and prepare its parent directory.
   ///
   /// Existing compatible destinations are removed only when `overwrite` is true.
-  pub fn new(output: &Path, output_files: Option<usize>, overwrite: bool) -> Result<Self> {
+  pub(crate) fn new(output: &Path, output_files: Option<usize>, overwrite: bool) -> Result<Self> {
     let has_extension = output.extension().is_some();
     let is_directory = !has_extension;
     let parts = if is_directory {
@@ -88,17 +88,17 @@ impl OutputLayout {
   }
 
   /// Return the output file or directory selected by the caller.
-  pub fn path(&self) -> &Path {
+  pub(crate) fn path(&self) -> &Path {
     &self.path
   }
 
   /// Return the exact number of output files to create.
-  pub fn part_count(&self) -> usize {
+  pub(crate) fn part_count(&self) -> usize {
     self.parts
   }
 
   /// Resolve the validated layout into deterministic output file paths.
-  pub fn paths(&self) -> Result<Vec<PathBuf>> {
+  pub(crate) fn paths(&self) -> Result<Vec<PathBuf>> {
     if self.is_directory {
       let mut paths = Vec::new();
       for part_index in 0..self.parts {

@@ -1,11 +1,12 @@
 //! Applies optimized Parquet writer policy to concrete output paths.
 
 use anyhow::{Context, Result};
-use datafusion::dataframe::DataFrame;
-use engine::{OutputLayout, ParquetWriterOptions, write_single_file};
+use arrow_array::{Array, UInt64Array};
+use datafusion::dataframe::{DataFrame, DataFrameWriteOptions};
 
 use crate::optimized::clustering::{cluster_key_column, cluster_partition_column};
 use crate::optimized::{ClusteringFamily, ResolvedOptimization};
+use crate::output::{OutputLayout, ParquetWriterOptions};
 use crate::progress::{WriteStagePhase, finish_spinner, row_bar, write_stage_message};
 
 use super::partitioned_sink::PartitionedParquetWriter;
@@ -43,7 +44,24 @@ pub(super) async fn write_optimized_single_file(
     .context("missing output path")?
     .to_string_lossy()
     .into_owned();
-  let rows_written = write_single_file(dataframe, &output_path, writer_options).await?;
+  let batches = dataframe
+    .write_parquet(
+      &output_path,
+      DataFrameWriteOptions::new().with_single_file_output(true),
+      Some(writer_options.into_datafusion()),
+    )
+    .await?;
+  let batch = batches.first().context("write returned no row count")?;
+  let values = batch
+    .column(0)
+    .as_any()
+    .downcast_ref::<UInt64Array>()
+    .context("write result count column was not UInt64")?;
+  let rows_written = if values.is_empty() {
+    0
+  } else {
+    values.value(0)
+  };
   finish_spinner(
     &write_bar,
     format!("Completed write pipeline ({rows_written} rows)"),

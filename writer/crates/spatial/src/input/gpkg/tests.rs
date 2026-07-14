@@ -5,7 +5,6 @@ use std::sync::Arc;
 use arrow_array::{Int32Array, StringArray, StringViewArray};
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
 use datafusion::physical_plan::ExecutionPlanProperties;
-use engine::DataFusionSession;
 use futures_util::StreamExt;
 use gdal::vector::LayerAccess;
 use gdal_sys::OGRwkbGeometryType;
@@ -14,6 +13,7 @@ use tokio::runtime::Runtime;
 
 use crate::geometry::{Extent2D, GeometryKind};
 use crate::input::{InputOpenOptions, InputSource, RowRange, SourceFormat, open_input};
+use crate::session::DataFusionSession;
 
 use crate::test_support::{GpkgFeature, GpkgLayerSpec, open_gpkg_dataset, write_gpkg};
 
