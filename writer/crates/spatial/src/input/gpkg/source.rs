@@ -81,10 +81,6 @@ pub(in crate::input) async fn open_source(
 }
 
 impl InputSource for GpkgInputSource {
-  fn format_name(&self) -> &'static str {
-    "GeoPackage"
-  }
-
   fn schema(&self) -> Result<arrow_schema::SchemaRef> {
     Ok(self.schema.clone())
   }

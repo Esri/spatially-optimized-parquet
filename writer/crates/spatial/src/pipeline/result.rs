@@ -5,16 +5,27 @@ use crate::validate::ValidationReport;
 /// Represents the durable result produced by one spatial pipeline.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpatialPipelineResult {
+  rows_expected: u64,
   rows_written: u64,
   validation_report: Option<ValidationReport>,
 }
 
 impl SpatialPipelineResult {
-  pub(super) const fn new(rows_written: u64, validation_report: Option<ValidationReport>) -> Self {
+  pub(super) const fn new(
+    rows_expected: u64,
+    rows_written: u64,
+    validation_report: Option<ValidationReport>,
+  ) -> Self {
     Self {
+      rows_expected,
       rows_written,
       validation_report,
     }
+  }
+
+  /// Return the expected number of selected output rows.
+  pub const fn rows_expected(&self) -> u64 {
+    self.rows_expected
   }
 
   /// Return the number of rows accepted by the output writer.

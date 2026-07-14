@@ -5,24 +5,23 @@ mod optimized_partitioned;
 mod optimized_single_file;
 mod options;
 mod plain;
+mod reporter;
 mod result;
 mod runner;
 
-use std::io::IsTerminal;
 use std::sync::Arc;
-use std::time::Instant;
 
 use anyhow::Result;
 use arrow_schema::SchemaRef;
 use datafusion::dataframe::DataFrame;
 
-use crate::diagnostics::explain_timing;
 use crate::input::{InputSource, RowRange};
 use crate::output::OutputLayout;
-use crate::progress::format_elapsed;
 use crate::session::DataFusionSession;
 
-pub use options::{ExecutionOptions, InputOptions, OutputOptions, SpatialPipelineOptions};
+pub use options::{InputOptions, OutputOptions, SpatialPipelineOptions};
+pub(crate) use reporter::SharedWriteReporter;
+pub use reporter::{WriteProgress, WriteReporter};
 pub use result::SpatialPipelineResult;
 pub use runner::run;
 
@@ -52,7 +51,6 @@ struct OptimizedPartitionedPipeline {
 }
 
 struct SpatialPipelineState {
-  started_at: Instant,
   _session: DataFusionSession,
   input: Arc<dyn InputSource>,
   input_dataframe: DataFrame,
@@ -65,8 +63,7 @@ struct SpatialPipelineState {
   output_wkid: u32,
   covering: bool,
   compression: Option<String>,
-  progress: bool,
-  explain: bool,
+  write_reporter: Option<SharedWriteReporter>,
 }
 
 impl Pipeline {
@@ -99,22 +96,17 @@ impl OptimizedPartitionedPipeline {
 
 impl SpatialPipelineState {
   fn finish_plain(&self, rows_written: u64) -> SpatialPipelineResult {
-    self.finish_logging();
-    SpatialPipelineResult::new(rows_written, None)
+    SpatialPipelineResult::new(self.total_input_rows, rows_written, None)
   }
 
   fn finish_validated(&self, rows_written: u64) -> Result<SpatialPipelineResult> {
     let report = crate::validate::validate(self.output_layout.path())?
       .ensure_valid()
       .map_err(anyhow::Error::new)?;
-    self.finish_logging();
-    Ok(SpatialPipelineResult::new(rows_written, Some(report)))
-  }
-
-  fn finish_logging(&self) {
-    if self.progress && std::io::stderr().is_terminal() {
-      eprintln!("Completed in {}", format_elapsed(self.started_at.elapsed()));
-    }
-    explain_timing(self.explain, "Total job", self.started_at.elapsed());
+    Ok(SpatialPipelineResult::new(
+      self.total_input_rows,
+      rows_written,
+      Some(report),
+    ))
   }
 }

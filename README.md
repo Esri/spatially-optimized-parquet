@@ -52,6 +52,10 @@ Optimized `parquet-opt write` commands run the same validation automatically aft
 `--no-optimization` writes plain GeoParquet and skips SOP validation. Warnings return exit status
 `0`. Validation errors return non-zero without deleting output.
 
+During every write, the CLI updates one stdout line with `Wrote X/Y features` at most every 500
+milliseconds and prints the final count immediately before validation output. Pass `--no-progress`
+to suppress live updates while retaining the final `Wrote X/Y features` line.
+
 GeoParquet is also supported. Parquet without geospatial metadata can also be used provided the geometry column is tagged with `--geometry-column`. Add `--covering` to write a GeoParquet 1.1 root `bbox` covering column with `xmin`, `ymin`, `xmax`, and `ymax` fields.
 
 Input format is inferred from `.gpkg` or `.parquet`. Local directories are treated as Parquet
@@ -88,6 +92,6 @@ execution:
 - `spatial::output::reprojection` owns the shared CRS comparison, WKB transformation, point,
   bounds, and target-extent expressions used by both output modes.
 - `spatial::output` retains shared layout, Parquet writer policy, metadata, output-mode,
-  spatial-reference, and reprojection mechanics.
+  spatial-reference, reprojection, and callback-aware write mechanics.
 
 See [architecture.md](architecture.md) for the complete execution flow and module map.

@@ -3,20 +3,23 @@
 //! This module deliberately contains no storage-format or geometry logic. Clap validates
 //! argument shape, the local parsers enforce row-range constraints, and [`run`] maps the
 //! resulting values into domain options. The `spatial` crate then owns input detection,
-//! metadata discovery, DataFusion planning, geometry transformation, progress reporting,
-//! and durable output.
+//! metadata discovery, DataFusion planning, geometry transformation, and durable output.
 //!
 //! Keeping this layer thin prevents CLI concerns from leaking into reusable pipeline code. A
 //! failure returned by the pipeline propagates through `main`, producing a non-zero process exit.
+
+mod write_progress;
 
 use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use spatial::{
-  DEFAULT_OUTPUT_WKID, ExecutionOptions, InputOptions, OutputMode, OutputOptions, RowRange,
-  SourceFormat, SpatialPipelineOptions, ValidationReport,
+  DEFAULT_OUTPUT_WKID, InputOptions, OutputMode, OutputOptions, RowRange, SourceFormat,
+  SpatialPipelineOptions, ValidationReport,
 };
+
+use crate::write_progress::StdoutWriteReporter;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -86,12 +89,11 @@ struct WriteCommand {
   overwrite: bool,
   #[arg(
     long,
-    help = "Print detailed plan and performance diagnostics to stderr, including DataFusion EXPLAIN VERBOSE / EXPLAIN ANALYZE VERBOSE-style output and per-operator metrics; disables progress bars and can be substantially slower"
+    help = "Suppress live write updates while retaining the final written feature count"
   )]
-  explain: bool,
+  no_progress: bool,
   #[arg(
     long = "no-optimization",
-    alias = "no-optimiztaion",
     help = "Pass through the selected input rows without sorting, display optimization, or geodisplay metadata changes"
   )]
   no_optimization: bool,
@@ -112,8 +114,10 @@ async fn main() -> Result<()> {
 async fn run(cli: Cli) -> Result<()> {
   match cli.command {
     Command::Write(args) => {
-      let result = spatial::run(args.into()).await?;
-      println!("wrote {} rows", result.rows_written());
+      let reporter = StdoutWriteReporter::new(!args.no_progress);
+      let options = SpatialPipelineOptions::from(args).with_write_reporter(reporter.clone());
+      let result = spatial::run(options).await?;
+      reporter.finish(result.rows_written(), result.rows_expected());
       if let Some(report) = result.validation_report() {
         render_validation_report(report);
       }
@@ -154,7 +158,6 @@ impl From<WriteCommand> for SpatialPipelineOptions {
         args.covering,
         args.overwrite,
       ),
-      ExecutionOptions::new(!args.explain, args.explain),
     )
   }
 }
@@ -204,6 +207,45 @@ mod tests {
     assert_eq!(args.input, "input.parquet");
     assert_eq!(args.output, PathBuf::from("output.parquet"));
     assert!(args.no_optimization);
+  }
+
+  #[test]
+  fn write_subcommand_accepts_no_progress() {
+    let cli = Cli::try_parse_from([
+      "parquet-opt",
+      "write",
+      "--input",
+      "input.parquet",
+      "--output",
+      "output.parquet",
+      "--no-progress",
+    ])
+    .unwrap();
+
+    let Command::Write(args) = cli.command else {
+      panic!("expected write command");
+    };
+    assert!(args.no_progress);
+  }
+
+  #[test]
+  fn write_subcommand_rejects_removed_explain() {
+    let error = Cli::try_parse_from([
+      "parquet-opt",
+      "write",
+      "--input",
+      "input.parquet",
+      "--output",
+      "output.parquet",
+      "--explain",
+    ])
+    .unwrap_err();
+
+    assert!(
+      error
+        .to_string()
+        .contains("unexpected argument '--explain'")
+    );
   }
 
   #[test]

@@ -78,7 +78,6 @@ fn open_input_accepts_single_layer_geopackage_and_reads_metadata() {
   );
 
   let input = open_gpkg_input(&path, None);
-  assert_eq!(input.format_name(), "GeoPackage");
   assert_eq!(input.total_rows().unwrap(), 2);
   let schema = input.schema().unwrap();
   assert!(schema.field_with_name("id").is_ok());

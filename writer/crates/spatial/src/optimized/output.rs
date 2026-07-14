@@ -19,7 +19,7 @@ use crate::optimized::range_boundaries::compute_cluster_range_boundaries;
 use crate::optimized::write::{PartitionedOutputWriter, write_optimized_single_file};
 use crate::optimized::{ClusteringFamily, OptimizedGeometry, ResolvedOptimization};
 use crate::output::{OutputLayout, ReprojectionSpec};
-use crate::progress::{finish_row_bar, row_bar};
+use crate::pipeline::SharedWriteReporter;
 
 /// Coordinates optimized resolution and output behind one crate-private product boundary.
 pub(crate) struct OptimizedOutput<'a, State> {
@@ -27,7 +27,7 @@ pub(crate) struct OptimizedOutput<'a, State> {
   output_layout: &'a OutputLayout,
   source_schema: &'a Schema,
   total_input_rows: u64,
-  explain: bool,
+  write_reporter: Option<SharedWriteReporter>,
   state: State,
 }
 
@@ -41,7 +41,6 @@ pub(crate) struct PendingOutputState<'a> {
 pub(crate) struct ResolvedOutputState<'a> {
   covering: bool,
   compression: Option<&'a str>,
-  progress: bool,
   optimization: ResolvedOptimization,
 }
 
@@ -54,14 +53,14 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
     source_schema: &'a Schema,
     total_input_rows: u64,
     row_range: RowRange,
-    explain: bool,
+    write_reporter: Option<SharedWriteReporter>,
   ) -> Self {
     Self {
       input_dataframe,
       output_layout,
       source_schema,
       total_input_rows,
-      explain,
+      write_reporter,
       state: PendingOutputState { input, row_range },
     }
   }
@@ -74,7 +73,6 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
     output_wkid: u32,
     covering: bool,
     compression: Option<&'a str>,
-    progress: bool,
   ) -> Result<OptimizedOutput<'a, ResolvedOutputState<'a>>> {
     validate_covering_configuration(covering, self.source_schema)?;
     let source = resolve_source(
@@ -96,10 +94,7 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
     let target_extent = TargetExtentResolver::new(
       self.state.input,
       self.input_dataframe.clone(),
-      self.total_input_rows,
       self.state.row_range,
-      progress,
-      self.explain,
     )
     .resolve(&source, &geometry, &reprojection)
     .await?;
@@ -112,11 +107,10 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
       output_layout: self.output_layout,
       source_schema: self.source_schema,
       total_input_rows: self.total_input_rows,
-      explain: self.explain,
+      write_reporter: self.write_reporter,
       state: ResolvedOutputState {
         covering,
         compression,
-        progress,
         optimization: ResolvedOptimization::new(
           source.source_metadata,
           geometry,
@@ -144,8 +138,8 @@ impl<'a> OptimizedOutput<'a, ResolvedOutputState<'a>> {
       self.output_layout,
       self.state.compression,
       metadata,
-      self.state.progress,
       self.total_input_rows,
+      self.write_reporter.clone(),
     )
     .await
   }
@@ -158,27 +152,14 @@ impl<'a> OptimizedOutput<'a, ResolvedOutputState<'a>> {
         self.state.optimization.geometry().clustering_family,
       )),
     )?;
-    let range_bar = row_bar(
-      self.state.progress,
-      "Computing partition ranges",
-      self.total_input_rows,
-    );
     let range_source =
       partitioned_range_source(&self.state.optimization, self.input_dataframe.clone())?;
     let boundaries = compute_cluster_range_boundaries(
       range_source,
       cluster_key_column(self.state.optimization.geometry().clustering_family),
       self.output_layout.part_count(),
-      &range_bar,
-      self.total_input_rows,
-      self.explain,
     )
     .await?;
-    finish_row_bar(
-      &range_bar,
-      self.total_input_rows,
-      "Computed partition ranges".to_string(),
-    );
     let dataframe = partitioned_projection(
       &self.state.optimization,
       self.input_dataframe.clone(),
@@ -191,9 +172,8 @@ impl<'a> OptimizedOutput<'a, ResolvedOutputState<'a>> {
       self.output_layout,
       self.state.compression,
       &self.state.optimization,
-      self.state.progress,
       self.total_input_rows,
-      self.explain,
+      self.write_reporter.clone(),
     )
     .write(dataframe, metadata)
     .await

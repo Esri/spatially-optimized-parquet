@@ -1,7 +1,5 @@
 //! Resolves the optimized extent in target coordinates.
 
-use std::time::Duration;
-
 use anyhow::{Context, Result, bail};
 use arrow_array::{Array, Float64Array, RecordBatch};
 use datafusion::dataframe::DataFrame;
@@ -9,11 +7,9 @@ use datafusion::functions::core::expr_ext::FieldAccessor;
 use datafusion::functions_aggregate::expr_fn::{max, min};
 use datafusion::logical_expr::{Expr, expr_fn::ident};
 
-use crate::diagnostics::{explain_stage_note, explain_timing};
 use crate::geometry::Extent2D;
 use crate::geoparquet::ResolvedGeoParquetSource;
 use crate::input::{InputSource, RowRange};
-use crate::optimized::aggregate::collect_aggregate_with_progress;
 use crate::optimized::clustering::{bounds_expr, point_expr};
 use crate::optimized::multiscale::{
   POINT_X_COLUMN, POINT_Y_COLUMN, TEMP_BOUNDS_COLUMN, TEMP_POINT_COORDS_COLUMN, TEMP_XMAX_COLUMN,
@@ -21,16 +17,12 @@ use crate::optimized::multiscale::{
 };
 use crate::optimized::{ClusteringFamily, OptimizedGeometry};
 use crate::output::{ReprojectionSpec, transformed_bounds_expr, transformed_point_coords_expr};
-use crate::progress::{finish_row_bar, row_bar};
 
 /// Resolves one selected dataset extent in the output coordinate reference system.
 pub(super) struct TargetExtentResolver<'a> {
   input: &'a dyn InputSource,
   input_dataframe: DataFrame,
-  total_input_rows: u64,
   row_range: RowRange,
-  progress: bool,
-  explain: bool,
 }
 
 impl<'a> TargetExtentResolver<'a> {
@@ -38,18 +30,12 @@ impl<'a> TargetExtentResolver<'a> {
   pub(super) fn new(
     input: &'a dyn InputSource,
     input_dataframe: DataFrame,
-    total_input_rows: u64,
     row_range: RowRange,
-    progress: bool,
-    explain: bool,
   ) -> Self {
     Self {
       input,
       input_dataframe,
-      total_input_rows,
       row_range,
-      progress,
-      explain,
     }
   }
 
@@ -60,7 +46,6 @@ impl<'a> TargetExtentResolver<'a> {
     geometry: &OptimizedGeometry,
     reprojection: &ReprojectionSpec,
   ) -> Result<Extent2D> {
-    let progress_bar = row_bar(self.progress, "Analyzing geometry", self.total_input_rows);
     let source_metadata = self.input.source_metadata()?;
     let metadata_fast_path = self.row_range.is_full()
       && !reprojection.requires_reprojection()
@@ -71,32 +56,13 @@ impl<'a> TargetExtentResolver<'a> {
         .and_then(|metadata| metadata.bbox)
         .is_some();
     let target_extent = if metadata_fast_path {
-      explain_stage_note(
-        self.explain,
-        "Analyzing geometry",
-        "using metadata fast path from resolved source metadata",
-      );
-      explain_timing(self.explain, "Analyzing geometry", Duration::ZERO);
-      progress_bar.inc(self.total_input_rows);
       source.source_extent
     } else {
       let aggregate_dataframe =
         target_extent_aggregate(self.input_dataframe, geometry, reprojection)?;
-      let batches = collect_aggregate_with_progress(
-        aggregate_dataframe,
-        &progress_bar,
-        self.total_input_rows,
-        "Analyzing geometry",
-        self.explain,
-      )
-      .await?;
+      let batches = aggregate_dataframe.collect().await?;
       extract_target_extent(&batches)?
     };
-    finish_row_bar(
-      &progress_bar,
-      self.total_input_rows,
-      format!("Analyzed {} geometry", geometry.geometry_type.as_str()),
-    );
     Ok(target_extent)
   }
 }

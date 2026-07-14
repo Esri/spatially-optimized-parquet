@@ -1,6 +1,8 @@
+use std::sync::{Arc, Mutex};
+
 use spatial::{
-  ExecutionOptions, InputOptions, OutputMode, OutputOptions, RowRange, SourceFormat,
-  SpatialPipelineOptions, ValidationRule, run, validate,
+  InputOptions, OutputMode, OutputOptions, RowRange, SourceFormat, SpatialPipelineOptions,
+  ValidationRule, WriteProgress, run, validate,
 };
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
@@ -32,23 +34,33 @@ fn public_api_runs_typed_request_and_reports_rows_written() {
     &[geoparquet_kv("geometry", &["Point"])],
   );
 
+  let progress = Arc::new(Mutex::new(Vec::new()));
+  let reported = Arc::clone(&progress);
   let result = Runtime::new()
     .unwrap()
-    .block_on(run(SpatialPipelineOptions::new(
-      InputOptions::new(
-        input.to_string_lossy(),
-        Some(SourceFormat::Parquet),
-        RowRange::new(1, Some(1)),
-        None,
-        None,
-        None,
-      ),
-      OutputOptions::new(&output, OutputMode::Plain, None, None, 4326, false, true),
-      ExecutionOptions::new(false, false),
-    )))
+    .block_on(run(
+      SpatialPipelineOptions::new(
+        InputOptions::new(
+          input.to_string_lossy(),
+          Some(SourceFormat::Parquet),
+          RowRange::new(1, Some(1)),
+          None,
+          None,
+          None,
+        ),
+        OutputOptions::new(&output, OutputMode::Plain, None, None, 4326, false, true),
+      )
+      .with_write_reporter(move |update: WriteProgress| {
+        reported.lock().unwrap().push(update);
+      }),
+    ))
     .unwrap();
 
+  assert_eq!(result.rows_expected(), 1);
   assert_eq!(result.rows_written(), 1);
+  let progress = progress.lock().unwrap();
+  assert_eq!(progress.last().map(|update| update.rows_written()), Some(1));
+  assert_eq!(progress.last().map(|update| update.total_rows()), Some(1));
   assert!(result.validation_report().is_none());
   assert!(output.exists());
 
@@ -81,30 +93,41 @@ fn public_api_validates_optimized_output_and_returns_warnings() {
     &[geoparquet_kv("geometry", &["Point"])],
   );
 
+  let progress = Arc::new(Mutex::new(Vec::new()));
+  let reported = Arc::clone(&progress);
   let result = Runtime::new()
     .unwrap()
-    .block_on(run(SpatialPipelineOptions::new(
-      InputOptions::new(
-        input.to_string_lossy(),
-        Some(SourceFormat::Parquet),
-        RowRange::default(),
-        None,
-        None,
-        None,
-      ),
-      OutputOptions::new(
-        &output,
-        OutputMode::Optimized,
-        None,
-        None,
-        4326,
-        false,
-        true,
-      ),
-      ExecutionOptions::new(false, false),
-    )))
+    .block_on(run(
+      SpatialPipelineOptions::new(
+        InputOptions::new(
+          input.to_string_lossy(),
+          Some(SourceFormat::Parquet),
+          RowRange::default(),
+          None,
+          None,
+          None,
+        ),
+        OutputOptions::new(
+          &output,
+          OutputMode::Optimized,
+          None,
+          None,
+          4326,
+          false,
+          true,
+        ),
+      )
+      .with_write_reporter(move |update: WriteProgress| {
+        reported.lock().unwrap().push(update);
+      }),
+    ))
     .unwrap();
 
+  assert_eq!(result.rows_expected(), 3);
+  assert_eq!(result.rows_written(), 3);
+  let progress = progress.lock().unwrap();
+  assert_eq!(progress.last().map(|update| update.rows_written()), Some(3));
+  assert_eq!(progress.last().map(|update| update.total_rows()), Some(3));
   let automatic_report = result.validation_report().expect("automatic validation");
   assert!(!automatic_report.has_errors());
   assert!(
@@ -119,5 +142,66 @@ fn public_api_validates_optimized_output_and_returns_warnings() {
   assert_eq!(
     explicit_report.warning_count(),
     automatic_report.warning_count()
+  );
+}
+
+#[test]
+fn public_api_reports_monotonic_partitioned_write_counts() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("input.parquet");
+  let output = temp.path().join("output");
+  let schema = sample_schema_with_geometry();
+  let batch = sample_batch_with_geometry(vec![
+    Some(wkb_point(0.0, 0.0)),
+    Some(wkb_point(1.0, 1.0)),
+    Some(wkb_point(2.0, 2.0)),
+  ]);
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv("geometry", &["Point"])],
+  );
+
+  let progress = Arc::new(Mutex::new(Vec::new()));
+  let reported = Arc::clone(&progress);
+  let result = Runtime::new()
+    .unwrap()
+    .block_on(run(
+      SpatialPipelineOptions::new(
+        InputOptions::new(
+          input.to_string_lossy(),
+          Some(SourceFormat::Parquet),
+          RowRange::default(),
+          None,
+          None,
+          None,
+        ),
+        OutputOptions::new(
+          &output,
+          OutputMode::Optimized,
+          Some(2),
+          None,
+          4326,
+          false,
+          true,
+        ),
+      )
+      .with_write_reporter(move |update: WriteProgress| {
+        reported.lock().unwrap().push(update);
+      }),
+    ))
+    .unwrap();
+
+  assert_eq!(result.rows_expected(), 3);
+  assert_eq!(result.rows_written(), 3);
+  let progress = progress.lock().unwrap();
+  assert_eq!(progress.last().map(|update| update.rows_written()), Some(3));
+  assert_eq!(progress.last().map(|update| update.total_rows()), Some(3));
+  assert!(
+    progress
+      .windows(2)
+      .all(|updates| updates[0].rows_written() <= updates[1].rows_written())
   );
 }

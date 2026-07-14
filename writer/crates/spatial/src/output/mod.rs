@@ -6,6 +6,7 @@ mod layout;
 mod metadata;
 mod mode;
 mod parquet;
+mod parquet_sink;
 mod reprojection;
 mod spatial_reference;
 
@@ -17,6 +18,7 @@ pub(crate) use metadata::{
 };
 pub use mode::OutputMode;
 pub(crate) use parquet::ParquetWriterOptions;
+pub(crate) use parquet_sink::TrackingParquetWriter;
 pub(crate) use reprojection::{
   CoordinateTransformSpec, ReprojectionSpec, reproject_geometry_expr, transformed_bounds_expr,
   transformed_point_coords_expr,

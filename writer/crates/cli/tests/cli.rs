@@ -37,6 +37,10 @@ fn point_wkb(x: f64, y: f64) -> Vec<u8> {
   bytes
 }
 
+fn normalized_stdout(output: &[u8]) -> String {
+  String::from_utf8_lossy(output).replace('\r', "")
+}
+
 #[test]
 fn write_subcommand_prints_automatic_validation_report() {
   let temp = TempDir::new().unwrap();
@@ -65,11 +69,97 @@ fn write_subcommand_prints_automatic_validation_report() {
     "{}",
     String::from_utf8_lossy(&result.stderr)
   );
-  let stdout = String::from_utf8_lossy(&result.stdout);
-  assert!(stdout.contains("wrote 2 rows"));
+  let stdout = normalized_stdout(&result.stdout);
+  assert!(stdout.contains("Wrote 2/2 features\n"));
   assert!(stdout.contains("valid:"));
   assert!(stdout.contains("warning SOP-META-006"));
+  assert!(
+    stdout.find("Wrote 2/2 features").unwrap() < stdout.find("valid:").unwrap(),
+    "{stdout}"
+  );
   assert!(output.exists());
+}
+
+#[test]
+fn write_subcommand_renders_live_and_final_written_count() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("input.parquet");
+  let output = temp.path().join("output.parquet");
+  write_point_input(&input);
+
+  let result = Command::new(env!("CARGO_BIN_EXE_parquet-opt"))
+    .args([
+      "write",
+      "--input",
+      input.to_str().unwrap(),
+      "--output",
+      output.to_str().unwrap(),
+      "--geometry-column",
+      "geometry",
+      "--in-sr",
+      "4326",
+      "--no-optimization",
+      "--overwrite",
+    ])
+    .output()
+    .unwrap();
+
+  assert!(result.status.success());
+  assert_eq!(
+    normalized_stdout(&result.stdout)
+      .matches("Wrote 2/2 features")
+      .count(),
+    2
+  );
+}
+
+#[test]
+fn no_progress_suppresses_live_updates_but_keeps_final_count() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("input.parquet");
+  let output = temp.path().join("output.parquet");
+  write_point_input(&input);
+
+  let result = Command::new(env!("CARGO_BIN_EXE_parquet-opt"))
+    .args([
+      "write",
+      "--input",
+      input.to_str().unwrap(),
+      "--output",
+      output.to_str().unwrap(),
+      "--geometry-column",
+      "geometry",
+      "--in-sr",
+      "4326",
+      "--no-optimization",
+      "--no-progress",
+      "--overwrite",
+    ])
+    .output()
+    .unwrap();
+
+  assert!(result.status.success());
+  let stdout = normalized_stdout(&result.stdout);
+  assert_eq!(stdout.matches("Wrote 2/2 features").count(), 1);
+  assert!(stdout.ends_with("Wrote 2/2 features\n"));
+}
+
+#[test]
+fn write_subcommand_rejects_removed_explain() {
+  let result = Command::new(env!("CARGO_BIN_EXE_parquet-opt"))
+    .args([
+      "write",
+      "--input",
+      "input.parquet",
+      "--output",
+      "output.parquet",
+      "--explain",
+    ])
+    .output()
+    .unwrap();
+
+  assert!(!result.status.success());
+  assert!(String::from_utf8_lossy(&result.stderr).contains("unexpected argument '--explain'"));
 }
 
 #[test]

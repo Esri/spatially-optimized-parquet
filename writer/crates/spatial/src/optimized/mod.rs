@@ -1,13 +1,11 @@
 //! Implements optimized spatial analysis, projection, and physical output mechanics.
 
-mod aggregate;
 mod clustering;
 mod extent;
 mod geometry;
 mod metadata;
 mod multiscale;
 mod output;
-mod partitioned_sink;
 mod partitioned_sort;
 mod projection;
 mod range_boundaries;

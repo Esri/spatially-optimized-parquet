@@ -7,9 +7,7 @@ use datafusion::functions_aggregate::approx_percentile_cont::approx_percentile_c
 use datafusion::functions_aggregate::expr_fn::min;
 use datafusion::logical_expr::expr_fn::ident;
 use datafusion::prelude::lit;
-use indicatif::ProgressBar;
 
-use super::aggregate::collect_aggregate_with_progress;
 use super::clustering::ClusterRangeBoundaries;
 
 /// Estimate balanced cluster-key ranges with one minimum and approximate percentiles.
@@ -17,9 +15,6 @@ pub(super) async fn compute_cluster_range_boundaries(
   dataframe: DataFrame,
   cluster_key_column: &str,
   bucket_count: usize,
-  progress_bar: &ProgressBar,
-  total_input_rows: u64,
-  explain: bool,
 ) -> Result<ClusterRangeBoundaries> {
   if bucket_count <= 1 {
     return Ok(ClusterRangeBoundaries::new(0, Vec::new()));
@@ -34,14 +29,10 @@ pub(super) async fn compute_cluster_range_boundaries(
     )
     .alias(format!("range_boundary_{index}"))
   }));
-  let batches = collect_aggregate_with_progress(
-    dataframe.aggregate(vec![], aggregate_expressions)?,
-    progress_bar,
-    total_input_rows,
-    "Computing partition ranges",
-    explain,
-  )
-  .await?;
+  let batches = dataframe
+    .aggregate(vec![], aggregate_expressions)?
+    .collect()
+    .await?;
   let Some(batch) = batches.first() else {
     return Ok(ClusterRangeBoundaries::new(0, Vec::new()));
   };

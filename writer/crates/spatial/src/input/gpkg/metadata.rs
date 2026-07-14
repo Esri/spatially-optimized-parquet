@@ -11,7 +11,7 @@ use crate::input::{InputOpenOptions, SourceGeometryMetadata};
 const MAX_GEOMETRY_TYPE_SAMPLE_FEATURES: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-/// Summarizes one layer for selection errors and diagnostics.
+/// Summarizes one layer for selection error messages.
 pub(super) struct GpkgLayerSummary {
   name: String,
   geometry_type: String,

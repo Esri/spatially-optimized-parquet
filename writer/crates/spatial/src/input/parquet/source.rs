@@ -46,10 +46,6 @@ impl ParquetInputSource {
 }
 
 impl InputSource for ParquetInputSource {
-  fn format_name(&self) -> &'static str {
-    "parquet"
-  }
-
   fn schema(&self) -> Result<SchemaRef> {
     let metadata = self
       .metadata

@@ -15,7 +15,7 @@ impl OptimizedPartitionedPipeline {
       state.source_schema.as_ref(),
       state.total_input_rows,
       state.row_range,
-      state.explain,
+      state.write_reporter.clone(),
     )
     .resolve(
       state.geometry_column.as_deref(),
@@ -23,7 +23,6 @@ impl OptimizedPartitionedPipeline {
       state.output_wkid,
       state.covering,
       state.compression.as_deref(),
-      state.progress,
     )
     .await?;
     let rows_written = output.write_partitioned().await?;

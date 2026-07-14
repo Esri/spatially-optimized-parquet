@@ -1,9 +1,9 @@
 //! Writes and validates Spatially Optimized Parquet through stable public façades.
 //!
-//! Construct [`SpatialPipelineOptions`] from [`InputOptions`], [`OutputOptions`], and
-//! [`ExecutionOptions`], then pass the request to [`run`]. [`RowRange`] selects source rows,
-//! [`SourceFormat`] overrides source detection, and [`OutputMode`] chooses plain or optimized
-//! GeoParquet output. [`DEFAULT_OUTPUT_WKID`] provides the default output spatial reference.
+//! Construct [`SpatialPipelineOptions`] from [`InputOptions`] and [`OutputOptions`], then pass the
+//! request to [`run`]. [`RowRange`] selects source rows, [`SourceFormat`] overrides source
+//! detection, and [`OutputMode`] chooses plain or optimized GeoParquet output. Attach a
+//! [`WriteReporter`] when cumulative write counts are needed.
 //!
 //! [`run`] validates the request, executes the complete DataFusion workflow, writes durable output,
 //! and automatically validates optimized output before returning [`SpatialPipelineResult`].
@@ -12,7 +12,6 @@
 
 #![warn(missing_docs)]
 
-mod diagnostics;
 mod geometry;
 mod geoparquet;
 mod input;
@@ -20,7 +19,6 @@ mod optimized;
 mod output;
 mod parquet_dataset;
 mod pipeline;
-mod progress;
 mod session;
 #[cfg(test)]
 mod test_support;
@@ -29,7 +27,8 @@ pub mod validate;
 pub use input::{RowRange, SourceFormat};
 pub use output::{DEFAULT_OUTPUT_WKID, OutputMode};
 pub use pipeline::{
-  ExecutionOptions, InputOptions, OutputOptions, SpatialPipelineOptions, SpatialPipelineResult, run,
+  InputOptions, OutputOptions, SpatialPipelineOptions, SpatialPipelineResult, WriteProgress,
+  WriteReporter, run,
 };
 pub use validate::{
   ValidationFailure, ValidationFinding, ValidationLocation, ValidationReport, ValidationRule,

@@ -51,10 +51,6 @@ struct MetadataInputSource {
 }
 
 impl InputSource for MetadataInputSource {
-  fn format_name(&self) -> &'static str {
-    "metadata-test"
-  }
-
   fn schema(&self) -> Result<SchemaRef> {
     Ok(self.schema.clone())
   }

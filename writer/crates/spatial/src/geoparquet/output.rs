@@ -1,15 +1,16 @@
 //! Coordinates plain GeoParquet resolution, projection, metadata, and writing.
 
 use anyhow::{Context, Result};
-use arrow_array::{Array, UInt64Array};
 use arrow_schema::Schema;
-use datafusion::dataframe::{DataFrame, DataFrameWriteOptions};
+use datafusion::dataframe::DataFrame;
 
 use crate::input::{InputSource, RowRange};
 use crate::optimized::COVERING_BBOX_COLUMN;
 use crate::output::{
-  GeoMetadataInput, OutputLayout, ParquetWriterOptions, ReprojectionSpec, geoparquet_metadata,
+  GeoMetadataInput, OutputLayout, ParquetWriterOptions, ReprojectionSpec, TrackingParquetWriter,
+  geoparquet_metadata,
 };
+use crate::pipeline::SharedWriteReporter;
 
 use super::{
   analyze_plain_target_extent, plain_output_dataframe, resolve_source,
@@ -24,6 +25,8 @@ pub(crate) struct PlainOutput<'a> {
   geometry_column: Option<&'a str>,
   input_wkid: Option<u32>,
   row_range: RowRange,
+  total_rows: u64,
+  write_reporter: Option<SharedWriteReporter>,
 }
 
 impl<'a> PlainOutput<'a> {
@@ -36,6 +39,8 @@ impl<'a> PlainOutput<'a> {
     geometry_column: Option<&'a str>,
     input_wkid: Option<u32>,
     row_range: RowRange,
+    total_rows: u64,
+    write_reporter: Option<SharedWriteReporter>,
   ) -> Self {
     Self {
       input,
@@ -45,6 +50,8 @@ impl<'a> PlainOutput<'a> {
       geometry_column,
       input_wkid,
       row_range,
+      total_rows,
+      write_reporter,
     }
   }
 
@@ -97,7 +104,8 @@ impl<'a> PlainOutput<'a> {
       covering_column: COVERING_BBOX_COLUMN,
     };
     let metadata = geoparquet_metadata(source.source_metadata.passthrough_kv, geo_metadata)?;
-    let writer_options = ParquetWriterOptions::new(compression.unwrap_or("snappy"), &metadata)?;
+    let writer_options =
+      ParquetWriterOptions::new(compression.unwrap_or("snappy"), &metadata)?.into_datafusion();
     let output_path = self
       .output_layout
       .paths()?
@@ -106,23 +114,8 @@ impl<'a> PlainOutput<'a> {
       .context("missing output path")?
       .to_string_lossy()
       .into_owned();
-
-    let batches = dataframe
-      .write_parquet(
-        &output_path,
-        DataFrameWriteOptions::new().with_single_file_output(true),
-        Some(writer_options.into_datafusion()),
-      )
-      .await?;
-    let batch = batches.first().context("write returned no row count")?;
-    let values = batch
-      .column(0)
-      .as_any()
-      .downcast_ref::<UInt64Array>()
-      .context("write result count column was not UInt64")?;
-    if values.is_empty() {
-      return Ok(0);
-    }
-    Ok(values.value(0))
+    TrackingParquetWriter::new(self.total_rows, self.write_reporter)
+      .write_single(dataframe, output_path, writer_options)
+      .await
   }
 }

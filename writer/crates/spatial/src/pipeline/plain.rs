@@ -2,7 +2,6 @@
 
 use anyhow::Result;
 
-use crate::diagnostics::explain_stage_note;
 use crate::geoparquet::PlainOutput;
 
 use super::{PlainPipeline, SpatialPipelineResult};
@@ -18,6 +17,8 @@ impl PlainPipeline {
       state.geometry_column.as_deref(),
       state.input_wkid,
       state.row_range,
+      state.total_input_rows,
+      state.write_reporter.clone(),
     )
     .write(
       state.output_wkid,
@@ -25,11 +26,6 @@ impl PlainPipeline {
       state.compression.as_deref(),
     )
     .await?;
-    explain_stage_note(
-      state.explain,
-      "Plain GeoParquet",
-      &format!("wrote {rows_written} selected rows without optimized clustering"),
-    );
     Ok(state.finish_plain(rows_written))
   }
 }

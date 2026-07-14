@@ -19,9 +19,7 @@ use crate::geometry::Extent2D;
 use crate::input::{RowRange, SourceFormat};
 use crate::optimized::geometry_extent_from_wkb;
 use crate::output::OutputMode;
-use crate::pipeline::{
-  ExecutionOptions, InputOptions, OutputOptions, SpatialPipelineOptions, SpatialPipelineResult,
-};
+use crate::pipeline::{InputOptions, OutputOptions, SpatialPipelineOptions, SpatialPipelineResult};
 use wkb::writer::WriteOptions;
 
 use crate::test_support::{
@@ -42,8 +40,6 @@ struct PipelineTestRequest {
   output_wkid: u32,
   covering: bool,
   overwrite: bool,
-  progress: bool,
-  explain: bool,
   output_mode: OutputMode,
 }
 
@@ -66,7 +62,6 @@ async fn run_test_pipeline(request: PipelineTestRequest) -> Result<SpatialPipeli
       request.covering,
       request.overwrite,
     ),
-    ExecutionOptions::new(request.progress, request.explain),
   ))
   .await
 }
@@ -239,8 +234,6 @@ fn spatial_pipeline_preserves_same_crs_wkb_and_writes_sorted_metadata() {
       output_wkid: 4326,
       covering: false,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Optimized,
     }))
     .unwrap();
@@ -328,8 +321,6 @@ fn spatial_pipeline_writes_covering_bbox_for_reprojected_points() {
       output_wkid: 4326,
       covering: true,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Optimized,
     }))
     .unwrap();
@@ -410,8 +401,6 @@ fn spatial_pipeline_reprojects_geoparquet_point_output_to_wgs84() {
       output_wkid: 4326,
       covering: true,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Optimized,
     }))
     .unwrap();
@@ -508,8 +497,6 @@ fn spatial_pipeline_writes_non_point_geodisplay_struct_and_metadata() {
       output_wkid: 4326,
       covering: false,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Optimized,
     }))
     .unwrap();
@@ -584,8 +571,6 @@ fn non_wgs84_output_panics_before_filesystem_mutation_in_both_modes() {
           output_wkid,
           covering: false,
           overwrite: true,
-          progress: false,
-          explain: false,
           output_mode,
         }))
       }));
@@ -638,8 +623,6 @@ fn spatial_pipeline_writes_covering_bbox_for_non_point_output() {
       output_wkid: 4326,
       covering: true,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Optimized,
     }))
     .unwrap();
@@ -711,8 +694,6 @@ fn spatial_pipeline_replaces_existing_non_point_geodisplay_column() {
       output_wkid: 4326,
       covering: false,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Optimized,
     }))
     .unwrap();
@@ -797,8 +778,6 @@ fn spatial_pipeline_sorts_non_point_rows_across_multiple_input_batches() {
       output_wkid: 4326,
       covering: false,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Optimized,
     }))
     .unwrap();
@@ -878,8 +857,6 @@ fn spatial_pipeline_writes_range_partitioned_multi_file_output() {
       output_wkid: 4326,
       covering: false,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Optimized,
     }))
     .unwrap();
@@ -1037,8 +1014,6 @@ fn spatial_pipeline_row_range_writes_requested_input_rows() {
       output_wkid: 4326,
       covering: false,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Optimized,
     }))
     .unwrap();
@@ -1121,8 +1096,6 @@ fn plain_geoparquet_preserves_same_crs_wkb_and_rows_without_sop_metadata() {
       output_wkid: 4326,
       covering: false,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Plain,
     }))
     .unwrap();
@@ -1197,8 +1170,6 @@ fn plain_geoparquet_writes_covering_bbox() {
       output_wkid: 4326,
       covering: true,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Plain,
     }))
     .unwrap();
@@ -1262,8 +1233,6 @@ fn plain_geoparquet_reprojects_wkb_covering_extent_and_crs() {
       output_wkid: 4326,
       covering: true,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Plain,
     }))
     .unwrap();
@@ -1351,8 +1320,6 @@ fn spatial_pipeline_rejects_covering_when_bbox_column_exists() {
       output_wkid: 4326,
       covering: true,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Optimized,
     }))
     .unwrap_err();
@@ -1409,8 +1376,6 @@ fn spatial_pipeline_errors_when_explicit_geometry_column_lacks_crs_metadata() {
       output_wkid: 4326,
       covering: false,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Optimized,
     }))
     .unwrap_err();
@@ -1430,8 +1395,6 @@ fn spatial_pipeline_errors_when_explicit_geometry_column_lacks_crs_metadata() {
       output_wkid: 4326,
       covering: false,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Plain,
     }))
     .unwrap();
@@ -1487,8 +1450,6 @@ fn spatial_pipeline_scans_when_geometry_type_metadata_is_missing() {
       output_wkid: 4326,
       covering: false,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Optimized,
     }))
     .unwrap();
@@ -1538,8 +1499,6 @@ fn spatial_pipeline_rejects_input_wkid_when_crs_metadata_exists() {
       output_wkid: 4326,
       covering: false,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Optimized,
     }))
     .unwrap_err();
@@ -1588,8 +1547,6 @@ fn spatial_pipeline_accepts_single_layer_geopackage_input() {
       output_wkid: 4326,
       covering: false,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Optimized,
     }))
     .unwrap();
@@ -1659,8 +1616,6 @@ fn spatial_pipeline_reprojects_geopackage_polygon_output_to_wgs84() {
       output_wkid: 4326,
       covering: true,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Optimized,
     }))
     .unwrap();
@@ -1808,8 +1763,6 @@ fn spatial_pipeline_selects_requested_geopackage_layer() {
       output_wkid: 4326,
       covering: false,
       overwrite: true,
-      progress: false,
-      explain: false,
       output_mode: OutputMode::Optimized,
     }))
     .unwrap();

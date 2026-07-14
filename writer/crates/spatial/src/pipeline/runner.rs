@@ -1,17 +1,13 @@
 //! Opens validated resources and executes one concrete spatial pipeline.
 
-use std::time::Instant;
-
 use anyhow::{Result, bail};
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
 
-use crate::diagnostics::{configure_explain_session, explain_timing};
 use crate::geoparquet::validate_covering_configuration;
 use crate::input::{InputOpenOptions, InputSource, RowRange, open_input, resolve_source_format};
 use crate::optimized::validate_internal_projection_columns;
 use crate::output::{OutputLayout, OutputMode, validate_output_wkid};
-use crate::progress::{finish_row_bar, row_bar};
 use crate::session::DataFusionSession;
 
 use super::{
@@ -27,7 +23,6 @@ pub async fn run(options: SpatialPipelineOptions) -> Result<SpatialPipelineResul
 impl Pipeline {
   async fn new(options: SpatialPipelineOptions) -> Result<Self> {
     validate_output_wkid(options.output.output_wkid);
-    let started_at = Instant::now();
     let input_format = resolve_source_format(&options.input.location, options.input.format)?;
     let input = open_input(
       input_format,
@@ -44,28 +39,12 @@ impl Pipeline {
     validate_internal_projection_columns(source_schema.as_ref())?;
     let discovered_rows = input.total_rows()?;
     let total_input_rows = options.input.row_range.effective_rows(discovered_rows);
-    explain_run_configuration(
-      options.execution.explain,
-      input.format_name(),
-      &options,
-      discovered_rows,
-      total_input_rows,
-      output_layout.part_count(),
-    );
 
     let session = DataFusionSession::new()?;
-    configure_explain_session(session.context(), options.execution.explain);
-    let input_dataframe = prepare_input_dataframe(
-      input.as_ref(),
-      session.context(),
-      options.input.row_range,
-      options.execution,
-      total_input_rows,
-    )
-    .await?;
+    let input_dataframe =
+      prepare_input_dataframe(input.as_ref(), session.context(), options.input.row_range).await?;
     let output_mode = options.output.mode;
     let state = SpatialPipelineState {
-      started_at,
       _session: session,
       input,
       input_dataframe,
@@ -78,8 +57,7 @@ impl Pipeline {
       output_wkid: options.output.output_wkid,
       covering: options.output.covering,
       compression: options.output.compression,
-      progress: options.execution.progress,
-      explain: options.execution.explain,
+      write_reporter: options.write_reporter,
     };
 
     match PipelineKind::new(output_mode, state.output_layout.part_count())? {
@@ -111,63 +89,13 @@ async fn prepare_input_dataframe(
   input: &dyn InputSource,
   session: &SessionContext,
   row_range: RowRange,
-  execution: super::ExecutionOptions,
-  total_input_rows: u64,
 ) -> Result<DataFrame> {
   let dataframe = input.to_dataframe(session, row_range).await?;
   if row_range.num().is_none() {
     return Ok(dataframe);
   }
 
-  let cache_bar = row_bar(
-    execution.progress,
-    "Caching selected input",
-    total_input_rows,
-  );
-  let cache_start = Instant::now();
-  let dataframe = dataframe.cache().await?;
-  cache_bar.inc(total_input_rows);
-  finish_row_bar(
-    &cache_bar,
-    total_input_rows,
-    "Cached selected input".to_string(),
-  );
-  explain_timing(
-    execution.explain,
-    "Caching selected input",
-    cache_start.elapsed(),
-  );
-  Ok(dataframe)
-}
-
-fn explain_run_configuration(
-  explain: bool,
-  input_format: &str,
-  options: &SpatialPipelineOptions,
-  discovered_rows: u64,
-  effective_rows: u64,
-  output_parts: usize,
-) {
-  if !explain {
-    return;
-  }
-  eprintln!(
-    "[explain] input_format={input_format} discovered_rows={discovered_rows} effective_rows={effective_rows} output_files={output_parts} start={} num={}",
-    options.input.row_range.start(),
-    options
-      .input
-      .row_range
-      .num()
-      .map(|num| num.to_string())
-      .unwrap_or_else(|| "all".to_string())
-  );
-  eprintln!(
-    "[explain] output_path={} output_wkid={} overwrite={} progress={}",
-    options.output.path.display(),
-    options.output.output_wkid,
-    options.output.overwrite,
-    options.execution.progress,
-  );
+  dataframe.cache().await.map_err(Into::into)
 }
 
 #[cfg(test)]

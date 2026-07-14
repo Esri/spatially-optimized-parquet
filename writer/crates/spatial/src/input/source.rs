@@ -132,8 +132,6 @@ pub(crate) async fn open_input(
 
 /// Defines the normalized input contract consumed by output layout resolution.
 pub(crate) trait InputSource: Send + Sync {
-  /// Return a stable display name for diagnostics.
-  fn format_name(&self) -> &'static str;
   /// Load the normalized Arrow schema.
   fn schema(&self) -> Result<SchemaRef>;
   /// Return the row count discovered from source metadata.

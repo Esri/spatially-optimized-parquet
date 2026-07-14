@@ -1,15 +1,13 @@
 //! Applies optimized Parquet writer policy to concrete output paths.
 
 use anyhow::{Context, Result};
-use arrow_array::{Array, UInt64Array};
-use datafusion::dataframe::{DataFrame, DataFrameWriteOptions};
+use datafusion::dataframe::DataFrame;
 
 use crate::optimized::clustering::{cluster_key_column, cluster_partition_column};
 use crate::optimized::{ClusteringFamily, ResolvedOptimization};
-use crate::output::{OutputLayout, ParquetWriterOptions};
-use crate::progress::{WriteStagePhase, finish_spinner, row_bar, write_stage_message};
+use crate::output::{OutputLayout, ParquetWriterOptions, TrackingParquetWriter};
+use crate::pipeline::SharedWriteReporter;
 
-use super::partitioned_sink::PartitionedParquetWriter;
 use super::partitioned_sort::PartitionedSortConfig;
 
 /// Writes one range-partitioned optimized dataset through the custom sink plan.
@@ -17,26 +15,21 @@ pub(super) struct PartitionedOutputWriter<'a> {
   output_layout: &'a OutputLayout,
   compression: Option<&'a str>,
   optimization: &'a ResolvedOptimization,
-  progress: bool,
   total_input_rows: u64,
-  explain: bool,
+  write_reporter: Option<SharedWriteReporter>,
 }
 
-/// Write globally sorted optimized rows through DataFusion's standard single-file API.
+/// Write globally sorted optimized rows through the shared tracking sink.
 pub(super) async fn write_optimized_single_file(
   dataframe: DataFrame,
   output_layout: &OutputLayout,
   compression: Option<&str>,
   metadata: Vec<parquet::file::metadata::KeyValue>,
-  progress: bool,
   total_input_rows: u64,
+  write_reporter: Option<SharedWriteReporter>,
 ) -> Result<u64> {
-  let writer_options = ParquetWriterOptions::new(compression.unwrap_or("snappy"), &metadata)?;
-  let write_bar = row_bar(
-    progress,
-    write_stage_message(WriteStagePhase::Reading, false),
-    total_input_rows,
-  );
+  let writer_options =
+    ParquetWriterOptions::new(compression.unwrap_or("snappy"), &metadata)?.into_datafusion();
   let output_path = output_layout
     .paths()?
     .into_iter()
@@ -44,29 +37,9 @@ pub(super) async fn write_optimized_single_file(
     .context("missing output path")?
     .to_string_lossy()
     .into_owned();
-  let batches = dataframe
-    .write_parquet(
-      &output_path,
-      DataFrameWriteOptions::new().with_single_file_output(true),
-      Some(writer_options.into_datafusion()),
-    )
-    .await?;
-  let batch = batches.first().context("write returned no row count")?;
-  let values = batch
-    .column(0)
-    .as_any()
-    .downcast_ref::<UInt64Array>()
-    .context("write result count column was not UInt64")?;
-  let rows_written = if values.is_empty() {
-    0
-  } else {
-    values.value(0)
-  };
-  finish_spinner(
-    &write_bar,
-    format!("Completed write pipeline ({rows_written} rows)"),
-  );
-  Ok(rows_written)
+  TrackingParquetWriter::new(total_input_rows, write_reporter)
+    .write_single(dataframe, output_path, writer_options)
+    .await
 }
 
 impl<'a> PartitionedOutputWriter<'a> {
@@ -75,17 +48,15 @@ impl<'a> PartitionedOutputWriter<'a> {
     output_layout: &'a OutputLayout,
     compression: Option<&'a str>,
     optimization: &'a ResolvedOptimization,
-    progress: bool,
     total_input_rows: u64,
-    explain: bool,
+    write_reporter: Option<SharedWriteReporter>,
   ) -> Self {
     Self {
       output_layout,
       compression,
       optimization,
-      progress,
       total_input_rows,
-      explain,
+      write_reporter,
     }
   }
 
@@ -97,36 +68,25 @@ impl<'a> PartitionedOutputWriter<'a> {
   ) -> Result<u64> {
     let writer_options =
       ParquetWriterOptions::new(self.compression.unwrap_or("snappy"), &metadata)?.into_datafusion();
-    let write_bar = row_bar(
-      self.progress,
-      write_stage_message(WriteStagePhase::Reading, true),
-      self.total_input_rows,
-    );
     let partition_column = cluster_partition_column(self.optimization.geometry().clustering_family);
     let drop_cluster_key_after_sort = matches!(
       self.optimization.geometry().clustering_family,
       ClusteringFamily::NonPoint
     );
-    let rows_written = PartitionedParquetWriter::new(
-      self.output_layout.path().to_string_lossy().into_owned(),
-      vec![partition_column.to_string()],
-      PartitionedSortConfig::new(
-        partition_column,
-        cluster_key_column(self.optimization.geometry().clustering_family),
-        self.output_layout.part_count(),
-        drop_cluster_key_after_sort,
-      ),
-      writer_options,
-      &write_bar,
-      self.total_input_rows,
-      self.explain,
-    )
-    .write(dataframe)
-    .await?;
-    finish_spinner(
-      &write_bar,
-      format!("Completed write pipeline ({rows_written} rows)"),
+    let partitioned_sort = PartitionedSortConfig::new(
+      partition_column,
+      cluster_key_column(self.optimization.geometry().clustering_family),
+      self.output_layout.part_count(),
+      drop_cluster_key_after_sort,
     );
-    Ok(rows_written)
+    TrackingParquetWriter::new(self.total_input_rows, self.write_reporter)
+      .write_partitioned(
+        dataframe,
+        self.output_layout.path().to_string_lossy().into_owned(),
+        vec![partition_column.to_string()],
+        writer_options,
+        |input| partitioned_sort.insert_into(input),
+      )
+      .await
   }
 }

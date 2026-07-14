@@ -48,7 +48,6 @@ fn open_input_accepts_single_parquet_file() {
       &InputOpenOptions::new(path.to_string_lossy().into_owned(), None),
     ))
     .unwrap();
-  assert_eq!(input.format_name(), "parquet");
   assert_eq!(input.total_rows().unwrap(), 3);
 }
 
@@ -78,7 +77,6 @@ fn open_input_accepts_directory_of_parquet_files() {
       &InputOpenOptions::new(temp.path().to_string_lossy().into_owned(), None),
     ))
     .unwrap();
-  assert_eq!(input.format_name(), "parquet");
   assert_eq!(input.total_rows().unwrap(), 6);
 }
 
