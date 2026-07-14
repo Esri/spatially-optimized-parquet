@@ -20,5 +20,5 @@ pub(crate) use binary_array::{
 pub(crate) use extent::Extent2D;
 pub(crate) use types::{
   GeometryCategory, GeometryEncoding, GeometryKind, GeometryShape, GeometrySpec,
-  geometry_kind_from_wkb,
+  geometry_kind_from_wkb, geometry_kind_from_wkb_type,
 };

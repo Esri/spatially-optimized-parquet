@@ -3699,8 +3699,12 @@ name = "spatial-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arrow-array",
+ "arrow-schema",
  "clap",
+ "parquet",
  "spatial",
+ "tempfile",
  "tokio",
 ]
 

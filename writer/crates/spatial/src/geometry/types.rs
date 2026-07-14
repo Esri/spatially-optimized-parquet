@@ -98,7 +98,9 @@ pub(crate) enum GeometryEncoding {
 }
 
 /// Map a decoded WKB geometry type into the repository geometry taxonomy.
-fn geometry_kind_from_wkb_type(geometry_type: wkb::reader::GeometryType) -> GeometryKind {
+pub(crate) fn geometry_kind_from_wkb_type(
+  geometry_type: wkb::reader::GeometryType,
+) -> GeometryKind {
   match geometry_type {
     wkb::reader::GeometryType::Point => GeometryKind::Point,
     wkb::reader::GeometryType::LineString => GeometryKind::LineString,

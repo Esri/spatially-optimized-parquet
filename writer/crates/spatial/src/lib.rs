@@ -1,4 +1,4 @@
-//! Runs the Spatially Optimized Parquet writer through one stable request façade.
+//! Writes and validates Spatially Optimized Parquet through stable public façades.
 //!
 //! Construct [`SpatialPipelineOptions`] from [`InputOptions`], [`OutputOptions`], and
 //! [`ExecutionOptions`], then pass the request to [`run`]. [`RowRange`] selects source rows,
@@ -6,8 +6,9 @@
 //! GeoParquet output. [`DEFAULT_OUTPUT_WKID`] provides the default output spatial reference.
 //!
 //! [`run`] validates the request, executes the complete DataFusion workflow, writes durable output,
-//! and returns [`SpatialPipelineResult`]. The root façade keeps storage adapters, geometry
-//! processing, optimization algorithms, and output mechanics private.
+//! and automatically validates optimized output before returning [`SpatialPipelineResult`].
+//! [`validate`] inspects an existing file or recursive partitioned directory. The root façade keeps
+//! storage adapters, geometry processing, optimization algorithms, and output mechanics private.
 
 #![warn(missing_docs)]
 
@@ -17,13 +18,19 @@ mod geoparquet;
 mod input;
 mod optimized;
 mod output;
+mod parquet_dataset;
 mod pipeline;
 mod progress;
 #[cfg(test)]
 mod test_support;
+pub mod validate;
 
 pub use input::{RowRange, SourceFormat};
 pub use output::{DEFAULT_OUTPUT_WKID, OutputMode};
 pub use pipeline::{
   ExecutionOptions, InputOptions, OutputOptions, SpatialPipelineOptions, SpatialPipelineResult, run,
+};
+pub use validate::{
+  ValidationFailure, ValidationFinding, ValidationLocation, ValidationReport, ValidationRule,
+  ValidationSeverity, validate,
 };

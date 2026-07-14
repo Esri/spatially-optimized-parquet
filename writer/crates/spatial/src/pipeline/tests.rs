@@ -226,7 +226,7 @@ fn spatial_pipeline_preserves_same_crs_wkb_and_writes_sorted_metadata() {
     &[geoparquet_kv("geometry", &["Point"])],
   );
 
-  runtime()
+  let result = runtime()
     .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
@@ -245,6 +245,11 @@ fn spatial_pipeline_preserves_same_crs_wkb_and_writes_sorted_metadata() {
       output_mode: OutputMode::Optimized,
     }))
     .unwrap();
+  assert!(
+    result
+      .validation_report()
+      .is_some_and(|report| !report.has_errors())
+  );
 
   let df = runtime()
     .block_on(scan_parquet(output.to_str().unwrap()))
@@ -310,7 +315,7 @@ fn spatial_pipeline_writes_covering_bbox_for_reprojected_points() {
     &[geoparquet_kv_with_epsg("geometry", &["Point"], 3857)],
   );
 
-  runtime()
+  let result = runtime()
     .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
@@ -329,6 +334,11 @@ fn spatial_pipeline_writes_covering_bbox_for_reprojected_points() {
       output_mode: OutputMode::Optimized,
     }))
     .unwrap();
+  assert!(
+    result
+      .validation_report()
+      .is_some_and(|report| !report.has_errors())
+  );
 
   let df = runtime()
     .block_on(scan_parquet(output.to_str().unwrap()))
@@ -855,7 +865,7 @@ fn spatial_pipeline_writes_range_partitioned_multi_file_output() {
     &[geoparquet_kv_with_epsg("geometry", &["Point"], 3857)],
   );
 
-  runtime()
+  let result = runtime()
     .block_on(run_test_pipeline(PipelineTestRequest {
       input: input.to_string_lossy().into_owned(),
       input_format: None,
@@ -874,6 +884,11 @@ fn spatial_pipeline_writes_range_partitioned_multi_file_output() {
       output_mode: OutputMode::Optimized,
     }))
     .unwrap();
+  assert!(
+    result
+      .validation_report()
+      .is_some_and(|report| !report.has_errors())
+  );
 
   let df = runtime()
     .block_on(scan_parquet(output_dir.to_str().unwrap()))

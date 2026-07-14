@@ -20,8 +20,11 @@ pub(crate) use columns::{
 pub(in crate::optimized) use datafusion::non_point_geodisplay_expr;
 pub(in crate::optimized) use levels::{GeometryEncoding, create_geometry_encodings};
 use payload::flat_geometry_payload_from_wkb;
-pub(crate) use traversal::geometry_extent_from_wkb;
-pub(in crate::optimized) use traversal::point_xy_from_wkb;
+pub(crate) use traversal::{
+  GeometryPartRole, GeometryPartSink, geometry_extent_from_wkb, point_xy_from_wkb,
+  visit_wkb_geometry,
+};
+pub(crate) use wire::decode_pbf_geometry;
 use wire::{GeometryEncodeScratch, encode_flat_geometry_with_scratch};
 
 #[cfg(test)]

@@ -14,6 +14,7 @@ pub(super) fn encode_quantized_payload_into(
   coords.clear();
   lengths.clear();
   let mut offset = 0usize;
+  let mut degenerated_coordinate = None;
 
   for &length in input_lengths {
     let point_count = length as usize;
@@ -79,11 +80,19 @@ pub(super) fn encode_quantized_payload_into(
     }
 
     if output_length < encoding.min_length as u32 {
+      degenerated_coordinate.get_or_insert((coords[part_start], coords[part_start + 1]));
       coords.truncate(part_start);
     } else {
       lengths.push(output_length);
     }
     offset += point_count * 2;
+  }
+
+  if lengths.is_empty()
+    && let Some((x, y)) = degenerated_coordinate
+  {
+    coords.extend([x, y]);
+    lengths.push(1);
   }
 
   Ok(())
@@ -154,7 +163,7 @@ mod tests {
   }
 
   #[test]
-  fn drops_parts_below_minimum_length() {
+  fn preserves_one_coordinate_for_degenerated_geometry() {
     let mut coords = Vec::new();
     let mut lengths = Vec::new();
     encode_quantized_payload_into(
@@ -165,7 +174,7 @@ mod tests {
       &mut lengths,
     )
     .unwrap();
-    assert!(lengths.is_empty());
-    assert!(coords.is_empty());
+    assert_eq!(lengths, vec![1]);
+    assert_eq!(coords, vec![0, 0]);
   }
 }

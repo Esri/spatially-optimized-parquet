@@ -30,7 +30,7 @@ impl PlainPipeline {
       "Plain GeoParquet",
       &format!("wrote {rows_written} selected rows without optimized clustering"),
     );
-    Ok(state.finish(rows_written))
+    Ok(state.finish_plain(rows_written))
   }
 }
 

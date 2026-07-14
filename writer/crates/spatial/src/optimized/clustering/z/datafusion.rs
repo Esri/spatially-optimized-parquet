@@ -91,6 +91,10 @@ impl ScalarUDFImpl for ZGeometryClusterKeyUdf {
     Ok(DataType::UInt64)
   }
 
+  fn return_field_from_args(&self, _: ReturnFieldArgs) -> DataFusionResult<Arc<Field>> {
+    Ok(Arc::new(Field::new(self.name(), DataType::UInt64, false)))
+  }
+
   fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
     let arrays = ColumnarValue::values_to_arrays(&args.args)?;
     let geometry = arrays
@@ -126,6 +130,10 @@ impl ScalarUDFImpl for ZPointClusterKeyUdf {
 
   fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
     Ok(DataType::UInt64)
+  }
+
+  fn return_field_from_args(&self, _: ReturnFieldArgs) -> DataFusionResult<Arc<Field>> {
+    Ok(Arc::new(Field::new(self.name(), DataType::UInt64, false)))
   }
 
   fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {

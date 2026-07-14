@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -11,6 +10,7 @@ use parquet::arrow::async_reader::ParquetObjectReader;
 use url::Url;
 
 use crate::input::{InputOpenOptions, InputSource};
+use crate::parquet_dataset::{DiscoveryMode, discover_parquet_dataset, load_parquet_metadata};
 
 use super::source::{ParquetInputLocation, ParquetInputSource};
 
@@ -95,44 +95,15 @@ async fn open_http_parquet(location: &str) -> Result<Arc<dyn InputSource>> {
 ///
 /// Returns `None` for unsupported paths so another input provider can attempt them.
 fn discover_parquet_files(input: &Path) -> Result<Option<Vec<PathBuf>>> {
-  if input.is_file() {
-    return Ok(
-      input
-        .extension()
-        .is_some_and(|ext| ext == "parquet")
-        .then(|| vec![input.to_path_buf()]),
-    );
-  }
-
-  if input.is_dir() {
-    let mut files = Vec::new();
-    for entry in fs::read_dir(input)? {
-      let entry = entry?;
-      let path = entry.path();
-      if path.is_file() && path.extension().is_some_and(|ext| ext == "parquet") {
-        files.push(path);
-      }
-    }
-    if files.is_empty() {
-      return Err(anyhow::anyhow!(
-        "no parquet files found at: {}",
-        input.display()
-      ));
-    }
-    files.sort();
-    return Ok(Some(files));
-  }
-
-  Ok(None)
+  Ok(
+    discover_parquet_dataset(input, DiscoveryMode::Flat)?
+      .map(|files| files.into_iter().map(|file| file.path).collect()),
+  )
 }
 
 /// Load Arrow and Parquet metadata from one local file footer.
 fn load_arrow_metadata(file: &Path) -> Result<ArrowReaderMetadata> {
-  ArrowReaderMetadata::load(
-    &fs::File::open(file).with_context(|| format!("open parquet file: {}", file.display()))?,
-    ArrowReaderOptions::new(),
-  )
-  .with_context(|| format!("read arrow metadata: {}", file.display()))
+  load_parquet_metadata(file).with_context(|| format!("read arrow metadata: {}", file.display()))
 }
 
 #[cfg(test)]

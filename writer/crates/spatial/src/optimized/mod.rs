@@ -14,11 +14,14 @@ mod range_boundaries;
 mod state;
 mod write;
 
-pub(crate) use clustering::{bounds_expr, point_expr};
+pub(crate) use clustering::{
+  DEFAULT_XZ_MAX_LEVEL, bounds_expr, extent_xz_code, point_expr, point_z_code,
+};
 pub(crate) use multiscale::{
-  COVERING_BBOX_COLUMN, TEMP_BOUNDS_COLUMN, TEMP_POINT_COORDS_COLUMN,
-  TEMP_REPROJECTED_GEOMETRY_COLUMN, TEMP_XMAX_COLUMN, TEMP_XMIN_COLUMN, TEMP_YMAX_COLUMN,
-  TEMP_YMIN_COLUMN, geometry_extent_from_wkb, validate_internal_projection_columns,
+  COVERING_BBOX_COLUMN, GeometryPartRole, GeometryPartSink, TEMP_BOUNDS_COLUMN,
+  TEMP_POINT_COORDS_COLUMN, TEMP_REPROJECTED_GEOMETRY_COLUMN, TEMP_XMAX_COLUMN, TEMP_XMIN_COLUMN,
+  TEMP_YMAX_COLUMN, TEMP_YMIN_COLUMN, decode_pbf_geometry, geometry_extent_from_wkb,
+  point_xy_from_wkb, validate_internal_projection_columns, visit_wkb_geometry,
 };
 pub(crate) use output::OptimizedOutput;
 

@@ -97,11 +97,23 @@ impl OptimizedPartitionedPipeline {
 }
 
 impl SpatialPipelineState {
-  fn finish(&self, rows_written: u64) -> SpatialPipelineResult {
+  fn finish_plain(&self, rows_written: u64) -> SpatialPipelineResult {
+    self.finish_logging();
+    SpatialPipelineResult::new(rows_written, None)
+  }
+
+  fn finish_validated(&self, rows_written: u64) -> Result<SpatialPipelineResult> {
+    let report = crate::validate::validate(self.output_layout.path())?
+      .ensure_valid()
+      .map_err(anyhow::Error::new)?;
+    self.finish_logging();
+    Ok(SpatialPipelineResult::new(rows_written, Some(report)))
+  }
+
+  fn finish_logging(&self) {
     if self.progress && std::io::stderr().is_terminal() {
       eprintln!("Completed in {}", format_elapsed(self.started_at.elapsed()));
     }
     explain_timing(self.explain, "Total job", self.started_at.elapsed());
-    SpatialPipelineResult::new(rows_written)
   }
 }

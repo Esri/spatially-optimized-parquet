@@ -5,7 +5,7 @@ use crate::geometry::Extent2D;
 use super::super::ClusterKey;
 
 /// Stores the default maximum depth of the XZ hierarchy.
-pub(in crate::optimized) const DEFAULT_XZ_MAX_LEVEL: u32 = 20;
+pub(crate) const DEFAULT_XZ_MAX_LEVEL: u32 = 20;
 
 /// Select the deepest XZ hierarchy level whose cell can contain a feature extent.
 fn extent_xz_level(full_extent: Extent2D, feature_extent: Extent2D, max_depth: u32) -> u32 {
@@ -24,7 +24,7 @@ fn extent_xz_level(full_extent: Extent2D, feature_extent: Extent2D, max_depth: u
 }
 
 /// Encode a feature extent at an XZ hierarchy level that preserves spatial containment.
-pub(super) fn extent_xz_code(
+pub(crate) fn extent_xz_code(
   full_extent: Extent2D,
   feature_extent: Extent2D,
   max_depth: u32,

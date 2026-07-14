@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::{Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::geometry::{Extent2D, GeometryKind};
@@ -32,34 +32,34 @@ pub(crate) struct GeoMetadataInput<'a> {
 }
 
 /// Represents the GeoParquet 1.1 file metadata contract.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub(super) struct GeoMetadata {
-  version: &'static str,
-  primary_column: String,
-  columns: BTreeMap<String, GeoColumnMetadata>,
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct GeoMetadata {
+  pub(crate) version: String,
+  pub(crate) primary_column: String,
+  pub(crate) columns: BTreeMap<String, GeoColumnMetadata>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-struct GeoColumnMetadata {
-  encoding: &'static str,
-  geometry_types: Vec<String>,
-  bbox: [f64; 4],
-  crs: Value,
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct GeoColumnMetadata {
+  pub(crate) encoding: String,
+  pub(crate) geometry_types: Vec<String>,
+  pub(crate) bbox: [f64; 4],
+  pub(crate) crs: Value,
   #[serde(skip_serializing_if = "Option::is_none")]
-  covering: Option<GeoCovering>,
+  pub(crate) covering: Option<GeoCovering>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct GeoCovering {
-  bbox: GeoCoveringBbox,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct GeoCovering {
+  pub(crate) bbox: GeoCoveringBbox,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct GeoCoveringBbox {
-  xmin: [String; 2],
-  ymin: [String; 2],
-  xmax: [String; 2],
-  ymax: [String; 2],
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct GeoCoveringBbox {
+  pub(crate) xmin: Vec<String>,
+  pub(crate) ymin: Vec<String>,
+  pub(crate) xmax: Vec<String>,
+  pub(crate) ymax: Vec<String>,
 }
 
 impl GeoMetadata {
@@ -71,7 +71,7 @@ impl GeoMetadata {
       .map(|geometry_kind| geoparquet_geometry_type_name(geometry_kind, input.has_z, input.has_m))
       .collect::<Result<Vec<_>>>()?;
     let column = GeoColumnMetadata {
-      encoding: "WKB",
+      encoding: "WKB".to_string(),
       geometry_types,
       bbox: [
         input.output_extent.xmin,
@@ -89,7 +89,7 @@ impl GeoMetadata {
         .then(|| GeoCovering::new(input.covering_column)),
     };
     Ok(Self {
-      version: "1.1.0",
+      version: "1.1.0".to_string(),
       primary_column: input.geometry_column.to_string(),
       columns: BTreeMap::from([(input.geometry_column.to_string(), column)]),
     })
@@ -104,10 +104,10 @@ impl GeoCovering {
   fn new(column: &str) -> Self {
     Self {
       bbox: GeoCoveringBbox {
-        xmin: [column.to_string(), "xmin".to_string()],
-        ymin: [column.to_string(), "ymin".to_string()],
-        xmax: [column.to_string(), "xmax".to_string()],
-        ymax: [column.to_string(), "ymax".to_string()],
+        xmin: vec![column.to_string(), "xmin".to_string()],
+        ymin: vec![column.to_string(), "ymin".to_string()],
+        xmax: vec![column.to_string(), "xmax".to_string()],
+        ymax: vec![column.to_string(), "ymax".to_string()],
       },
     }
   }

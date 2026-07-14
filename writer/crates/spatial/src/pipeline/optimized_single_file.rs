@@ -27,6 +27,6 @@ impl OptimizedSingleFilePipeline {
     )
     .await?;
     let rows_written = output.write_single_file().await?;
-    Ok(state.finish(rows_written))
+    state.finish_validated(rows_written)
   }
 }

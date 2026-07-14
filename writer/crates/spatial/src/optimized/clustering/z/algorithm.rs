@@ -8,7 +8,7 @@ use super::super::ClusterKey;
 pub(in crate::optimized) const DEFAULT_COORDINATE_PRECISION: u32 = 20;
 
 /// Quantize a point within the full extent and interleave its x/y bits.
-pub(super) fn point_z_code(
+pub(crate) fn point_z_code(
   full_extent: Extent2D,
   x: f64,
   y: f64,

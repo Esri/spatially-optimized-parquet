@@ -5,7 +5,9 @@ use geo_traits::GeometryTrait;
 #[cfg(test)]
 use geo_types::Geometry;
 
-use super::traversal::{ExtentAccumulator, GeometryPartSink, visit_geometry_for_display};
+use super::traversal::{
+  ExtentAccumulator, GeometryPartRole, GeometryPartSink, visit_geometry_for_display,
+};
 use crate::geometry::Extent2D;
 use crate::optimized::OptimizedGeometryType;
 
@@ -115,7 +117,7 @@ impl PayloadBuilder {
 }
 
 impl GeometryPartSink for PayloadBuilder {
-  fn start_part(&mut self) {
+  fn start_part(&mut self, _: GeometryPartRole) {
     self.current_len = 0;
   }
 

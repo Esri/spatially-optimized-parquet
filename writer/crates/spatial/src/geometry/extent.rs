@@ -1,6 +1,6 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 /// Represents an axis-aligned two-dimensional extent.
 pub(crate) struct Extent2D {
   /// Stores the minimum x coordinate.

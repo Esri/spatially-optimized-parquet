@@ -8,8 +8,9 @@ mod reprojection;
 mod spatial_reference;
 
 pub(crate) use metadata::{
-  GeoMetadataInput, MultiscaleLevelInput, XzClusteringIndexInput, ZClusteringIndexInput,
-  geoparquet_metadata, optimized_point_metadata, optimized_xz_metadata,
+  ESRI_PBF_ENCODING, GEODISPLAY_VERSION, GeoMetadata, GeoMetadataInput, GeodisplayMetadata,
+  MultiscaleLevelInput, XzClusteringIndex, XzClusteringIndexInput, ZClusteringIndex,
+  ZClusteringIndexInput, geoparquet_metadata, optimized_point_metadata, optimized_xz_metadata,
 };
 pub use mode::OutputMode;
 pub(crate) use reprojection::{

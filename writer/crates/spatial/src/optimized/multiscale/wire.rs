@@ -18,11 +18,16 @@ pub(super) struct GeometryEncodeScratch {
 }
 
 #[derive(Clone, PartialEq, Message)]
-struct PbfGeometry {
+pub(crate) struct PbfGeometry {
   #[prost(uint32, repeated, tag = "2")]
-  lengths: Vec<u32>,
+  pub(crate) lengths: Vec<u32>,
   #[prost(sint64, repeated, tag = "3")]
-  coords: Vec<i64>,
+  pub(crate) coords: Vec<i64>,
+}
+
+/// Decode one Esri PBF geometry payload through the writer's wire schema.
+pub(crate) fn decode_pbf_geometry(bytes: &[u8]) -> Result<PbfGeometry> {
+  Ok(PbfGeometry::decode(bytes)?)
 }
 
 /// Quantize and encode a complete geometry payload into a new byte buffer.

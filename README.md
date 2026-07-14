@@ -34,13 +34,23 @@ cargo install
 
 You can then run on a `geopackage` with:
 ```sh
-parquet-opt
+parquet-opt write \
   --input france/gpkg/bdnb.gpkg \
   --layer batiment_groupe_compile \
   --output out.parquet \
   --output-files 1 \
   --overwrite
 ```
+
+Validate an existing optimized file or recursive partitioned dataset with:
+
+```sh
+parquet-opt validate out.parquet
+```
+
+Optimized `parquet-opt write` commands run the same validation automatically after output closes.
+`--no-optimization` writes plain GeoParquet and skips SOP validation. Warnings return exit status
+`0`. Validation errors return non-zero without deleting output.
 
 GeoParquet is also supported. Parquet without geospatial metadata can also be used provided the geometry column is tagged with `--geometry-column`. Add `--covering` to write a GeoParquet 1.1 root `bbox` covering column with `xmin`, `ymin`, `xmax`, and `ymax` fields.
 

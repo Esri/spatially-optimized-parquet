@@ -168,7 +168,14 @@ where:
 
 #### Multiscale Requirements
 
-Multiscale geometry columns must be non-null. Quantization may degenerate geometries, but a degenerated geometry must include at least one coordinate with a single length of `1`. This allows clients to still symbolize these features. When quantized a source geometry  that is null to begin with, write an empty PBF geometry with an empty or missing `coords` and `lengths` array message. For polygons, exterior rings are generally assumed to be clockwise and interior rings, counterclockwise. However, quantization may degenerate polygons and violate that winding order, so clients must handle unexpected winding order for degenerated polygons.
+Multiscale geometry columns may be nullable. A null source geometry may be encoded as a null
+multiscale value or as an empty PBF geometry with an empty or missing `coords` and `lengths` array
+message. A non-null source geometry must produce a non-null multiscale value. Quantization may
+degenerate geometries, but a degenerated geometry must include at least one coordinate with a
+single length of `1`. This allows clients to still symbolize these features. For polygons, exterior
+rings are generally assumed to be clockwise and interior rings, counterclockwise. However,
+quantization may degenerate polygons and violate that winding order, so clients must handle
+unexpected winding order for degenerated polygons.
 
 #### Example
 

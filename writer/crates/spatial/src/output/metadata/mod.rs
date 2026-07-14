@@ -7,8 +7,10 @@ mod parquet;
 use ::parquet::file::metadata::KeyValue;
 use anyhow::Result;
 
-use geo::GeoMetadata;
-use geodisplay::{GeodisplayMetadata, XzClusteringIndex, ZClusteringIndex};
+pub(crate) use geo::GeoMetadata;
+pub(crate) use geodisplay::{
+  ESRI_PBF_ENCODING, GEODISPLAY_VERSION, GeodisplayMetadata, XzClusteringIndex, ZClusteringIndex,
+};
 use parquet::ParquetMetadataSet;
 
 pub(crate) use geo::GeoMetadataInput;

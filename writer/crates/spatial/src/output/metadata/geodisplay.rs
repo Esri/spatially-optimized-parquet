@@ -1,71 +1,84 @@
 //! Defines the geodisplay JSON contract.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::geometry::Extent2D;
 
 use super::parquet::ParquetMetadata;
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+pub(crate) const GEODISPLAY_VERSION: &str = "0.1";
+pub(crate) const ESRI_PBF_ENCODING: &str = "esriPBF";
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub(super) enum GeodisplayMetadata {
+pub(crate) enum GeodisplayMetadata {
   Z(ZClusteringIndex),
   Xz(XzClusteringIndex),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub(super) struct ZClusteringIndex {
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ZClusteringIndex {
   #[serde(rename = "type")]
-  index_type: &'static str,
-  version: &'static str,
-  code: String,
+  pub(crate) index_type: String,
+  pub(crate) version: String,
   #[serde(skip_serializing_if = "Option::is_none")]
-  wkid: Option<u32>,
+  pub(crate) writer: Option<WriterMetadata>,
+  pub(crate) code: String,
   #[serde(skip_serializing_if = "Option::is_none")]
-  wkt: Option<String>,
+  pub(crate) wkid: Option<u32>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub(crate) wkt: Option<String>,
   #[serde(rename = "xColumn")]
-  x_column: String,
+  pub(crate) x_column: String,
   #[serde(rename = "yColumn")]
-  y_column: String,
+  pub(crate) y_column: String,
   #[serde(rename = "zColumn", skip_serializing_if = "Option::is_none")]
-  z_column: Option<String>,
+  pub(crate) z_column: Option<String>,
   #[serde(rename = "mColumn", skip_serializing_if = "Option::is_none")]
-  m_column: Option<String>,
+  pub(crate) m_column: Option<String>,
   #[serde(rename = "coordinatePrecision")]
-  coordinate_precision: u32,
+  pub(crate) coordinate_precision: u32,
   #[serde(rename = "fullExtent")]
-  full_extent: Extent2D,
+  pub(crate) full_extent: Extent2D,
   #[serde(rename = "geometryType")]
-  geometry_type: &'static str,
+  pub(crate) geometry_type: String,
   #[serde(rename = "hasZ")]
-  has_z: bool,
+  pub(crate) has_z: bool,
   #[serde(rename = "hasM")]
-  has_m: bool,
+  pub(crate) has_m: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub(super) struct XzClusteringIndex {
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct XzClusteringIndex {
   #[serde(rename = "type")]
-  index_type: &'static str,
-  version: &'static str,
-  field: String,
-  code: String,
+  pub(crate) index_type: String,
+  pub(crate) version: String,
   #[serde(skip_serializing_if = "Option::is_none")]
-  wkid: Option<u32>,
+  pub(crate) writer: Option<WriterMetadata>,
+  pub(crate) field: String,
+  pub(crate) code: String,
   #[serde(skip_serializing_if = "Option::is_none")]
-  wkt: Option<String>,
-  encoding: String,
+  pub(crate) wkid: Option<u32>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub(crate) wkt: Option<String>,
+  pub(crate) encoding: String,
   #[serde(rename = "geometryType")]
-  geometry_type: String,
+  pub(crate) geometry_type: String,
   #[serde(rename = "fullExtent")]
-  full_extent: Extent2D,
+  pub(crate) full_extent: Extent2D,
   #[serde(rename = "maxLevel")]
-  max_level: u32,
+  pub(crate) max_level: u32,
   #[serde(rename = "hasZ")]
-  has_z: bool,
+  pub(crate) has_z: bool,
   #[serde(rename = "hasM")]
-  has_m: bool,
-  levels: Vec<MultiscaleLevel>,
+  pub(crate) has_m: bool,
+  pub(crate) levels: Vec<MultiscaleLevel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct WriterMetadata {
+  pub(crate) name: String,
+  pub(crate) version: String,
 }
 
 /// Stores point index values before fixed metadata fields are applied.
@@ -130,19 +143,19 @@ pub(crate) struct MultiscaleLevelInput {
   pub(crate) transform_translate: [f64; 4],
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-struct MultiscaleLevel {
-  column: String,
-  level: u16,
-  resolution: f64,
-  scale: f64,
-  transform: QuantizationTransform,
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct MultiscaleLevel {
+  pub(crate) column: String,
+  pub(crate) level: u16,
+  pub(crate) resolution: f64,
+  pub(crate) scale: f64,
+  pub(crate) transform: QuantizationTransform,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-struct QuantizationTransform {
-  scale: [f64; 4],
-  translate: [f64; 4],
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct QuantizationTransform {
+  pub(crate) scale: [f64; 4],
+  pub(crate) translate: [f64; 4],
 }
 
 impl GeodisplayMetadata {
@@ -162,8 +175,9 @@ impl ParquetMetadata for GeodisplayMetadata {
 impl ZClusteringIndex {
   pub(super) fn new(input: ZClusteringIndexInput) -> Self {
     Self {
-      index_type: "z",
-      version: "0.1",
+      index_type: "z".to_string(),
+      version: GEODISPLAY_VERSION.to_string(),
+      writer: None,
       code: input.code,
       wkid: input.wkid,
       wkt: input.wkt,
@@ -173,7 +187,7 @@ impl ZClusteringIndex {
       m_column: None,
       coordinate_precision: input.coordinate_precision,
       full_extent: input.full_extent,
-      geometry_type: "point",
+      geometry_type: "point".to_string(),
       has_z: input.has_z,
       has_m: input.has_m,
     }
@@ -183,8 +197,9 @@ impl ZClusteringIndex {
 impl XzClusteringIndex {
   pub(super) fn new(field: &str, input: XzClusteringIndexInput) -> Self {
     Self {
-      index_type: "xz",
-      version: "0.1",
+      index_type: "xz".to_string(),
+      version: GEODISPLAY_VERSION.to_string(),
+      writer: None,
       field: field.to_string(),
       code: input.code,
       wkid: input.wkid,
