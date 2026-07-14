@@ -256,6 +256,8 @@ fn spatial_pipeline_preserves_same_crs_wkb_and_writes_sorted_metadata() {
   assert!(output_schema.index_of("zCode").is_ok());
   assert!(output_schema.index_of("x").is_ok());
   assert!(output_schema.index_of("y").is_ok());
+  assert!(!output_schema.field_with_name("x").unwrap().is_nullable());
+  assert!(!output_schema.field_with_name("y").unwrap().is_nullable());
   assert_eq!(
     string_value(batch.column_by_name("name").unwrap().as_ref(), 0),
     "early"
@@ -269,16 +271,13 @@ fn spatial_pipeline_preserves_same_crs_wkb_and_writes_sorted_metadata() {
   assert!(kv.contains_key("geo"));
   let geo: serde_json::Value = serde_json::from_str(kv.get("geo").unwrap()).unwrap();
   let geodisplay: serde_json::Value = serde_json::from_str(kv.get("geodisplay").unwrap()).unwrap();
-  assert_eq!(geodisplay["index"]["type"], "z");
-  assert_eq!(geodisplay["index"]["xColumn"], "x");
-  assert_eq!(geodisplay["index"]["yColumn"], "y");
-  assert_eq!(geodisplay["index"]["wkid"], 4326);
-  assert!(
-    geodisplay["index"]["wkt"]
-      .as_str()
-      .unwrap()
-      .contains("WGS 84")
-  );
+  assert_eq!(geodisplay["type"], "z");
+  assert_eq!(geodisplay["version"], "0.1");
+  assert_eq!(geodisplay["geometryType"], "point");
+  assert_eq!(geodisplay["xColumn"], "x");
+  assert_eq!(geodisplay["yColumn"], "y");
+  assert_eq!(geodisplay["wkid"], 4326);
+  assert!(geodisplay["wkt"].as_str().unwrap().contains("WGS 84"));
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["authority"], "EPSG");
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
 }
@@ -448,14 +447,9 @@ fn spatial_pipeline_reprojects_geoparquet_point_output_to_wgs84() {
     ymax: 1.0,
   };
   assert_json_extent(&geo["columns"]["geometry"]["bbox"], selected_extent);
-  assert_json_extent(&geodisplay["index"]["fullExtent"], selected_extent);
-  assert_eq!(geodisplay["index"]["wkid"], 4326);
-  assert!(
-    geodisplay["index"]["wkt"]
-      .as_str()
-      .unwrap()
-      .contains("WGS 84")
-  );
+  assert_json_extent(&geodisplay["fullExtent"], selected_extent);
+  assert_eq!(geodisplay["wkid"], 4326);
+  assert!(geodisplay["wkt"].as_str().unwrap().contains("WGS 84"));
   assert!(!kv.get("geo").unwrap().contains("3857"));
   assert!(!kv.get("geodisplay").unwrap().contains("3857"));
 }
@@ -538,19 +532,15 @@ fn spatial_pipeline_writes_non_point_geodisplay_struct_and_metadata() {
   let kv = kv_map(&output);
   let geo: serde_json::Value = serde_json::from_str(kv.get("geo").unwrap()).unwrap();
   let geodisplay: serde_json::Value = serde_json::from_str(kv.get("geodisplay").unwrap()).unwrap();
-  assert_eq!(geodisplay["parentColumn"], "geodisplay");
-  assert_eq!(geodisplay["index"]["type"], "xz");
-  assert_eq!(geodisplay["index"]["encoding"], "esriPBF");
-  assert_eq!(geodisplay["index"]["wkid"], 4326);
-  assert!(
-    geodisplay["index"]["wkt"]
-      .as_str()
-      .unwrap()
-      .contains("WGS 84")
-  );
+  assert_eq!(geodisplay["field"], "geodisplay");
+  assert_eq!(geodisplay["type"], "xz");
+  assert_eq!(geodisplay["version"], "0.1");
+  assert_eq!(geodisplay["encoding"], "esriPBF");
+  assert_eq!(geodisplay["wkid"], 4326);
+  assert!(geodisplay["wkt"].as_str().unwrap().contains("WGS 84"));
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["authority"], "EPSG");
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
-  let levels = geodisplay["index"]["levels"].as_array().unwrap();
+  let levels = geodisplay["levels"].as_array().unwrap();
   assert_eq!(levels.len(), 9);
   assert_eq!(levels[0]["level"], 0);
   assert_eq!(levels[0]["resolution"], 0.703125);
@@ -953,7 +943,7 @@ fn spatial_pipeline_writes_range_partitioned_multi_file_output() {
         ymax: 8.0,
       },
     );
-    assert_eq!(geodisplay["index"]["wkid"], 4326);
+    assert_eq!(geodisplay["wkid"], 4326);
     assert!(!metadata.get("geo").unwrap().contains("3857"));
     assert!(!metadata.get("geodisplay").unwrap().contains("3857"));
   }
@@ -1739,20 +1729,12 @@ fn spatial_pipeline_reprojects_geopackage_polygon_output_to_wgs84() {
   };
   assert_covering_metadata(&geo);
   assert_json_extent(&geo["columns"]["geometry"]["bbox"], target_extent);
-  assert_json_extent(&geodisplay["index"]["fullExtent"], target_extent);
-  assert_eq!(geodisplay["index"]["wkid"], 4326);
-  assert!(
-    geodisplay["index"]["wkt"]
-      .as_str()
-      .unwrap()
-      .contains("WGS 84")
-  );
-  assert_eq!(geodisplay["index"]["levels"][0]["column"], "level_0");
-  assert_eq!(geodisplay["index"]["levels"][0]["resolution"], 0.703125);
-  assert_eq!(
-    geodisplay["index"]["levels"][0]["transform"]["scale"][0],
-    0.703125
-  );
+  assert_json_extent(&geodisplay["fullExtent"], target_extent);
+  assert_eq!(geodisplay["wkid"], 4326);
+  assert!(geodisplay["wkt"].as_str().unwrap().contains("WGS 84"));
+  assert_eq!(geodisplay["levels"][0]["column"], "level_0");
+  assert_eq!(geodisplay["levels"][0]["resolution"], 0.703125);
+  assert_eq!(geodisplay["levels"][0]["transform"]["scale"][0], 0.703125);
   assert!(!kv.get("geo").unwrap().contains("3857"));
   assert!(!kv.get("geodisplay").unwrap().contains("3857"));
 }
@@ -1846,7 +1828,7 @@ fn spatial_pipeline_selects_requested_geopackage_layer() {
   let geo: serde_json::Value = serde_json::from_str(kv.get("geo").unwrap()).unwrap();
   let geodisplay: serde_json::Value = serde_json::from_str(kv.get("geodisplay").unwrap()).unwrap();
   assert_eq!(geo["primary_column"], "geometry");
-  assert_eq!(geodisplay["index"]["type"], "xz");
+  assert_eq!(geodisplay["type"], "xz");
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["authority"], "EPSG");
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
 }

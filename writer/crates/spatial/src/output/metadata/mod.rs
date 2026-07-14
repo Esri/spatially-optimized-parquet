@@ -41,13 +41,13 @@ pub(crate) fn optimized_point_metadata(
 pub(crate) fn optimized_xz_metadata(
   source_entries: Vec<KeyValue>,
   geo_input: GeoMetadataInput<'_>,
-  parent_column: &str,
+  field: &str,
   index_input: XzClusteringIndexInput,
 ) -> Result<Vec<KeyValue>> {
   optimized_metadata(
     source_entries,
     geo_input,
-    GeodisplayMetadata::xz_with_parent(parent_column, XzClusteringIndex::new(index_input)),
+    GeodisplayMetadata::xz(XzClusteringIndex::new(field, index_input)),
   )
 }
 

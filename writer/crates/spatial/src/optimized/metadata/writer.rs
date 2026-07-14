@@ -6,8 +6,8 @@ use parquet::file::metadata::KeyValue;
 use crate::geometry::GeometryKind;
 use crate::optimized::clustering::{DEFAULT_COORDINATE_PRECISION, DEFAULT_XZ_MAX_LEVEL};
 use crate::optimized::multiscale::{
-  BOUNDS_COLUMN, COVERING_BBOX_COLUMN, GEODISPLAY_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN,
-  POINT_Z_CODE_COLUMN, XZ_CODE_COLUMN,
+  COVERING_BBOX_COLUMN, GEODISPLAY_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_CODE_COLUMN,
+  XZ_CODE_COLUMN,
 };
 use crate::optimized::{ClusteringFamily, ResolvedOptimization};
 use crate::output::{
@@ -62,7 +62,6 @@ impl ResolvedOptimization {
           code: XZ_CODE_COLUMN.to_string(),
           encoding: "esriPBF".to_string(),
           geometry_type: self.geometry().geometry_type.as_str().to_string(),
-          bounds: BOUNDS_COLUMN.to_string(),
           full_extent: self.target_extent(),
           max_level: DEFAULT_XZ_MAX_LEVEL,
           wkid: self.reprojection().target_spatial_reference().wkid,

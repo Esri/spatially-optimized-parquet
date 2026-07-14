@@ -7,15 +7,8 @@ use crate::geometry::Extent2D;
 use super::parquet::ParquetMetadata;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub(super) struct GeodisplayMetadata {
-  #[serde(rename = "parentColumn")]
-  parent_column: Option<String>,
-  index: ClusteringIndex,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
-enum ClusteringIndex {
+pub(super) enum GeodisplayMetadata {
   Z(ZClusteringIndex),
   Xz(XzClusteringIndex),
 }
@@ -24,8 +17,11 @@ enum ClusteringIndex {
 pub(super) struct ZClusteringIndex {
   #[serde(rename = "type")]
   index_type: &'static str,
+  version: &'static str,
   code: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
   wkid: Option<u32>,
+  #[serde(skip_serializing_if = "Option::is_none")]
   wkt: Option<String>,
   #[serde(rename = "xColumn")]
   x_column: String,
@@ -39,6 +35,8 @@ pub(super) struct ZClusteringIndex {
   coordinate_precision: u32,
   #[serde(rename = "fullExtent")]
   full_extent: Extent2D,
+  #[serde(rename = "geometryType")]
+  geometry_type: &'static str,
   #[serde(rename = "hasZ")]
   has_z: bool,
   #[serde(rename = "hasM")]
@@ -49,13 +47,16 @@ pub(super) struct ZClusteringIndex {
 pub(super) struct XzClusteringIndex {
   #[serde(rename = "type")]
   index_type: &'static str,
+  version: &'static str,
+  field: String,
   code: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
   wkid: Option<u32>,
+  #[serde(skip_serializing_if = "Option::is_none")]
   wkt: Option<String>,
   encoding: String,
   #[serde(rename = "geometryType")]
   geometry_type: String,
-  bounds: String,
   #[serde(rename = "fullExtent")]
   full_extent: Extent2D,
   #[serde(rename = "maxLevel")]
@@ -97,8 +98,6 @@ pub(crate) struct XzClusteringIndexInput {
   pub(crate) encoding: String,
   /// Names the geodisplay geometry category.
   pub(crate) geometry_type: String,
-  /// Names the feature bounds field.
-  pub(crate) bounds: String,
   /// Stores the indexed dataset extent.
   pub(crate) full_extent: Extent2D,
   /// Stores the maximum XZ hierarchy depth.
@@ -148,17 +147,11 @@ struct QuantizationTransform {
 
 impl GeodisplayMetadata {
   pub(super) fn point(index: ZClusteringIndex) -> Self {
-    Self {
-      parent_column: None,
-      index: ClusteringIndex::Z(index),
-    }
+    Self::Z(index)
   }
 
-  pub(super) fn xz_with_parent(parent_column: &str, index: XzClusteringIndex) -> Self {
-    Self {
-      parent_column: Some(parent_column.to_string()),
-      index: ClusteringIndex::Xz(index),
-    }
+  pub(super) fn xz(index: XzClusteringIndex) -> Self {
+    Self::Xz(index)
   }
 }
 
@@ -170,6 +163,7 @@ impl ZClusteringIndex {
   pub(super) fn new(input: ZClusteringIndexInput) -> Self {
     Self {
       index_type: "z",
+      version: "0.1",
       code: input.code,
       wkid: input.wkid,
       wkt: input.wkt,
@@ -179,6 +173,7 @@ impl ZClusteringIndex {
       m_column: None,
       coordinate_precision: input.coordinate_precision,
       full_extent: input.full_extent,
+      geometry_type: "point",
       has_z: input.has_z,
       has_m: input.has_m,
     }
@@ -186,15 +181,16 @@ impl ZClusteringIndex {
 }
 
 impl XzClusteringIndex {
-  pub(super) fn new(input: XzClusteringIndexInput) -> Self {
+  pub(super) fn new(field: &str, input: XzClusteringIndexInput) -> Self {
     Self {
       index_type: "xz",
+      version: "0.1",
+      field: field.to_string(),
       code: input.code,
       wkid: input.wkid,
       wkt: input.wkt,
       encoding: input.encoding,
       geometry_type: input.geometry_type,
-      bounds: input.bounds,
       full_extent: input.full_extent,
       max_level: input.max_level,
       has_z: input.has_z,

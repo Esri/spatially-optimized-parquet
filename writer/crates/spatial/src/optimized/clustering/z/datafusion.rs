@@ -12,8 +12,8 @@ use datafusion::common::cast::{
 };
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
 use datafusion::logical_expr::{
-  ColumnarValue, Expr, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature,
-  Volatility,
+  ColumnarValue, Expr, ReturnFieldArgs, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature,
+  TypeSignature, Volatility,
 };
 use datafusion::prelude::{col, lit};
 
@@ -42,6 +42,14 @@ impl ScalarUDFImpl for PointUdf {
 
   fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
     Ok(DataType::Struct(point_fields()))
+  }
+
+  fn return_field_from_args(&self, _: ReturnFieldArgs) -> DataFusionResult<Arc<Field>> {
+    Ok(Arc::new(Field::new(
+      self.name(),
+      DataType::Struct(point_fields()),
+      false,
+    )))
   }
 
   fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
@@ -164,24 +172,19 @@ where
   let mut xs = Vec::with_capacity(array.len());
   let mut ys = Vec::with_capacity(array.len());
   for index in 0..array.len() {
-    match array.value_opt(index) {
-      Some(bytes) => {
-        let (x, y) = point_xy_from_wkb(bytes).map_err(to_datafusion_error)?;
-        xs.push(Some(x));
-        ys.push(Some(y));
-      }
-      None => {
-        xs.push(None);
-        ys.push(None);
-      }
-    }
+    let (x, y) = array
+      .value_opt(index)
+      .and_then(|bytes| point_xy_from_wkb(bytes).ok())
+      .unwrap_or((f64::NAN, f64::NAN));
+    xs.push(x);
+    ys.push(y);
   }
   let x_array = Float64Array::from(xs);
   let y_array = Float64Array::from(ys);
   StructArray::try_new(
     point_fields(),
-    vec![Arc::new(x_array.clone()), Arc::new(y_array)],
-    x_array.nulls().cloned(),
+    vec![Arc::new(x_array), Arc::new(y_array)],
+    None,
   )
   .map_err(to_datafusion_error)
 }
@@ -191,8 +194,8 @@ fn point_fields() -> Fields {
   FIELDS
     .get_or_init(|| {
       Fields::from(vec![
-        Arc::new(Field::new("x", DataType::Float64, true)),
-        Arc::new(Field::new("y", DataType::Float64, true)),
+        Arc::new(Field::new("x", DataType::Float64, false)),
+        Arc::new(Field::new("y", DataType::Float64, false)),
       ])
     })
     .clone()
@@ -266,4 +269,55 @@ fn first_f64(array: &ArrayRef) -> DataFusionResult<f64> {
     ));
   }
   Ok(array.value(0))
+}
+
+#[cfg(test)]
+mod tests {
+  use arrow_array::BinaryArray;
+  use geo_types::{Geometry, Point};
+
+  use super::*;
+
+  #[test]
+  fn point_coordinates_are_required_and_use_nan_for_missing_or_invalid_geometry() {
+    let mut point_wkb = Vec::new();
+    wkb::writer::write_geometry(
+      &mut point_wkb,
+      &Geometry::Point(Point::new(1.0, 2.0)),
+      &Default::default(),
+    )
+    .unwrap();
+    let invalid_wkb = [0_u8, 1, 2];
+    let input = BinaryArray::from(vec![
+      Some(point_wkb.as_slice()),
+      None,
+      Some(invalid_wkb.as_slice()),
+    ]);
+
+    let coordinates = point_coords_struct(&input).unwrap();
+    let x = coordinates
+      .column_by_name("x")
+      .unwrap()
+      .as_any()
+      .downcast_ref::<Float64Array>()
+      .unwrap();
+    let y = coordinates
+      .column_by_name("y")
+      .unwrap()
+      .as_any()
+      .downcast_ref::<Float64Array>()
+      .unwrap();
+
+    assert!(!coordinates.fields()[0].is_nullable());
+    assert!(!coordinates.fields()[1].is_nullable());
+    assert_eq!(coordinates.null_count(), 0);
+    assert_eq!(x.null_count(), 0);
+    assert_eq!(y.null_count(), 0);
+    assert_eq!(x.value(0), 1.0);
+    assert_eq!(y.value(0), 2.0);
+    assert!(x.value(1).is_nan());
+    assert!(y.value(1).is_nan());
+    assert!(x.value(2).is_nan());
+    assert!(y.value(2).is_nan());
+  }
 }

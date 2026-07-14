@@ -160,24 +160,22 @@ fn point_geodisplay_metadata_serializes_z_clustering() {
   assert_eq!(
     values["geodisplay"],
     json!({
-      "parentColumn": null,
-      "index": {
-        "type": "z",
-        "code": "zCode",
-        "wkid": 4326,
-        "wkt": null,
-        "xColumn": "x",
-        "yColumn": "y",
-        "coordinatePrecision": 20,
-        "fullExtent": {
-          "xmin": -180.0,
-          "ymin": -90.0,
-          "xmax": 180.0,
-          "ymax": 90.0
-        },
-        "hasZ": false,
-        "hasM": false
-      }
+      "type": "z",
+      "version": "0.1",
+      "code": "zCode",
+      "wkid": 4326,
+      "xColumn": "x",
+      "yColumn": "y",
+      "coordinatePrecision": 20,
+      "fullExtent": {
+        "xmin": -180.0,
+        "ymin": -90.0,
+        "xmax": 180.0,
+        "ymax": 90.0
+      },
+      "geometryType": "point",
+      "hasZ": false,
+      "hasM": false
     })
   );
 }
@@ -195,7 +193,6 @@ fn xz_geodisplay_metadata_serializes_multiscale_clustering() {
         code: "xzCode".to_string(),
         encoding: "esriPBF".to_string(),
         geometry_type: "polygon".to_string(),
-        bounds: "bounds".to_string(),
         full_extent: Extent2D {
           xmin: -10.0,
           ymin: -5.0,
@@ -223,35 +220,32 @@ fn xz_geodisplay_metadata_serializes_multiscale_clustering() {
   assert_eq!(
     values["geodisplay"],
     json!({
-      "parentColumn": "geodisplay",
-      "index": {
-        "type": "xz",
-        "code": "xzCode",
-        "wkid": 4326,
-        "wkt": null,
-        "encoding": "esriPBF",
-        "geometryType": "polygon",
-        "bounds": "bounds",
-        "fullExtent": {
-          "xmin": -10.0,
-          "ymin": -5.0,
-          "xmax": 10.0,
-          "ymax": 5.0
-        },
-        "maxLevel": 20,
-        "hasZ": false,
-        "hasM": false,
-        "levels": [{
-          "column": "level_0",
-          "level": 0,
-          "resolution": 0.703125,
-          "scale": 295829355.4545656,
-          "transform": {
-            "scale": [0.703125, 0.703125, 1.0, 1.0],
-            "translate": [0.0, 0.0, 0.0, 0.0]
-          }
-        }]
-      }
+      "type": "xz",
+      "version": "0.1",
+      "field": "geodisplay",
+      "code": "xzCode",
+      "wkid": 4326,
+      "encoding": "esriPBF",
+      "geometryType": "polygon",
+      "fullExtent": {
+        "xmin": -10.0,
+        "ymin": -5.0,
+        "xmax": 10.0,
+        "ymax": 5.0
+      },
+      "maxLevel": 20,
+      "hasZ": false,
+      "hasM": false,
+      "levels": [{
+        "column": "level_0",
+        "level": 0,
+        "resolution": 0.703125,
+        "scale": 295829355.4545656,
+        "transform": {
+          "scale": [0.703125, 0.703125, 1.0, 1.0],
+          "translate": [0.0, 0.0, 0.0, 0.0]
+        }
+      }]
     })
   );
 }
