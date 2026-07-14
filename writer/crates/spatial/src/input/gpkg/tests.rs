@@ -300,7 +300,7 @@ fn geopackage_input_can_produce_dataframe_for_execution() {
   );
 
   let input = open_gpkg_input(&path, None);
-  let session = DataFusionSession::new().unwrap();
+  let session = DataFusionSession::new(None, None).unwrap();
   let rows = runtime().block_on(async {
     let df = input
       .to_dataframe(session.context(), RowRange::new(0, Some(1)))
@@ -349,7 +349,7 @@ fn geopackage_dataframe_uses_partitioned_scan_for_full_reads() {
   );
 
   let input = open_gpkg_input(&path, None);
-  let session = DataFusionSession::new().unwrap();
+  let session = DataFusionSession::new(None, None).unwrap();
   let (ids, saw_partitioned_node) = runtime().block_on(async {
     let df = input
       .to_dataframe(session.context(), RowRange::default())
@@ -438,7 +438,7 @@ fn geopackage_dataframe_limit_uses_partitioned_scan_path() {
   );
 
   let input = open_gpkg_input(&path, None);
-  let session = DataFusionSession::new().unwrap();
+  let session = DataFusionSession::new(None, None).unwrap();
   let (row_count, ids, saw_partitioned_node) = runtime().block_on(async {
     let df = input
       .to_dataframe(session.context(), RowRange::new(0, Some(3)))

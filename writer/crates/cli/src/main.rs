@@ -50,6 +50,27 @@ struct WriteCommand {
   output: PathBuf,
   #[arg(long, value_name = "N")]
   output_files: Option<usize>,
+  #[arg(
+    long = "memory",
+    value_name = "GB",
+    value_parser = parse_memory_gb,
+    help = "Set the DataFusion memory pool in whole GiB; defaults to half of total physical memory"
+  )]
+  memory_limit_bytes: Option<usize>,
+  #[arg(
+    long = "sort-concurrency",
+    value_name = "N",
+    value_parser = parse_sort_concurrency,
+    help = "Set DataFusion sort concurrency; defaults to the available CPU core count"
+  )]
+  sort_concurrency: Option<usize>,
+  #[arg(
+    long,
+    value_name = "N",
+    value_parser = parse_cores,
+    help = "Set Tokio worker threads; defaults to the available CPU core count"
+  )]
+  cores: Option<usize>,
   #[arg(long, value_name = "STRING")]
   compression: Option<String>,
   #[arg(long, value_name = "N", value_parser = parse_start, help = "Skip the first N input rows before processing")]
@@ -105,10 +126,18 @@ struct ValidateCommand {
   path: PathBuf,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
   let cli = Cli::parse();
-  run(cli).await
+  let worker_threads = match &cli.command {
+    Command::Write(args) => args.cores,
+    Command::Validate(_) => None,
+  };
+  let mut runtime = tokio::runtime::Builder::new_multi_thread();
+  runtime.enable_all();
+  if let Some(worker_threads) = worker_threads {
+    runtime.worker_threads(worker_threads);
+  }
+  runtime.build()?.block_on(run(cli))
 }
 
 async fn run(cli: Cli) -> Result<()> {
@@ -135,12 +164,14 @@ async fn run(cli: Cli) -> Result<()> {
 
 impl From<WriteCommand> for SpatialPipelineOptions {
   fn from(args: WriteCommand) -> Self {
+    let memory_limit_bytes = args.memory_limit_bytes;
+    let sort_concurrency = args.sort_concurrency;
     let output_mode = if args.no_optimization {
       OutputMode::Plain
     } else {
       OutputMode::Optimized
     };
-    Self::new(
+    let mut options = Self::new(
       InputOptions::new(
         args.input,
         args.input_format,
@@ -158,7 +189,14 @@ impl From<WriteCommand> for SpatialPipelineOptions {
         args.covering,
         args.overwrite,
       ),
-    )
+    );
+    if let Some(memory_limit_bytes) = memory_limit_bytes {
+      options = options.with_memory_limit_bytes(memory_limit_bytes);
+    }
+    if let Some(sort_concurrency) = sort_concurrency {
+      options = options.with_target_partitions(sort_concurrency);
+    }
+    options
   }
 }
 
@@ -182,6 +220,34 @@ fn parse_num(value: &str) -> Result<usize, String> {
     return Err("--num must be >= 1".to_string());
   }
   Ok(num)
+}
+
+/// Parse a non-zero whole-GiB DataFusion memory limit.
+fn parse_memory_gb(value: &str) -> Result<usize, String> {
+  let memory_gb = parse_positive_usize(value, "--memory")?;
+  memory_gb
+    .checked_mul(1024 * 1024 * 1024)
+    .ok_or_else(|| format!("value for --memory is too large: {value}"))
+}
+
+/// Parse a non-zero DataFusion sort concurrency.
+fn parse_sort_concurrency(value: &str) -> Result<usize, String> {
+  parse_positive_usize(value, "--sort-concurrency")
+}
+
+/// Parse a non-zero Tokio worker-thread count.
+fn parse_cores(value: &str) -> Result<usize, String> {
+  parse_positive_usize(value, "--cores")
+}
+
+fn parse_positive_usize(value: &str, option: &str) -> Result<usize, String> {
+  let parsed = value
+    .parse::<usize>()
+    .map_err(|_| format!("invalid value for {option}: {value}"))?;
+  if parsed == 0 {
+    return Err(format!("{option} must be >= 1"));
+  }
+  Ok(parsed)
 }
 
 #[cfg(test)]
@@ -226,6 +292,51 @@ mod tests {
       panic!("expected write command");
     };
     assert!(args.no_progress);
+  }
+
+  #[test]
+  fn write_subcommand_accepts_resource_limits() {
+    let cli = Cli::try_parse_from([
+      "parquet-opt",
+      "write",
+      "--input",
+      "input.parquet",
+      "--output",
+      "output.parquet",
+      "--memory",
+      "8",
+      "--sort-concurrency",
+      "6",
+      "--cores",
+      "4",
+    ])
+    .unwrap();
+
+    let Command::Write(args) = cli.command else {
+      panic!("expected write command");
+    };
+    assert_eq!(args.memory_limit_bytes, Some(8 * 1024 * 1024 * 1024));
+    assert_eq!(args.sort_concurrency, Some(6));
+    assert_eq!(args.cores, Some(4));
+  }
+
+  #[test]
+  fn write_subcommand_rejects_zero_resource_limits() {
+    for option in ["--memory", "--sort-concurrency", "--cores"] {
+      let error = Cli::try_parse_from([
+        "parquet-opt",
+        "write",
+        "--input",
+        "input.parquet",
+        "--output",
+        "output.parquet",
+        option,
+        "0",
+      ])
+      .unwrap_err();
+
+      assert!(error.to_string().contains("must be >= 1"));
+    }
   }
 
   #[test]

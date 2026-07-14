@@ -220,7 +220,7 @@ fn parquet_input_can_produce_dataframe_for_execution() {
       &InputOpenOptions::new(path.to_string_lossy().into_owned(), None),
     ))
     .unwrap();
-  let session = DataFusionSession::new().unwrap();
+  let session = DataFusionSession::new(None, None).unwrap();
 
   let rows = runtime().block_on(async {
     let df = input

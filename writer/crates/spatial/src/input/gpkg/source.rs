@@ -11,20 +11,18 @@ use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use gdal::vector::LayerAccess;
 
-use crate::geometry::{GeometryEncoding, GeometrySpec};
-#[cfg(test)]
-use crate::input::source::InputBatchStream;
-use crate::input::{
-  InputOpenOptions, InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata,
-};
-use crate::session::DataFusionSession;
-
 use super::batch_reader::load_schema;
 #[cfg(test)]
 use super::batch_reader::{batch_stream, open_gpkg_batch_reader};
 use super::metadata::{collect_layer_summaries, select_layer_name};
 use super::open::{is_gpkg_path, open_gpkg_dataset};
 use super::partition::{GpkgPartitionStream, plan_gpkg_scan_partitions};
+use crate::geometry::{GeometryEncoding, GeometrySpec};
+#[cfg(test)]
+use crate::input::source::InputBatchStream;
+use crate::input::{
+  InputOpenOptions, InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata,
+};
 
 #[derive(Debug, Clone)]
 /// Stores normalized GeoPackage metadata and constructs GDAL-backed batch streams.
@@ -144,7 +142,7 @@ impl InputSource for GpkgInputSource {
         &layer_name,
         total_rows,
         row_range,
-        DataFusionSession::target_partition_count(),
+        ctx.copied_config().target_partitions(),
       )?;
       let streams: Vec<_> = partitions
         .into_iter()

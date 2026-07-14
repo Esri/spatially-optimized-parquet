@@ -171,7 +171,7 @@ mod tests {
     .unwrap();
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
-      let session = DataFusionSession::new().unwrap();
+      let session = DataFusionSession::new(None, None).unwrap();
       let dataframe = session.context().read_batch(batch).unwrap();
       let physical_plan = dataframe.create_physical_plan().await.unwrap();
       let rewritten = PartitionedSortConfig::new(point_range_column, POINT_Z_CODE_COLUMN, 2, false)

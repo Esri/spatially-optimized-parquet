@@ -38,7 +38,7 @@ impl Pipeline {
     let discovered_rows = input.total_rows()?;
     let total_input_rows = options.input.row_range.effective_rows(discovered_rows);
 
-    let session = DataFusionSession::new()?;
+    let session = DataFusionSession::new(options.memory_limit_bytes, options.target_partitions)?;
     let input_dataframe =
       prepare_input_dataframe(input.as_ref(), session.context(), options.input.row_range).await?;
     let output_mode = options.output.mode;

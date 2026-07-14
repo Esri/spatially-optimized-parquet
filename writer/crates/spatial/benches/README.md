@@ -24,3 +24,14 @@ Filter to one case when measuring a specific path:
 cargo bench -p spatial --bench writer -- polygon/optimized_single
 cargo bench -p spatial --bench writer -- optimized_partitioned
 ```
+
+Print the independent DataFusion physical plans for one case without collecting Criterion samples:
+
+```sh
+cargo bench -p spatial --bench writer --features print-plan -- \
+  polygon/optimized_partitioned_8 --test
+```
+
+Partitioned output prints the cluster-boundary aggregate and final sink plans. Extent aggregation
+also prints when reprojection, row selection, or missing source metadata disables the metadata
+fast path.

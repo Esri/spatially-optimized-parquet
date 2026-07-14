@@ -31,6 +31,7 @@ tokio = { version = "1.48", features = ["rt-multi-thread"] }
 wkb = "0.9"
 object_store = { version = "0.12", features = ["http"] }
 url = "2.5"
+sysinfo = { version = "0.37.2", default-features = false, features = ["system"] }
 
 [dev-dependencies]
 criterion = "0.7"

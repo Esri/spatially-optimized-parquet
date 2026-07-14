@@ -80,6 +80,8 @@ impl OutputOptions {
 pub struct SpatialPipelineOptions {
   pub(super) input: InputOptions,
   pub(super) output: OutputOptions,
+  pub(super) memory_limit_bytes: Option<usize>,
+  pub(super) target_partitions: Option<usize>,
   pub(super) write_reporter: Option<SharedWriteReporter>,
 }
 
@@ -89,8 +91,22 @@ impl SpatialPipelineOptions {
     Self {
       input,
       output,
+      memory_limit_bytes: None,
+      target_partitions: None,
       write_reporter: None,
     }
+  }
+
+  /// Override the DataFusion memory-pool limit in bytes.
+  pub fn with_memory_limit_bytes(mut self, memory_limit_bytes: usize) -> Self {
+    self.memory_limit_bytes = Some(memory_limit_bytes);
+    self
+  }
+
+  /// Override the DataFusion execution partition count.
+  pub fn with_target_partitions(mut self, target_partitions: usize) -> Self {
+    self.target_partitions = Some(target_partitions);
+    self
   }
 
   /// Attach an optional callback for cumulative output row counts.
