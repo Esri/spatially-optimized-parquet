@@ -1,4 +1,4 @@
-//! Defines the `parquet-opt` write and validation process boundary.
+//! Defines the `sop` write and validation process boundary.
 //!
 //! This module deliberately contains no storage-format or geometry logic. Clap validates
 //! argument shape, the local parsers enforce row-range constraints, and [`run`] maps the
@@ -254,7 +254,7 @@ mod tests {
   #[test]
   fn write_subcommand_preserves_existing_arguments() {
     let cli = Cli::try_parse_from([
-      "parquet-opt",
+      "sop",
       "write",
       "--input",
       "input.parquet",
@@ -275,7 +275,7 @@ mod tests {
   #[test]
   fn write_subcommand_accepts_no_progress() {
     let cli = Cli::try_parse_from([
-      "parquet-opt",
+      "sop",
       "write",
       "--input",
       "input.parquet",
@@ -294,7 +294,7 @@ mod tests {
   #[test]
   fn write_subcommand_accepts_resource_limits() {
     let cli = Cli::try_parse_from([
-      "parquet-opt",
+      "sop",
       "write",
       "--input",
       "input.parquet",
@@ -321,7 +321,7 @@ mod tests {
   fn write_subcommand_rejects_zero_resource_limits() {
     for option in ["--memory", "--sort-concurrency", "--cores"] {
       let error = Cli::try_parse_from([
-        "parquet-opt",
+        "sop",
         "write",
         "--input",
         "input.parquet",
@@ -339,7 +339,7 @@ mod tests {
   #[test]
   fn write_subcommand_rejects_removed_explain() {
     let error = Cli::try_parse_from([
-      "parquet-opt",
+      "sop",
       "write",
       "--input",
       "input.parquet",
@@ -358,8 +358,7 @@ mod tests {
 
   #[test]
   fn validate_subcommand_accepts_one_path() {
-    let cli =
-      Cli::try_parse_from(["parquet-opt", "validate", "output"]).expect("validate arguments");
+    let cli = Cli::try_parse_from(["sop", "validate", "output"]).expect("validate arguments");
 
     let Command::Validate(args) = cli.command else {
       panic!("expected validate command");

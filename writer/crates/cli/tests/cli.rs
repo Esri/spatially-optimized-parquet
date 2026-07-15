@@ -48,7 +48,7 @@ fn validation_runs_only_through_validate_subcommand() {
   let output = temp.path().join("output.parquet");
   write_point_input(&input);
 
-  let result = Command::new(env!("CARGO_BIN_EXE_parquet-opt"))
+  let result = Command::new(env!("CARGO_BIN_EXE_sop"))
     .args([
       "write",
       "--input",
@@ -75,7 +75,7 @@ fn validation_runs_only_through_validate_subcommand() {
   assert!(!stdout.contains("SOP-META"));
   assert!(output.exists());
 
-  let validation = Command::new(env!("CARGO_BIN_EXE_parquet-opt"))
+  let validation = Command::new(env!("CARGO_BIN_EXE_sop"))
     .args(["validate", output.to_str().unwrap()])
     .output()
     .unwrap();
@@ -92,7 +92,7 @@ fn write_subcommand_renders_live_and_final_written_count() {
   let output = temp.path().join("output.parquet");
   write_point_input(&input);
 
-  let result = Command::new(env!("CARGO_BIN_EXE_parquet-opt"))
+  let result = Command::new(env!("CARGO_BIN_EXE_sop"))
     .args([
       "write",
       "--input",
@@ -125,7 +125,7 @@ fn no_progress_suppresses_live_updates_but_keeps_final_count() {
   let output = temp.path().join("output.parquet");
   write_point_input(&input);
 
-  let result = Command::new(env!("CARGO_BIN_EXE_parquet-opt"))
+  let result = Command::new(env!("CARGO_BIN_EXE_sop"))
     .args([
       "write",
       "--input",
@@ -151,7 +151,7 @@ fn no_progress_suppresses_live_updates_but_keeps_final_count() {
 
 #[test]
 fn write_subcommand_rejects_removed_explain() {
-  let result = Command::new(env!("CARGO_BIN_EXE_parquet-opt"))
+  let result = Command::new(env!("CARGO_BIN_EXE_sop"))
     .args([
       "write",
       "--input",
@@ -173,7 +173,7 @@ fn validate_subcommand_exits_zero_for_warnings() {
   let input = temp.path().join("input.parquet");
   let output = temp.path().join("output.parquet");
   write_point_input(&input);
-  let write = Command::new(env!("CARGO_BIN_EXE_parquet-opt"))
+  let write = Command::new(env!("CARGO_BIN_EXE_sop"))
     .args([
       "write",
       "--input",
@@ -190,7 +190,7 @@ fn validate_subcommand_exits_zero_for_warnings() {
     .unwrap();
   assert!(write.status.success());
 
-  let result = Command::new(env!("CARGO_BIN_EXE_parquet-opt"))
+  let result = Command::new(env!("CARGO_BIN_EXE_sop"))
     .args(["validate", output.to_str().unwrap()])
     .output()
     .unwrap();
@@ -207,7 +207,7 @@ fn validate_subcommand_exits_nonzero_for_errors_and_preserves_output() {
   let input = temp.path().join("input.parquet");
   let output = temp.path().join("plain.parquet");
   write_point_input(&input);
-  let write = Command::new(env!("CARGO_BIN_EXE_parquet-opt"))
+  let write = Command::new(env!("CARGO_BIN_EXE_sop"))
     .args([
       "write",
       "--input",
@@ -226,7 +226,7 @@ fn validate_subcommand_exits_nonzero_for_errors_and_preserves_output() {
   assert!(write.status.success());
   assert!(!String::from_utf8_lossy(&write.stdout).contains("valid:"));
 
-  let result = Command::new(env!("CARGO_BIN_EXE_parquet-opt"))
+  let result = Command::new(env!("CARGO_BIN_EXE_sop"))
     .args(["validate", output.to_str().unwrap()])
     .output()
     .unwrap();

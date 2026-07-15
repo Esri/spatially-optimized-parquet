@@ -34,7 +34,7 @@ cargo install
 
 You can then run on a `geopackage` with:
 ```sh
-parquet-opt write \
+sop write \
   --input france/gpkg/bdnb.gpkg \
   --layer batiment_groupe_compile \
   --output out.parquet \
@@ -45,10 +45,10 @@ parquet-opt write \
 Validate an existing optimized file or recursive partitioned dataset with:
 
 ```sh
-parquet-opt validate out.parquet
+sop validate out.parquet
 ```
 
-Optimized `parquet-opt write` commands run the same validation automatically after output closes.
+Run `sop validate` separately when output validation is required.
 `--no-optimization` writes plain GeoParquet and skips SOP validation. Warnings return exit status
 `0`. Validation errors return non-zero without deleting output.
 
