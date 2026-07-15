@@ -147,11 +147,14 @@ fn optimized_output_sorts_points_and_writes_metadata() {
   let output_schema = Arc::new(dataframe.schema().as_arrow().clone());
   let batches = runtime().block_on(dataframe.collect()).unwrap();
   let batch = &batches[0];
-  assert!(output_schema.index_of("zCode").is_ok());
-  assert!(output_schema.index_of("x").is_ok());
-  assert!(output_schema.index_of("y").is_ok());
-  assert!(!output_schema.field_with_name("x").unwrap().is_nullable());
-  assert!(!output_schema.field_with_name("y").unwrap().is_nullable());
+  let geodisplay = output_schema.field_with_name("geodisplay").unwrap();
+  assert!(!geodisplay.is_nullable());
+  let DataType::Struct(fields) = geodisplay.data_type() else {
+    panic!("geodisplay must be a struct");
+  };
+  assert!(!fields.find("zCode").unwrap().1.is_nullable());
+  assert!(!fields.find("x").unwrap().1.is_nullable());
+  assert!(!fields.find("y").unwrap().1.is_nullable());
   assert_eq!(
     string_value(batch.column_by_name("name").unwrap().as_ref(), 0),
     "early"
@@ -166,13 +169,19 @@ fn optimized_output_sorts_points_and_writes_metadata() {
   let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").unwrap()).unwrap();
   let geodisplay: serde_json::Value =
     serde_json::from_str(metadata.get("geodisplay").unwrap()).unwrap();
-  assert_eq!(geodisplay["type"], "z");
-  assert_eq!(geodisplay["version"], "0.1");
-  assert_eq!(geodisplay["geometryType"], "point");
-  assert_eq!(geodisplay["xColumn"], "x");
-  assert_eq!(geodisplay["yColumn"], "y");
-  assert_eq!(geodisplay["wkid"], 4326);
-  assert!(geodisplay["wkt"].as_str().unwrap().contains("WGS 84"));
+  assert_eq!(geodisplay["parentColumn"], "geodisplay");
+  assert_eq!(geodisplay["index"]["type"], "z");
+  assert_eq!(geodisplay["index"]["version"], "0.1");
+  assert_eq!(geodisplay["index"]["geometryType"], "point");
+  assert_eq!(geodisplay["index"]["xColumn"], "x");
+  assert_eq!(geodisplay["index"]["yColumn"], "y");
+  assert_eq!(geodisplay["index"]["wkid"], 4326);
+  assert!(
+    geodisplay["index"]["wkt"]
+      .as_str()
+      .unwrap()
+      .contains("WGS 84")
+  );
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["authority"], "EPSG");
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
 }
@@ -285,13 +294,19 @@ fn optimized_output_reprojects_selected_geoparquet_rows() {
     string_value(batch.column_by_name("name").unwrap().as_ref(), 0),
     "selected"
   );
-  let x = batch
+  let geodisplay = batch
+    .column_by_name("geodisplay")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap();
+  let x = geodisplay
     .column_by_name("x")
     .unwrap()
     .as_any()
     .downcast_ref::<Float64Array>()
     .unwrap();
-  let y = batch
+  let y = geodisplay
     .column_by_name("y")
     .unwrap()
     .as_any()
@@ -310,9 +325,14 @@ fn optimized_output_reprojects_selected_geoparquet_rows() {
     serde_json::from_str(metadata.get("geodisplay").unwrap()).unwrap();
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
   assert_json_extent(&geo["columns"]["geometry"]["bbox"], [1.0, 1.0, 1.0, 1.0]);
-  assert_json_extent(&geodisplay["fullExtent"], [1.0, 1.0, 1.0, 1.0]);
-  assert_eq!(geodisplay["wkid"], 4326);
-  assert!(geodisplay["wkt"].as_str().unwrap().contains("WGS 84"));
+  assert_json_extent(&geodisplay["index"]["fullExtent"], [1.0, 1.0, 1.0, 1.0]);
+  assert_eq!(geodisplay["index"]["wkid"], 4326);
+  assert!(
+    geodisplay["index"]["wkt"]
+      .as_str()
+      .unwrap()
+      .contains("WGS 84")
+  );
   assert!(!metadata.get("geo").unwrap().contains("3857"));
   assert!(!metadata.get("geodisplay").unwrap().contains("3857"));
 }
@@ -391,15 +411,20 @@ fn optimized_output_writes_non_point_display_struct_and_metadata() {
   let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").unwrap()).unwrap();
   let geodisplay: serde_json::Value =
     serde_json::from_str(metadata.get("geodisplay").unwrap()).unwrap();
-  assert_eq!(geodisplay["field"], "geodisplay");
-  assert_eq!(geodisplay["type"], "xz");
-  assert_eq!(geodisplay["version"], "0.1");
-  assert_eq!(geodisplay["encoding"], "esriPBF");
-  assert_eq!(geodisplay["wkid"], 4326);
-  assert!(geodisplay["wkt"].as_str().unwrap().contains("WGS 84"));
+  assert_eq!(geodisplay["parentColumn"], "geodisplay");
+  assert_eq!(geodisplay["index"]["type"], "xz");
+  assert_eq!(geodisplay["index"]["version"], "0.1");
+  assert_eq!(geodisplay["index"]["encoding"], "esriPBF");
+  assert_eq!(geodisplay["index"]["wkid"], 4326);
+  assert!(
+    geodisplay["index"]["wkt"]
+      .as_str()
+      .unwrap()
+      .contains("WGS 84")
+  );
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["authority"], "EPSG");
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
-  let levels = geodisplay["levels"].as_array().unwrap();
+  let levels = geodisplay["index"]["levels"].as_array().unwrap();
   assert_eq!(levels.len(), 9);
   assert_eq!(levels[0]["level"], 0);
   assert_eq!(levels[0]["resolution"], 0.703125);
@@ -789,9 +814,8 @@ fn optimized_output_accepts_single_layer_geopackage() {
   let output_schema = Arc::new(dataframe.schema().as_arrow().clone());
   let batches = runtime().block_on(dataframe.collect()).unwrap();
   let batch = &batches[0];
-  assert!(output_schema.index_of("zCode").is_ok());
-  assert!(output_schema.index_of("x").is_ok());
-  assert!(output_schema.index_of("y").is_ok());
+  let geodisplay = output_schema.field_with_name("geodisplay").unwrap();
+  assert!(matches!(geodisplay.data_type(), DataType::Struct(_)));
   assert_eq!(
     string_value(batch.column_by_name("name").unwrap().as_ref(), 0),
     "early"
@@ -871,12 +895,20 @@ fn optimized_output_reprojects_geopackage_polygon() {
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
   assert_covering_metadata(&geo);
   assert_json_extent(&geo["columns"]["geometry"]["bbox"], [0.0, 0.0, 1.0, 1.0]);
-  assert_json_extent(&geodisplay["fullExtent"], [0.0, 0.0, 1.0, 1.0]);
-  assert_eq!(geodisplay["wkid"], 4326);
-  assert!(geodisplay["wkt"].as_str().unwrap().contains("WGS 84"));
-  assert_eq!(geodisplay["levels"][0]["column"], "level_0");
-  assert_eq!(geodisplay["levels"][0]["resolution"], 0.703125);
-  assert_eq!(geodisplay["levels"][0]["transform"]["scale"][0], 0.703125);
+  assert_json_extent(&geodisplay["index"]["fullExtent"], [0.0, 0.0, 1.0, 1.0]);
+  assert_eq!(geodisplay["index"]["wkid"], 4326);
+  assert!(
+    geodisplay["index"]["wkt"]
+      .as_str()
+      .unwrap()
+      .contains("WGS 84")
+  );
+  assert_eq!(geodisplay["index"]["levels"][0]["column"], "level_0");
+  assert_eq!(geodisplay["index"]["levels"][0]["resolution"], 0.703125);
+  assert_eq!(
+    geodisplay["index"]["levels"][0]["transform"]["scale"][0],
+    0.703125
+  );
   assert!(!metadata.get("geo").unwrap().contains("3857"));
   assert!(!metadata.get("geodisplay").unwrap().contains("3857"));
 }
@@ -959,7 +991,8 @@ fn optimized_output_selects_requested_geopackage_layer() {
   let geodisplay: serde_json::Value =
     serde_json::from_str(metadata.get("geodisplay").unwrap()).unwrap();
   assert_eq!(geo["primary_column"], "geometry");
-  assert_eq!(geodisplay["type"], "xz");
+  assert_eq!(geodisplay["parentColumn"], "geodisplay");
+  assert_eq!(geodisplay["index"]["type"], "xz");
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["authority"], "EPSG");
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
 }

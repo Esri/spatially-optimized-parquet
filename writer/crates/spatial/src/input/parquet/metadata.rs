@@ -8,10 +8,7 @@ use serde_json::Value;
 
 use crate::geometry::Extent2D;
 use crate::geometry::{GeometryEncoding, GeometryKind};
-use crate::input::{
-  SourceCoveringMetadata, SourceGeometryMetadata, SourcePointOptimizationMetadata,
-};
-use crate::output::GeodisplayMetadata;
+use crate::input::{SourceCoveringMetadata, SourceGeometryMetadata};
 
 /// Parse and require consistent GeoParquet metadata across all discovered files.
 pub(super) fn load_geo_metadata(
@@ -128,49 +125,6 @@ fn covering_column(json: &Value, geometry_column: &str) -> Option<SourceCovering
     }
   }
   covering_column.map(|column| SourceCoveringMetadata { column })
-}
-
-pub(super) fn load_point_optimization_metadata(
-  metadata_items: &[ArrowReaderMetadata],
-) -> Result<Option<SourcePointOptimizationMetadata>> {
-  let mut optimization = None;
-  let mut saw_missing = false;
-  for metadata in metadata_items {
-    let file_optimization = match metadata_json(metadata, "geodisplay")? {
-      Some(json) => match serde_json::from_value::<GeodisplayMetadata>(json) {
-        Ok(GeodisplayMetadata::Z(index)) => Some(SourcePointOptimizationMetadata {
-          code: index.code,
-          x_column: index.x_column,
-          y_column: index.y_column,
-          coordinate_precision: index.coordinate_precision,
-          full_extent: index.full_extent,
-          wkid: index.wkid,
-          wkt: index.wkt,
-        }),
-        Ok(GeodisplayMetadata::Xz(_)) | Err(_) => None,
-      },
-      None => None,
-    };
-    match file_optimization {
-      Some(file_optimization) => {
-        if saw_missing
-          || optimization
-            .as_ref()
-            .is_some_and(|existing| existing != &file_optimization)
-        {
-          return Ok(None);
-        }
-        optimization = Some(file_optimization);
-      }
-      None => {
-        if optimization.is_some() {
-          return Ok(None);
-        }
-        saw_missing = true;
-      }
-    }
-  }
-  Ok(optimization)
 }
 
 /// Remove non-semantic metadata differences before comparing file-level GeoParquet JSON.

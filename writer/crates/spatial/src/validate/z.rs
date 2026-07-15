@@ -9,26 +9,53 @@ use super::geometry::{binary_value, inspect_wkb_geometry, validate_geometry_insp
 use super::metadata::{ValidatedMetadata, float_matches};
 use super::multifile::FileCodeRange;
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
-use super::structure::{LoadedDatasetFile, array_at_path, field_at_path, read_row_groups};
+use super::structure::{
+  LoadedDatasetFile, array_at_path, display_column_path, field_at_path, read_row_groups,
+};
 
 pub(crate) fn validate_z_schema(
   file: &LoadedDatasetFile,
+  parent_column: Option<&str>,
   index: &ZClusteringIndex,
   report: &mut ValidationReport,
 ) {
-  validate_required_field(file, &index.code, &DataType::UInt64, false, report);
-  validate_required_field(file, &index.x_column, &DataType::Float64, false, report);
-  validate_required_field(file, &index.y_column, &DataType::Float64, false, report);
+  validate_required_field(
+    file,
+    &display_column_path(parent_column, &index.code),
+    &DataType::UInt64,
+    false,
+    report,
+  );
+  validate_required_field(
+    file,
+    &display_column_path(parent_column, &index.x_column),
+    &DataType::Float64,
+    false,
+    report,
+  );
+  validate_required_field(
+    file,
+    &display_column_path(parent_column, &index.y_column),
+    &DataType::Float64,
+    false,
+    report,
+  );
   validate_dimension_field(
     file,
-    index.z_column.as_deref(),
+    index
+      .z_column
+      .as_deref()
+      .map(|column| display_column_path(parent_column, column)),
     index.has_z,
     "zColumn",
     report,
   );
   validate_dimension_field(
     file,
-    index.m_column.as_deref(),
+    index
+      .m_column
+      .as_deref()
+      .map(|column| display_column_path(parent_column, column)),
     index.has_m,
     "mColumn",
     report,
@@ -67,13 +94,13 @@ fn validate_required_field(
 
 fn validate_dimension_field(
   file: &LoadedDatasetFile,
-  path: Option<&str>,
+  path: Option<String>,
   required: bool,
   metadata_name: &str,
   report: &mut ValidationReport,
 ) {
   match (path, required) {
-    (Some(path), true) => validate_required_field(file, path, &DataType::Float64, false, report),
+    (Some(path), true) => validate_required_field(file, &path, &DataType::Float64, false, report),
     (Some(_), false) => report.push(
       ValidationRule::ZSchema,
       ValidationSeverity::Error,
@@ -95,9 +122,13 @@ fn validate_dimension_field(
 pub(crate) fn validate_z_file(
   file: &LoadedDatasetFile,
   contract: &ValidatedMetadata,
+  parent_column: Option<&str>,
   index: &ZClusteringIndex,
   report: &mut ValidationReport,
 ) -> Option<FileCodeRange> {
+  let code_path = display_column_path(parent_column, &index.code);
+  let x_path = display_column_path(parent_column, &index.x_column);
+  let y_path = display_column_path(parent_column, &index.y_column);
   let mut previous_code = None;
   let mut minimum = None::<u64>;
   let mut maximum = None::<u64>;
@@ -106,13 +137,13 @@ pub(crate) fn validate_z_file(
     let Ok(geometry) = array_at_path(batch, contract.geometry_column()) else {
       return;
     };
-    let Ok(x_values) = array_at_path(batch, &index.x_column) else {
+    let Ok(x_values) = array_at_path(batch, &x_path) else {
       return;
     };
-    let Ok(y_values) = array_at_path(batch, &index.y_column) else {
+    let Ok(y_values) = array_at_path(batch, &y_path) else {
       return;
     };
-    let Ok(code_values) = array_at_path(batch, &index.code) else {
+    let Ok(code_values) = array_at_path(batch, &code_path) else {
       return;
     };
     let Some(x_values) = x_values.as_any().downcast_ref::<Float64Array>() else {
@@ -130,7 +161,7 @@ pub(crate) fn validate_z_file(
       let code_location = ValidationLocation::file(file.file.relative_path.clone())
         .with_row_group(row_group)
         .with_row(row)
-        .with_column(index.code.clone());
+        .with_column(code_path.clone());
       if code_values.is_null(row_index) {
         report.push(
           ValidationRule::ZCode,
@@ -161,7 +192,7 @@ pub(crate) fn validate_z_file(
       let coordinate_location = ValidationLocation::file(file.file.relative_path.clone())
         .with_row_group(row_group)
         .with_row(row)
-        .with_column(format!("{},{}", index.x_column, index.y_column));
+        .with_column(format!("{x_path},{y_path}"));
       let coordinates = match (x, y) {
         (Some(x), Some(y)) => Some((x, y)),
         _ => {

@@ -65,7 +65,6 @@ pub(in crate::input) async fn open_source(
   });
   let source_metadata = SourceDatasetMetadata {
     geometry: Some(geometry_metadata),
-    point_optimization: None,
     passthrough_kv: Vec::new(),
   };
 

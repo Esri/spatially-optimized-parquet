@@ -6,14 +6,14 @@ use std::sync::{Arc, OnceLock};
 
 use arrow_array::builder::BinaryBuilder;
 use arrow_array::{Array, ArrayRef, StructArray, UInt64Array};
-use arrow_schema::{DataType, Field, Fields};
+use arrow_schema::{DataType, Field, FieldRef, Fields};
 use datafusion::common::cast::{
-  as_binary_array, as_binary_view_array, as_large_binary_array, as_uint64_array,
+  as_binary_array, as_binary_view_array, as_float64_array, as_large_binary_array, as_uint64_array,
 };
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
 use datafusion::logical_expr::{
-  ColumnarValue, Expr, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature,
-  Volatility,
+  ColumnarValue, Expr, ReturnFieldArgs, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature,
+  TypeSignature, Volatility,
 };
 use datafusion::prelude::col;
 
@@ -21,8 +21,8 @@ use crate::geometry::{BinaryValueAccess, to_datafusion_error};
 use crate::optimized::OptimizedGeometryType;
 
 use super::{
-  GEODISPLAY_COLUMN, GeometryEncodeScratch, GeometryEncoding, TEMP_XZ_CODE_COLUMN, XZ_CODE_COLUMN,
-  encode_flat_geometry_with_scratch,
+  GEODISPLAY_COLUMN, GeometryEncodeScratch, GeometryEncoding, POINT_X_COLUMN, POINT_Y_COLUMN,
+  POINT_Z_CODE_COLUMN, TEMP_XZ_CODE_COLUMN, XZ_CODE_COLUMN, encode_flat_geometry_with_scratch,
   flat_geometry_payload_from_wkb as pbf_flat_geometry_payload_from_wkb,
 };
 
@@ -182,6 +182,14 @@ impl ScalarUDFImpl for NonPointGeodisplayUdf {
     Ok(DataType::Struct(self.geodisplay_fields.clone()))
   }
 
+  fn return_field_from_args(&self, _: ReturnFieldArgs) -> DataFusionResult<FieldRef> {
+    Ok(Arc::new(Field::new(
+      self.name(),
+      DataType::Struct(self.geodisplay_fields.clone()),
+      false,
+    )))
+  }
+
   fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
     let arrays = ColumnarValue::values_to_arrays(&args.args)?;
     let geometry = arrays
@@ -207,6 +215,89 @@ impl ScalarUDFImpl for NonPointGeodisplayUdf {
     Ok(ColumnarValue::Array(Arc::new(output) as ArrayRef))
   }
 }
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+/// Packs generated point index columns into the geodisplay struct.
+struct PointGeodisplayUdf;
+
+impl ScalarUDFImpl for PointGeodisplayUdf {
+  fn as_any(&self) -> &dyn Any {
+    self
+  }
+
+  fn name(&self) -> &str {
+    "geodisplay_point"
+  }
+
+  fn signature(&self) -> &Signature {
+    static SIGNATURE: OnceLock<Signature> = OnceLock::new();
+    SIGNATURE.get_or_init(|| {
+      Signature::exact(
+        vec![DataType::UInt64, DataType::Float64, DataType::Float64],
+        Volatility::Immutable,
+      )
+    })
+  }
+
+  fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
+    Ok(DataType::Struct(point_geodisplay_fields()))
+  }
+
+  fn return_field_from_args(&self, _: ReturnFieldArgs) -> DataFusionResult<FieldRef> {
+    Ok(Arc::new(Field::new(
+      self.name(),
+      DataType::Struct(point_geodisplay_fields()),
+      false,
+    )))
+  }
+
+  fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
+    let arrays = ColumnarValue::values_to_arrays(&args.args)?;
+    let z_code = as_uint64_array(
+      arrays
+        .first()
+        .ok_or_else(|| DataFusionError::Execution("missing Z code argument".to_string()))?
+        .as_ref(),
+    )?;
+    let x = as_float64_array(
+      arrays
+        .get(1)
+        .ok_or_else(|| DataFusionError::Execution("missing x argument".to_string()))?
+        .as_ref(),
+    )?;
+    let y = as_float64_array(
+      arrays
+        .get(2)
+        .ok_or_else(|| DataFusionError::Execution("missing y argument".to_string()))?
+        .as_ref(),
+    )?;
+    let output = StructArray::try_new(
+      point_geodisplay_fields(),
+      vec![
+        Arc::new(z_code.clone()),
+        Arc::new(x.clone()),
+        Arc::new(y.clone()),
+      ],
+      None,
+    )
+    .map_err(to_datafusion_error)?;
+    Ok(ColumnarValue::Array(Arc::new(output)))
+  }
+}
+
+fn point_geodisplay_fields() -> Fields {
+  static FIELDS: OnceLock<Fields> = OnceLock::new();
+  FIELDS
+    .get_or_init(|| {
+      Fields::from(vec![
+        Arc::new(Field::new(POINT_Z_CODE_COLUMN, DataType::UInt64, false)),
+        Arc::new(Field::new(POINT_X_COLUMN, DataType::Float64, false)),
+        Arc::new(Field::new(POINT_Y_COLUMN, DataType::Float64, false)),
+      ])
+    })
+    .clone()
+}
+
 fn non_point_geodisplay_udf(
   geometry_type: OptimizedGeometryType,
   encodings: Vec<GeometryEncoding>,
@@ -238,6 +329,16 @@ pub(in crate::optimized) fn non_point_geodisplay_expr(
 ) -> Expr {
   non_point_geodisplay_udf(geometry_type, encodings.to_vec())
     .call(vec![col(geometry_column), col(TEMP_XZ_CODE_COLUMN)])
+    .alias(GEODISPLAY_COLUMN)
+}
+
+pub(in crate::optimized) fn point_geodisplay_expr() -> Expr {
+  ScalarUDF::new_from_impl(PointGeodisplayUdf)
+    .call(vec![
+      datafusion::logical_expr::expr_fn::ident(POINT_Z_CODE_COLUMN),
+      col(POINT_X_COLUMN),
+      col(POINT_Y_COLUMN),
+    ])
     .alias(GEODISPLAY_COLUMN)
 }
 

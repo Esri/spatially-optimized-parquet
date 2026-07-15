@@ -96,14 +96,6 @@ pub(crate) fn geometry_bbox_expr(
   }
 }
 
-pub(crate) fn point_bbox_expr(geometry_column: &str, x_column: &str, y_column: &str) -> Expr {
-  let x = col(x_column);
-  let y = col(y_column);
-  feature_bbox_udf()
-    .call(vec![col(geometry_column), x.clone(), y.clone(), x, y])
-    .alias(COVERING_BBOX_COLUMN)
-}
-
 pub(crate) fn bbox_field_expr(field: &str) -> Expr {
   col(COVERING_BBOX_COLUMN).field(field)
 }

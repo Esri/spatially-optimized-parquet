@@ -11,17 +11,6 @@ pub(crate) struct SourceCoveringMetadata {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct SourcePointOptimizationMetadata {
-  pub(crate) code: String,
-  pub(crate) x_column: String,
-  pub(crate) y_column: String,
-  pub(crate) coordinate_precision: u32,
-  pub(crate) full_extent: Extent2D,
-  pub(crate) wkid: Option<u32>,
-  pub(crate) wkt: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SourceGeometryMetadata {
   pub(crate) column: String,
   pub(crate) encoding: GeometryEncoding,
@@ -36,6 +25,5 @@ pub(crate) struct SourceGeometryMetadata {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct SourceDatasetMetadata {
   pub(crate) geometry: Option<SourceGeometryMetadata>,
-  pub(crate) point_optimization: Option<SourcePointOptimizationMetadata>,
   pub(crate) passthrough_kv: Vec<KeyValue>,
 }

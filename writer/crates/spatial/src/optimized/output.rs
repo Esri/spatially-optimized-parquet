@@ -118,7 +118,6 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
           reprojection,
           target_extent,
           encodings,
-          prepared.point_optimization_reused(),
         ),
       },
     })
@@ -135,11 +134,7 @@ impl<'a> OptimizedOutput<'a, ResolvedOutputState<'a>> {
       self.state.covering,
     )?;
     let metadata = parquet_metadata(&self.state.optimization, self.state.covering)?;
-    let hidden_sort_column = matches!(
-      self.state.optimization.geometry().clustering_family,
-      ClusteringFamily::NonPoint
-    )
-    .then_some(cluster_key_column(
+    let hidden_sort_column = Some(cluster_key_column(
       self.state.optimization.geometry().clustering_family,
     ));
     write_optimized_single_file(

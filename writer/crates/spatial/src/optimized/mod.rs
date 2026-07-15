@@ -13,14 +13,13 @@ mod state;
 mod write;
 
 pub(crate) use clustering::{
-  DEFAULT_COORDINATE_PRECISION, DEFAULT_XZ_MAX_LEVEL, bounds_expr, extent_xz_code, point_expr,
-  point_z_code,
+  DEFAULT_XZ_MAX_LEVEL, bounds_expr, extent_xz_code, point_expr, point_z_code,
 };
 pub(crate) use extent::TargetExtentResolver;
 pub(crate) use multiscale::{
-  COVERING_BBOX_COLUMN, GeometryPartRole, GeometryPartSink, POINT_X_COLUMN, POINT_Y_COLUMN,
-  POINT_Z_CODE_COLUMN, decode_pbf_geometry, geometry_extent_from_wkb, point_xy_from_wkb,
-  validate_internal_projection_columns, visit_wkb_geometry,
+  COVERING_BBOX_COLUMN, GeometryPartRole, GeometryPartSink, decode_pbf_geometry,
+  geometry_extent_from_wkb, point_xy_from_wkb, validate_internal_projection_columns,
+  visit_wkb_geometry,
 };
 pub(crate) use output::OptimizedOutput;
 

@@ -9,7 +9,8 @@ use anyhow::Result;
 
 pub(crate) use geo::GeoMetadata;
 pub(crate) use geodisplay::{
-  ESRI_PBF_ENCODING, GEODISPLAY_VERSION, GeodisplayMetadata, XzClusteringIndex, ZClusteringIndex,
+  ESRI_PBF_ENCODING, GEODISPLAY_VERSION, GeodisplayIndex, GeodisplayMetadata, XzClusteringIndex,
+  ZClusteringIndex,
 };
 use parquet::ParquetMetadataSet;
 
@@ -30,12 +31,13 @@ pub(crate) fn geoparquet_metadata(
 pub(crate) fn optimized_point_metadata(
   source_entries: Vec<KeyValue>,
   geo_input: GeoMetadataInput<'_>,
+  field: &str,
   index_input: ZClusteringIndexInput,
 ) -> Result<Vec<KeyValue>> {
   optimized_metadata(
     source_entries,
     geo_input,
-    GeodisplayMetadata::point(ZClusteringIndex::new(index_input)),
+    GeodisplayMetadata::point(field, ZClusteringIndex::new(index_input)),
   )
 }
 
@@ -49,7 +51,7 @@ pub(crate) fn optimized_xz_metadata(
   optimized_metadata(
     source_entries,
     geo_input,
-    GeodisplayMetadata::xz(XzClusteringIndex::new(field, index_input)),
+    GeodisplayMetadata::xz(field, XzClusteringIndex::new(index_input)),
   )
 }
 

@@ -129,13 +129,19 @@ fn partitioned_output_writes_sorted_range_partitions() {
   let batches = runtime().block_on(dataframe.collect()).unwrap();
   assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 3);
   for batch in &batches {
-    let x = batch
+    let geodisplay = batch
+      .column_by_name("geodisplay")
+      .unwrap()
+      .as_any()
+      .downcast_ref::<StructArray>()
+      .unwrap();
+    let x = geodisplay
       .column_by_name("x")
       .unwrap()
       .as_any()
       .downcast_ref::<Float64Array>()
       .unwrap();
-    let y = batch
+    let y = geodisplay
       .column_by_name("y")
       .unwrap()
       .as_any()
@@ -181,7 +187,13 @@ fn partitioned_output_writes_sorted_range_partitions() {
   assert_eq!(files.len(), 2);
   for file in &files {
     let schema = raw_parquet_schema(file);
-    assert!(schema.field_with_name("zCode").is_ok());
+    let geodisplay = schema.field_with_name("geodisplay").unwrap();
+    let DataType::Struct(fields) = geodisplay.data_type() else {
+      panic!("geodisplay must be a struct");
+    };
+    assert!(fields.find("zCode").is_some());
+    assert!(fields.find("x").is_some());
+    assert!(fields.find("y").is_some());
     assert!(schema.field_with_name("z_order").is_err());
     let metadata = kv_map(file);
     let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").unwrap()).unwrap();
@@ -189,7 +201,7 @@ fn partitioned_output_writes_sorted_range_partitions() {
       serde_json::from_str(metadata.get("geodisplay").unwrap()).unwrap();
     assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
     assert_json_extent(&geo["columns"]["geometry"]["bbox"], [1.0, 1.0, 8.0, 8.0]);
-    assert_eq!(geodisplay["wkid"], 4326);
+    assert_eq!(geodisplay["index"]["wkid"], 4326);
     assert!(!metadata.get("geo").unwrap().contains("3857"));
     assert!(!metadata.get("geodisplay").unwrap().contains("3857"));
   }
@@ -202,7 +214,13 @@ fn partitioned_output_writes_sorted_range_partitions() {
     let z_codes = batches
       .iter()
       .flat_map(|batch| {
-        let z_codes = batch
+        let geodisplay = batch
+          .column_by_name("geodisplay")
+          .unwrap()
+          .as_any()
+          .downcast_ref::<StructArray>()
+          .unwrap();
+        let z_codes = geodisplay
           .column_by_name("zCode")
           .unwrap()
           .as_any()

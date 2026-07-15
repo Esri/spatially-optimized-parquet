@@ -233,25 +233,28 @@ mod tests {
       }
     });
     let mut geodisplay = serde_json::json!({
-      "type": "z",
-      "version": "0.1",
-      "code": "zCode",
-      "wkid": display_epsg,
-      "xColumn": "x",
-      "yColumn": "y",
-      "coordinatePrecision": 20,
-      "fullExtent": {
-        "xmin": 0.0,
-        "ymin": 0.0,
-        "xmax": 10.0,
-        "ymax": 10.0
-      },
-      "geometryType": "point",
-      "hasZ": false,
-      "hasM": false
+      "parentColumn": null,
+      "index": {
+        "type": "z",
+        "version": "0.1",
+        "code": "zCode",
+        "wkid": display_epsg,
+        "xColumn": "x",
+        "yColumn": "y",
+        "coordinatePrecision": 20,
+        "fullExtent": {
+          "xmin": 0.0,
+          "ymin": 0.0,
+          "xmax": 10.0,
+          "ymax": 10.0
+        },
+        "geometryType": "point",
+        "hasZ": false,
+        "hasM": false
+      }
     });
     if let Some(display_wkt) = display_wkt {
-      geodisplay["wkt"] = serde_json::Value::String(display_wkt.to_string());
+      geodisplay["index"]["wkt"] = serde_json::Value::String(display_wkt.to_string());
     }
     let geo_entry = KeyValue::new("geo".to_string(), Some(geo.to_string()));
     let mut entries = vec![

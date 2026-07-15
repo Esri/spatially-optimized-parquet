@@ -13,7 +13,7 @@ pub(crate) use columns::{
   GEODISPLAY_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_CODE_COLUMN, TEMP_XZ_CODE_COLUMN,
   XZ_CODE_COLUMN,
 };
-pub(in crate::optimized) use datafusion::non_point_geodisplay_expr;
+pub(in crate::optimized) use datafusion::{non_point_geodisplay_expr, point_geodisplay_expr};
 pub(in crate::optimized) use levels::{GeometryEncoding, create_geometry_encodings};
 use payload::flat_geometry_payload_from_wkb;
 pub(crate) use traversal::{

@@ -10,8 +10,15 @@ pub(crate) const GEODISPLAY_VERSION: &str = "0.1";
 pub(crate) const ESRI_PBF_ENCODING: &str = "esriPBF";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct GeodisplayMetadata {
+  #[serde(rename = "parentColumn")]
+  pub(crate) parent_column: Option<String>,
+  pub(crate) index: GeodisplayIndex,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub(crate) enum GeodisplayMetadata {
+pub(crate) enum GeodisplayIndex {
   Z(ZClusteringIndex),
   Xz(XzClusteringIndex),
 }
@@ -55,7 +62,6 @@ pub(crate) struct XzClusteringIndex {
   pub(crate) version: String,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub(crate) writer: Option<WriterMetadata>,
-  pub(crate) field: String,
   pub(crate) code: String,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub(crate) wkid: Option<u32>,
@@ -159,12 +165,18 @@ pub(crate) struct QuantizationTransform {
 }
 
 impl GeodisplayMetadata {
-  pub(super) fn point(index: ZClusteringIndex) -> Self {
-    Self::Z(index)
+  pub(super) fn point(parent_column: &str, index: ZClusteringIndex) -> Self {
+    Self {
+      parent_column: Some(parent_column.to_string()),
+      index: GeodisplayIndex::Z(index),
+    }
   }
 
-  pub(super) fn xz(index: XzClusteringIndex) -> Self {
-    Self::Xz(index)
+  pub(super) fn xz(parent_column: &str, index: XzClusteringIndex) -> Self {
+    Self {
+      parent_column: Some(parent_column.to_string()),
+      index: GeodisplayIndex::Xz(index),
+    }
   }
 }
 
@@ -195,12 +207,11 @@ impl ZClusteringIndex {
 }
 
 impl XzClusteringIndex {
-  pub(super) fn new(field: &str, input: XzClusteringIndexInput) -> Self {
+  pub(super) fn new(input: XzClusteringIndexInput) -> Self {
     Self {
       index_type: "xz".to_string(),
       version: GEODISPLAY_VERSION.to_string(),
       writer: None,
-      field: field.to_string(),
       code: input.code,
       wkid: input.wkid,
       wkt: input.wkt,

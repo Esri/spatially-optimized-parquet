@@ -5,8 +5,8 @@ use serde::de::DeserializeOwned;
 use crate::geometry::Extent2D;
 use crate::optimized::DEFAULT_XZ_MAX_LEVEL;
 use crate::output::{
-  ESRI_PBF_ENCODING, GEODISPLAY_VERSION, GeoMetadata, GeodisplayMetadata, XzClusteringIndex,
-  ZClusteringIndex,
+  ESRI_PBF_ENCODING, GEODISPLAY_VERSION, GeoMetadata, GeodisplayIndex, GeodisplayMetadata,
+  XzClusteringIndex, ZClusteringIndex,
 };
 
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
@@ -273,9 +273,9 @@ fn validate_geodisplay_contract(
   file: &LoadedDatasetFile,
   report: &mut ValidationReport,
 ) {
-  match geodisplay {
-    GeodisplayMetadata::Z(index) => validate_z_metadata(index, file, report),
-    GeodisplayMetadata::Xz(index) => validate_xz_metadata(index, file, report),
+  match &geodisplay.index {
+    GeodisplayIndex::Z(index) => validate_z_metadata(index, file, report),
+    GeodisplayIndex::Xz(index) => validate_xz_metadata(index, file, report),
   }
 }
 
@@ -443,12 +443,12 @@ fn validate_xz_metadata(
       ),
     );
   }
-  if index.field.is_empty() || index.code.is_empty() {
+  if index.code.is_empty() {
     report.push(
       ValidationRule::MetadataContract,
       ValidationSeverity::Error,
       location.clone(),
-      "field and code must not be empty",
+      "code must not be empty",
     );
   }
   if index.levels.is_empty() {
@@ -464,7 +464,7 @@ fn validate_xz_metadata(
   for level in &index.levels {
     let level_location = location
       .clone()
-      .with_column(format!("{}.{}", index.field, level.column));
+      .with_column(format!("geodisplay.{}", level.column));
     if u32::from(level.level) > index.max_level || !levels.insert(level.level) {
       report.push(
         ValidationRule::XzMetadata,
@@ -526,9 +526,9 @@ fn validate_geometry_family(
   };
   let matches_family = column.geometry_types.iter().all(|geometry_type| {
     let base = geometry_base_type(geometry_type);
-    match geodisplay {
-      GeodisplayMetadata::Z(_) => base == "Point",
-      GeodisplayMetadata::Xz(index) => match index.geometry_type.as_str() {
+    match &geodisplay.index {
+      GeodisplayIndex::Z(_) => base == "Point",
+      GeodisplayIndex::Xz(index) => match index.geometry_type.as_str() {
         "multipoint" => base == "MultiPoint",
         "polyline" => matches!(base, "LineString" | "MultiLineString"),
         "polygon" => matches!(base, "Polygon" | "MultiPolygon"),
@@ -588,9 +588,9 @@ fn resolve_geodisplay_crs(
   file: &LoadedDatasetFile,
   report: &mut ValidationReport,
 ) -> Option<ValidatedCrs> {
-  let (wkid, wkt) = match geodisplay {
-    GeodisplayMetadata::Z(index) => (index.wkid, index.wkt.as_deref()),
-    GeodisplayMetadata::Xz(index) => (index.wkid, index.wkt.as_deref()),
+  let (wkid, wkt) = match &geodisplay.index {
+    GeodisplayIndex::Z(index) => (index.wkid, index.wkt.as_deref()),
+    GeodisplayIndex::Xz(index) => (index.wkid, index.wkt.as_deref()),
   };
   let location =
     ValidationLocation::file(file.file.relative_path.clone()).with_column("geodisplay");
@@ -647,9 +647,9 @@ fn validate_matching_extent(
   let Some(column) = geo.columns.get(&geo.primary_column) else {
     return;
   };
-  let display_extent = match geodisplay {
-    GeodisplayMetadata::Z(index) => index.full_extent,
-    GeodisplayMetadata::Xz(index) => index.full_extent,
+  let display_extent = match &geodisplay.index {
+    GeodisplayIndex::Z(index) => index.full_extent,
+    GeodisplayIndex::Xz(index) => index.full_extent,
   };
   let geo_extent = [
     column.bbox[0],

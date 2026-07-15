@@ -3,8 +3,8 @@
 use anyhow::{Context, Result};
 use datafusion::dataframe::DataFrame;
 
+use crate::optimized::ResolvedOptimization;
 use crate::optimized::clustering::{cluster_key_column, cluster_partition_column};
-use crate::optimized::{ClusteringFamily, ResolvedOptimization};
 use crate::output::{OutputLayout, ParquetWriterOptions, TrackingParquetWriter};
 use crate::pipeline::SharedWriteReporter;
 
@@ -75,15 +75,11 @@ impl<'a> PartitionedOutputWriter<'a> {
     let writer_options =
       ParquetWriterOptions::new(self.compression.unwrap_or("snappy"), &metadata)?.into_datafusion();
     let partition_column = cluster_partition_column(self.optimization.geometry().clustering_family);
-    let drop_cluster_key_after_sort = matches!(
-      self.optimization.geometry().clustering_family,
-      ClusteringFamily::NonPoint
-    );
     let partitioned_sort = PartitionedSortConfig::new(
       partition_column,
       cluster_key_column(self.optimization.geometry().clustering_family),
       self.output_layout.part_count(),
-      drop_cluster_key_after_sort,
+      true,
     );
     TrackingParquetWriter::new(self.total_input_rows, self.write_reporter)
       .write_partitioned(

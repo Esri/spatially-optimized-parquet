@@ -42,6 +42,7 @@ impl ResolvedOptimization {
       ClusteringFamily::Point => optimized_point_metadata(
         source_entries,
         geo_metadata,
+        GEODISPLAY_COLUMN,
         ZClusteringIndexInput {
           code: POINT_Z_CODE_COLUMN.to_string(),
           x_column: POINT_X_COLUMN.to_string(),

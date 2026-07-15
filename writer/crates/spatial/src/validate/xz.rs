@@ -10,40 +10,45 @@ use super::geometry::{binary_value, inspect_wkb_geometry, validate_geometry_insp
 use super::metadata::{ValidatedMetadata, geometry_base_type};
 use super::multifile::FileCodeRange;
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
-use super::structure::{LoadedDatasetFile, array_at_path, field_at_path, read_row_groups};
+use super::structure::{
+  LoadedDatasetFile, array_at_path, display_column_path, field_at_path, read_row_groups,
+};
 
 const PBF_SEARCH_LIMIT: usize = 512;
 
 pub(crate) fn validate_xz_schema(
   file: &LoadedDatasetFile,
+  parent_column: Option<&str>,
   index: &XzClusteringIndex,
   report: &mut ValidationReport,
 ) {
-  let field_location =
-    ValidationLocation::file(file.file.relative_path.clone()).with_column(index.field.clone());
-  match field_at_path(file.metadata.schema().as_ref(), &index.field) {
-    Some(field) if matches!(field.data_type(), DataType::Struct(_)) => {}
-    Some(field) => report.push(
-      ValidationRule::XzSchema,
-      ValidationSeverity::Error,
-      field_location,
-      format!(
-        "XZ field must be an Arrow struct, found {}",
-        field.data_type()
+  if let Some(parent_column) = parent_column {
+    let field_location = ValidationLocation::file(file.file.relative_path.clone())
+      .with_column(parent_column.to_string());
+    match field_at_path(file.metadata.schema().as_ref(), parent_column) {
+      Some(field) if matches!(field.data_type(), DataType::Struct(_)) => {}
+      Some(field) => report.push(
+        ValidationRule::XzSchema,
+        ValidationSeverity::Error,
+        field_location,
+        format!(
+          "XZ parent column must be an Arrow struct, found {}",
+          field.data_type()
+        ),
       ),
-    ),
-    None => report.push(
-      ValidationRule::XzSchema,
-      ValidationSeverity::Error,
-      field_location,
-      "XZ field is missing",
-    ),
+      None => report.push(
+        ValidationRule::XzSchema,
+        ValidationSeverity::Error,
+        field_location,
+        "XZ parent column is missing",
+      ),
+    }
   }
 
-  let code_path = format!("{}.{}", index.field, index.code);
+  let code_path = display_column_path(parent_column, &index.code);
   validate_xz_field(file, &code_path, &DataType::UInt64, Some(false), report);
   for level in &index.levels {
-    let level_path = format!("{}.{}", index.field, level.column);
+    let level_path = display_column_path(parent_column, &level.column);
     let location =
       ValidationLocation::file(file.file.relative_path.clone()).with_column(level_path.clone());
     match field_at_path(file.metadata.schema().as_ref(), &level_path) {
@@ -106,14 +111,15 @@ fn validate_xz_field(
 pub(crate) fn validate_xz_file(
   file: &LoadedDatasetFile,
   contract: &ValidatedMetadata,
+  parent_column: Option<&str>,
   index: &XzClusteringIndex,
   report: &mut ValidationReport,
 ) -> Option<FileCodeRange> {
-  let code_path = format!("{}.{}", index.field, index.code);
+  let code_path = display_column_path(parent_column, &index.code);
   let level_paths = index
     .levels
     .iter()
-    .map(|level| format!("{}.{}", index.field, level.column))
+    .map(|level| display_column_path(parent_column, &level.column))
     .collect::<Vec<_>>();
   let mut previous_code = None;
   let mut minimum = None::<u64>;

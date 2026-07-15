@@ -18,8 +18,7 @@ use crate::input::source::InputBatchStream;
 use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata};
 
 use super::metadata::{
-  load_covering_metadata, load_geo_metadata, load_point_optimization_metadata,
-  map_geo_geometry_type, passthrough_metadata,
+  load_covering_metadata, load_geo_metadata, map_geo_geometry_type, passthrough_metadata,
 };
 
 /// Stores Parquet footer metadata and the location needed to construct future scans.
@@ -108,7 +107,6 @@ impl InputSource for ParquetInputSource {
 
     Ok(SourceDatasetMetadata {
       geometry,
-      point_optimization: load_point_optimization_metadata(&self.metadata)?,
       passthrough_kv: passthrough_metadata(&self.metadata),
     })
   }
