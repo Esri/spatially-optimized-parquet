@@ -1,6 +1,6 @@
 //! Centralizes Parquet compression, metadata, and buffering policy.
 //!
-//! [`ParquetWriterOptions`] parses supported compression names, disables dictionary encoding,
+//! [`ParquetWriterOptions`] parses supported compression names, enables dictionary encoding,
 //! applies consistent row-group and write-batch sizes, and propagates key-value metadata.
 //!
 //! Row-group and batch sizes can be tuned through `OPT_PARQUET_ROW_GROUP_SIZE` and
@@ -9,6 +9,7 @@
 
 use anyhow::{Context, Result};
 use datafusion::common::config::TableParquetOptions;
+use datafusion::common::parquet_config::DFParquetWriterVersion;
 use parquet::basic::{BrotliLevel, Compression, GzipLevel, ZstdLevel};
 use parquet::file::metadata::KeyValue;
 
@@ -28,7 +29,9 @@ impl ParquetWriterOptions {
     let compression = parse_compression(compression)?;
     let mut options = TableParquetOptions::new();
     options.global.compression = Some(compression_to_datafusion_string(compression));
-    options.global.dictionary_enabled = Some(false);
+    options.global.dictionary_enabled = Some(true);
+    options.global.writer_version = DFParquetWriterVersion::V2_0;
+    options.global.maximum_parallel_row_group_writers = available_parallelism();
     options.global.max_row_group_size = configured_max_row_group_size();
     options.global.write_batch_size = configured_write_batch_size();
     options.key_value_metadata = kv_metadata
@@ -85,6 +88,12 @@ fn configured_write_batch_size() -> usize {
   env_usize(WRITE_BATCH_SIZE_ENV).unwrap_or(DEFAULT_WRITE_BATCH_SIZE)
 }
 
+fn available_parallelism() -> usize {
+  std::thread::available_parallelism()
+    .map(usize::from)
+    .unwrap_or(1)
+}
+
 fn env_usize(name: &str) -> Option<usize> {
   std::env::var(name)
     .ok()
@@ -125,7 +134,17 @@ mod tests {
     .into_datafusion();
 
     assert_eq!(options.global.compression.as_deref(), Some("gzip(6)"));
-    assert_eq!(options.global.dictionary_enabled, Some(false));
+    assert_eq!(options.global.dictionary_enabled, Some(true));
+    assert_eq!(
+      options.global.writer_version,
+      datafusion::common::parquet_config::DFParquetWriterVersion::V2_0
+    );
+    assert_eq!(
+      options.global.maximum_parallel_row_group_writers,
+      std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(1)
+    );
     assert_eq!(
       options
         .key_value_metadata
