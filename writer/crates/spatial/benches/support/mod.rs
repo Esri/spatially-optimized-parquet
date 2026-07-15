@@ -16,8 +16,11 @@ pub mod suite;
 
 const BATCH_ROWS: usize = 8_192;
 const FLOAT_COLUMN_COUNT: usize = 45;
-const STRING_COLUMN_NAMES: [&str; 5] =
+const STRING_COLUMN_COUNT: usize = 5;
+const STRING_COLUMN_NAMES: [&str; STRING_COLUMN_COUNT] =
   ["name", "description", "source_url", "owner", "external_ref"];
+const WIDE_FLOAT_COLUMN_COUNT: usize = 185;
+const WIDE_STRING_COLUMN_COUNT: usize = 21;
 const RANDOM_SEED: u64 = 0x5A17_1A1C_D15C_0DE5;
 
 #[derive(Clone, Copy)]
@@ -27,13 +30,6 @@ pub enum FixtureKind {
 }
 
 impl FixtureKind {
-  pub fn name(self) -> &'static str {
-    match self {
-      Self::Point => "point",
-      Self::Polygon => "polygon",
-    }
-  }
-
   fn geometry_type(self) -> &'static str {
     match self {
       Self::Point => "Point",
@@ -57,14 +53,37 @@ pub struct BenchmarkFixtureSet {
   pub output_root: PathBuf,
   pub point: BenchmarkFixture,
   pub polygon: BenchmarkFixture,
+  pub wide_polygon: BenchmarkFixture,
 }
 
 impl BenchmarkFixtureSet {
   pub fn build(target_mib: u64) -> Self {
     let temp = tempfile::tempdir().expect("create benchmark fixture directory");
     let target_bytes = target_mib * 1024 * 1024;
-    let point = write_fixture(temp.path(), FixtureKind::Point, target_bytes);
-    let polygon = write_fixture(temp.path(), FixtureKind::Polygon, target_bytes);
+    let point = write_fixture(
+      temp.path(),
+      FixtureKind::Point,
+      target_bytes,
+      FLOAT_COLUMN_COUNT,
+      STRING_COLUMN_COUNT,
+      "point",
+    );
+    let polygon = write_fixture(
+      temp.path(),
+      FixtureKind::Polygon,
+      target_bytes,
+      FLOAT_COLUMN_COUNT,
+      STRING_COLUMN_COUNT,
+      "polygon",
+    );
+    let wide_polygon = write_fixture(
+      temp.path(),
+      FixtureKind::Polygon,
+      target_bytes,
+      WIDE_FLOAT_COLUMN_COUNT,
+      WIDE_STRING_COLUMN_COUNT,
+      "polygon-wide-4x",
+    );
     let output_root = temp.path().join("output");
     fs::create_dir(&output_root).expect("create benchmark output directory");
     Self {
@@ -72,18 +91,26 @@ impl BenchmarkFixtureSet {
       output_root,
       point,
       polygon,
+      wide_polygon,
     }
   }
 }
 
-fn write_fixture(root: &Path, kind: FixtureKind, target_bytes: u64) -> BenchmarkFixture {
-  let path = root.join(format!("{}.parquet", kind.name()));
-  let schema = fixture_schema();
-  let sample_string_bytes = (0..STRING_COLUMN_NAMES.len())
+fn write_fixture(
+  root: &Path,
+  kind: FixtureKind,
+  target_bytes: u64,
+  float_column_count: usize,
+  string_column_count: usize,
+  fixture_name: &str,
+) -> BenchmarkFixture {
+  let path = root.join(format!("{fixture_name}.parquet"));
+  let schema = fixture_schema(float_column_count, string_column_count);
+  let sample_string_bytes = (0..string_column_count)
     .map(|column| string_attribute(0, column).len())
     .sum::<usize>();
   let sample_row_bytes =
-    kind.sample_geometry().len() + sample_string_bytes + 16 + FLOAT_COLUMN_COUNT * size_of::<f64>();
+    kind.sample_geometry().len() + sample_string_bytes + 16 + float_column_count * size_of::<f64>();
   let row_count = (target_bytes as usize / sample_row_bytes).max(BATCH_ROWS);
   let properties = WriterProperties::builder()
     .set_compression(Compression::UNCOMPRESSED)
@@ -105,6 +132,8 @@ fn write_fixture(root: &Path, kind: FixtureKind, target_bytes: u64) -> Benchmark
         kind,
         batch_start,
         batch_rows,
+        float_column_count,
+        string_column_count,
       ))
       .expect("write benchmark fixture batch");
   }
@@ -120,16 +149,15 @@ fn write_fixture(root: &Path, kind: FixtureKind, target_bytes: u64) -> Benchmark
   }
 }
 
-fn fixture_schema() -> SchemaRef {
+fn fixture_schema(float_column_count: usize, string_column_count: usize) -> SchemaRef {
   let mut fields = vec![Field::new("id", DataType::Int64, false)];
   fields.extend(
-    (0..FLOAT_COLUMN_COUNT)
+    (0..float_column_count)
       .map(|column| Field::new(format!("value_{column:02}"), DataType::Float64, false)),
   );
   fields.extend(
-    STRING_COLUMN_NAMES
-      .into_iter()
-      .map(|name| Field::new(name, DataType::Utf8, false)),
+    (0..string_column_count)
+      .map(|column| Field::new(string_column_name(column), DataType::Utf8, false)),
   );
   fields.push(Field::new("geometry", DataType::Binary, false));
   Arc::new(Schema::new(fields))
@@ -140,6 +168,8 @@ fn fixture_batch(
   kind: FixtureKind,
   batch_start: usize,
   row_count: usize,
+  float_column_count: usize,
+  string_column_count: usize,
 ) -> RecordBatch {
   let ids = (batch_start..batch_start + row_count)
     .map(|row| row as i64)
@@ -153,13 +183,13 @@ fn fixture_batch(
     .collect::<Vec<_>>();
 
   let mut columns: Vec<ArrayRef> = vec![Arc::new(Int64Array::from(ids))];
-  columns.extend((0..FLOAT_COLUMN_COUNT).map(|column| {
+  columns.extend((0..float_column_count).map(|column| {
     Arc::new(Float64Array::from_iter_values(
       (batch_start..batch_start + row_count)
         .map(|row| deterministic_float(row as u64, column as u64)),
     )) as ArrayRef
   }));
-  columns.extend((0..STRING_COLUMN_NAMES.len()).map(|column| {
+  columns.extend((0..string_column_count).map(|column| {
     Arc::new(StringArray::from_iter_values(
       (batch_start..batch_start + row_count).map(|row| string_attribute(row as u64, column)),
     )) as ArrayRef
@@ -167,6 +197,13 @@ fn fixture_batch(
   columns.push(Arc::new(BinaryArray::from(geometry_refs)));
 
   RecordBatch::try_new(schema, columns).expect("construct benchmark fixture batch")
+}
+
+fn string_column_name(column: usize) -> String {
+  STRING_COLUMN_NAMES
+    .get(column)
+    .map(|name| (*name).to_string())
+    .unwrap_or_else(|| format!("text_{column:03}"))
 }
 
 fn deterministic_float(row: u64, column: u64) -> f64 {
@@ -198,7 +235,10 @@ fn string_attribute(row: u64, column: usize) -> String {
     ),
     3 => format!("owner-{}", random_token(row, column as u64, 6, 32)),
     4 => format!("ref_{}", random_token(row, column as u64, 12, 48)),
-    _ => unreachable!("string column index must be valid"),
+    _ => format!(
+      "attribute-{column}-{}",
+      random_token(row, column as u64, 16, 96)
+    ),
   }
 }
 

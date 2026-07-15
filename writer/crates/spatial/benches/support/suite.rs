@@ -47,6 +47,14 @@ pub fn benchmark_writer(criterion: &mut Criterion, target_mib: u64, suite_name: 
     suite_name,
     "polygon",
   );
+  benchmark_single_file(
+    criterion,
+    &runtime,
+    &fixtures.wide_polygon,
+    &fixtures.output_root,
+    suite_name,
+    "polygon_wide_4x",
+  );
 }
 
 fn benchmark_geometry(
@@ -63,6 +71,21 @@ fn benchmark_geometry(
   for case in [OPTIMIZED_SINGLE, OPTIMIZED_PARTITIONED] {
     benchmark_case(&mut group, runtime, fixture, output_root, case);
   }
+  group.finish();
+}
+
+fn benchmark_single_file(
+  criterion: &mut Criterion,
+  runtime: &Runtime,
+  fixture: &BenchmarkFixture,
+  output_root: &Path,
+  suite_name: &str,
+  geometry_name: &str,
+) {
+  let mut group = criterion.benchmark_group(format!("writer/{suite_name}/{geometry_name}"));
+  group.sampling_mode(SamplingMode::Flat);
+  group.throughput(Throughput::Bytes(fixture.file_bytes));
+  benchmark_case(&mut group, runtime, fixture, output_root, OPTIMIZED_SINGLE);
   group.finish();
 }
 
