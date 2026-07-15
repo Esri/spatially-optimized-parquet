@@ -234,8 +234,7 @@ mod tests {
       (x: 1.0, y: 1.0),
       (x: 0.0, y: 0.0),
     ]);
-    let mut bytes = Vec::new();
-    wkb::writer::write_geometry(&mut bytes, &geometry, &Default::default()).unwrap();
+    let bytes = crate::geometry::write_test_geometry(&geometry);
 
     let inspection = inspect_wkb_geometry(&bytes).unwrap();
 

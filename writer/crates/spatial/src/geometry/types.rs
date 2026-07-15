@@ -97,39 +97,15 @@ pub(crate) enum GeometryEncoding {
   Wkb,
 }
 
-/// Map a decoded WKB geometry type into the repository geometry taxonomy.
-pub(crate) fn geometry_kind_from_wkb_type(
-  geometry_type: wkb::reader::GeometryType,
-) -> GeometryKind {
-  match geometry_type {
-    wkb::reader::GeometryType::Point => GeometryKind::Point,
-    wkb::reader::GeometryType::LineString => GeometryKind::LineString,
-    wkb::reader::GeometryType::MultiPoint => GeometryKind::MultiPoint,
-    wkb::reader::GeometryType::MultiLineString => GeometryKind::MultiLineString,
-    wkb::reader::GeometryType::Polygon => GeometryKind::Polygon,
-    wkb::reader::GeometryType::MultiPolygon => GeometryKind::MultiPolygon,
-    wkb::reader::GeometryType::GeometryCollection => GeometryKind::GeometryCollection,
-    _ => GeometryKind::Unknown,
-  }
-}
-
-/// Decode WKB and return its geometry kind.
-pub(crate) fn geometry_kind_from_wkb(bytes: &[u8]) -> Result<GeometryKind> {
-  let wkb_geom = wkb::reader::read_wkb(bytes)?;
-  Ok(geometry_kind_from_wkb_type(wkb_geom.geometry_type()))
-}
-
 #[cfg(test)]
 mod tests {
   use geo::polygon;
-  use wkb::writer::write_geometry;
 
-  use super::{GeometryKind, geometry_kind_from_wkb};
+  use super::GeometryKind;
+  use crate::geometry::{geometry_kind_from_wkb, write_test_geometry};
 
   fn encoded_geometry(geometry: &geo::Geometry) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    write_geometry(&mut bytes, geometry, &Default::default()).unwrap();
-    bytes
+    write_test_geometry(geometry)
   }
 
   #[test]

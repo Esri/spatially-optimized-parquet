@@ -6,12 +6,13 @@
 //! produce these values and analysis/output code consumes them without depending on the source
 //! format.
 //!
-//! WKB decoding helpers intentionally determine only the top-level geometry kind. Coordinate
-//! traversal, extents, reprojection, and optimized encoding belong to dedicated modules.
+//! WKB decoding validates headers and traverses coordinates without allocating geometry objects.
+//! Extents, reprojection, and optimized encoding remain owned by their dedicated modules.
 
 mod binary_array;
 mod extent;
 mod types;
+mod wkb;
 
 pub(crate) use binary_array::{
   BinaryValueAccess, geometry_signature, map_geometry_to_binary, map_geometry_to_u64,
@@ -20,5 +21,10 @@ pub(crate) use binary_array::{
 pub(crate) use extent::Extent2D;
 pub(crate) use types::{
   GeometryCategory, GeometryEncoding, GeometryKind, GeometryShape, GeometrySpec,
-  geometry_kind_from_wkb, geometry_kind_from_wkb_type,
+};
+#[cfg(test)]
+pub(crate) use wkb::write_test_geometry;
+pub(crate) use wkb::{
+  PolygonRingOrder, WkbPartRole, WkbSink, geometry_kind_from_wkb, read_wkb_point,
+  visit_wkb_geometry,
 };

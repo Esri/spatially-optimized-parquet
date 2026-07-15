@@ -10,7 +10,6 @@ use parquet::basic::Compression;
 use parquet::file::metadata::KeyValue;
 use parquet::file::properties::WriterProperties;
 use tempfile::TempDir;
-use wkb::writer::{WriteOptions, write_geometry};
 
 pub mod suite;
 
@@ -257,8 +256,8 @@ fn random_token(row: u64, column: u64, min_length: usize, max_length: usize) -> 
 fn geometry_for_row(kind: FixtureKind, row: usize) -> Vec<u8> {
   let x = -179.0 + ((row.wrapping_mul(37) % 358_000) as f64 / 1_000.0);
   let y = -89.0 + ((row.wrapping_mul(53) % 178_000) as f64 / 1_000.0);
-  let geometry = match kind {
-    FixtureKind::Point => geo::Geometry::Point(geo::Point::new(x, y)),
+  match kind {
+    FixtureKind::Point => encode_point(x, y),
     FixtureKind::Polygon => {
       let radius = 0.005 + (row % 16) as f64 * 0.0005;
       let mut coordinates = (0..64)
@@ -268,16 +267,35 @@ fn geometry_for_row(kind: FixtureKind, row: usize) -> Vec<u8> {
         })
         .collect::<Vec<_>>();
       coordinates.push(coordinates[0]);
-      geo::Geometry::Polygon(geo::Polygon::new(
-        geo::LineString::from(coordinates),
-        vec![],
-      ))
+      encode_polygon(&coordinates)
     }
-  };
-  let mut buffer = Vec::new();
-  write_geometry(&mut buffer, &geometry, &WriteOptions::default())
-    .expect("encode benchmark geometry");
-  buffer
+  }
+}
+
+fn encode_point(x: f64, y: f64) -> Vec<u8> {
+  let mut output = Vec::with_capacity(21);
+  output.push(1);
+  output.extend_from_slice(&1_u32.to_le_bytes());
+  output.extend_from_slice(&x.to_le_bytes());
+  output.extend_from_slice(&y.to_le_bytes());
+  output
+}
+
+fn encode_polygon(coordinates: &[(f64, f64)]) -> Vec<u8> {
+  let mut output = Vec::with_capacity(13 + coordinates.len() * 16);
+  output.push(1);
+  output.extend_from_slice(&3_u32.to_le_bytes());
+  output.extend_from_slice(&1_u32.to_le_bytes());
+  output.extend_from_slice(
+    &u32::try_from(coordinates.len())
+      .expect("benchmark polygon coordinate count fits u32")
+      .to_le_bytes(),
+  );
+  for &(x, y) in coordinates {
+    output.extend_from_slice(&x.to_le_bytes());
+    output.extend_from_slice(&y.to_le_bytes());
+  }
+  output
 }
 
 fn geoparquet_metadata(kind: FixtureKind) -> KeyValue {

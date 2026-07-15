@@ -288,13 +288,7 @@ mod tests {
 
   #[test]
   fn point_coordinates_are_required_and_use_nan_for_missing_or_invalid_geometry() {
-    let mut point_wkb = Vec::new();
-    wkb::writer::write_geometry(
-      &mut point_wkb,
-      &Geometry::Point(Point::new(1.0, 2.0)),
-      &Default::default(),
-    )
-    .unwrap();
+    let point_wkb = crate::geometry::write_test_geometry(&Geometry::Point(Point::new(1.0, 2.0)));
     let invalid_wkb = [0_u8, 1, 2];
     let input = BinaryArray::from(vec![
       Some(point_wkb.as_slice()),

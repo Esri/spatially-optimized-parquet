@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use arrow_array::{BinaryArray, Int32Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
-use wkb::writer::{WriteOptions, write_geometry};
+
+use super::wkb;
 
 pub fn sample_schema_with_geometry() -> SchemaRef {
   Arc::new(Schema::new(vec![
@@ -25,18 +26,9 @@ pub fn sample_batch_with_geometry(wkb_values: Vec<Option<Vec<u8>>>) -> RecordBat
 }
 
 pub fn wkb_point(x: f64, y: f64) -> Vec<u8> {
-  let geometry = geo::Geometry::Point(geo::Point::new(x, y));
-  let mut buffer = Vec::new();
-  write_geometry(&mut buffer, &geometry, &WriteOptions::default()).unwrap();
-  buffer
+  wkb::point(x, y)
 }
 
 pub fn wkb_polygon(coords: &[(f64, f64)]) -> Vec<u8> {
-  let geometry = geo::Geometry::Polygon(geo::Polygon::new(
-    geo::LineString::from(coords.to_vec()),
-    vec![],
-  ));
-  let mut buffer = Vec::new();
-  write_geometry(&mut buffer, &geometry, &WriteOptions::default()).unwrap();
-  buffer
+  wkb::polygon(coords)
 }

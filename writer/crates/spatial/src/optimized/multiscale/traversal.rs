@@ -1,24 +1,33 @@
 //! Traverses supported geometry structures through a shared part sink.
 
 use anyhow::{Context, Result, bail};
+use geo_traits::Dimensions;
+#[cfg(test)]
 use geo_traits::{
-  CoordTrait, Dimensions, GeometryTrait, GeometryType, LineStringTrait, MultiLineStringTrait,
-  MultiPointTrait, MultiPolygonTrait, PointTrait, PolygonTrait,
+  CoordTrait, GeometryTrait, GeometryType, LineStringTrait, MultiLineStringTrait, MultiPointTrait,
+  MultiPolygonTrait, PointTrait, PolygonTrait,
 };
 
-use crate::geometry::{Extent2D, GeometryKind, geometry_kind_from_wkb_type};
+use crate::geometry::{
+  Extent2D, GeometryKind, PolygonRingOrder, read_wkb_point,
+  visit_wkb_geometry as decode_wkb_geometry,
+};
 use crate::optimized::OptimizedGeometryType;
+
+pub(crate) use crate::geometry::{WkbPartRole as GeometryPartRole, WkbSink as GeometryPartSink};
 
 /// Decode a WKB point and return its x/y coordinate.
 pub(crate) fn point_xy_from_wkb(bytes: &[u8]) -> Result<(f64, f64)> {
-  let geometry = wkb::reader::read_wkb(bytes)?;
-  point_xy_from_geometry_trait(&geometry)
+  read_wkb_point(bytes)
 }
 
 /// Decode WKB and calculate its axis-aligned extent.
 pub(crate) fn geometry_extent_from_wkb(bytes: &[u8]) -> Result<Extent2D> {
-  let geometry = wkb::reader::read_wkb(bytes)?;
-  geometry_extent_from_trait(&geometry).context("geometry missing bounding rectangle")
+  let mut collector = BoundsCollector::default();
+  decode_wkb_geometry(bytes, PolygonRingOrder::Preserve, &mut collector)?;
+  collector
+    .finish()
+    .context("geometry missing bounding rectangle")
 }
 
 /// Visit one decoded WKB geometry through the canonical part traversal.
@@ -26,48 +35,42 @@ pub(crate) fn visit_wkb_geometry<S: GeometryPartSink>(
   bytes: &[u8],
   sink: &mut S,
 ) -> Result<(GeometryKind, Dimensions)> {
-  let geometry = wkb::reader::read_wkb(bytes)?;
-  let kind = geometry_kind_from_wkb_type(geometry.geometry_type());
-  let dimensions = geometry.dim();
-  visit_geometry_parts(&geometry, sink)?;
-  Ok((kind, dimensions))
+  let header = decode_wkb_geometry(bytes, PolygonRingOrder::Preserve, sink)?;
+  Ok((header.kind, header.dimensions))
 }
 
-fn visit_geometry_parts<G: GeometryTrait<T = f64>, S: GeometryPartSink>(
-  geometry: &G,
+pub(super) fn visit_wkb_geometry_for_display<S: GeometryPartSink>(
+  bytes: &[u8],
+  geometry_type: OptimizedGeometryType,
   sink: &mut S,
 ) -> Result<()> {
-  match geometry.as_type() {
-    GeometryType::Point(point) => visit_point(point, sink),
-    GeometryType::LineString(line) => visit_line_string(line, GeometryPartRole::Other, sink),
-    GeometryType::Polygon(polygon) => visit_polygon(polygon, sink),
-    GeometryType::MultiPoint(points) => visit_multipoint(points, sink),
-    GeometryType::MultiLineString(lines) => visit_multiline_string(lines, sink),
-    GeometryType::MultiPolygon(polygons) => visit_multipolygon(polygons, sink),
-    GeometryType::GeometryCollection(_) => {
-      bail!("geometry collections are not supported by display optimization")
+  let header = decode_wkb_geometry(bytes, PolygonRingOrder::Reverse, sink)?;
+  let kind_matches = match geometry_type {
+    OptimizedGeometryType::Point => header.kind == GeometryKind::Point,
+    OptimizedGeometryType::MultiPoint => header.kind == GeometryKind::MultiPoint,
+    OptimizedGeometryType::Polyline => {
+      matches!(
+        header.kind,
+        GeometryKind::LineString | GeometryKind::MultiLineString
+      )
     }
-    _ => bail!("unsupported WKB geometry"),
+    OptimizedGeometryType::Polygon => {
+      matches!(
+        header.kind,
+        GeometryKind::Polygon | GeometryKind::MultiPolygon
+      )
+    }
+  };
+  if !kind_matches {
+    bail!(
+      "WKB geometry {:?} does not match optimized type {geometry_type:?}",
+      header.kind
+    );
   }
   Ok(())
 }
 
-fn geometry_extent_from_trait<G: GeometryTrait<T = f64>>(geometry: &G) -> Option<Extent2D> {
-  let mut collector = BoundsCollector::default();
-  match geometry.as_type() {
-    GeometryType::Point(point) => visit_point(point, &mut collector),
-    GeometryType::LineString(line) => {
-      visit_line_string(line, GeometryPartRole::Other, &mut collector)
-    }
-    GeometryType::Polygon(polygon) => visit_polygon(polygon, &mut collector),
-    GeometryType::MultiPoint(points) => visit_multipoint(points, &mut collector),
-    GeometryType::MultiLineString(lines) => visit_multiline_string(lines, &mut collector),
-    GeometryType::MultiPolygon(polygons) => visit_multipolygon(polygons, &mut collector),
-    _ => return None,
-  }
-  collector.finish()
-}
-
+#[cfg(test)]
 pub(super) fn visit_geometry_for_display<G: GeometryTrait<T = f64>, S: GeometryPartSink>(
   geometry: &G,
   geometry_type: OptimizedGeometryType,
@@ -85,26 +88,17 @@ pub(super) fn visit_geometry_for_display<G: GeometryTrait<T = f64>, S: GeometryP
       visit_multiline_string(lines, sink)
     }
     (OptimizedGeometryType::Polygon, GeometryType::Polygon(polygon)) => {
-      visit_polygon(polygon, sink)
+      visit_polygon_reversed(polygon, sink)
     }
     (OptimizedGeometryType::Polygon, GeometryType::MultiPolygon(polygons)) => {
-      visit_multipolygon(polygons, sink)
+      visit_multipolygon_reversed(polygons, sink)
     }
     _ => bail!("unsupported geometry for optimized type {geometry_type:?}"),
   }
   Ok(())
 }
 
-fn point_xy_from_geometry_trait<G: GeometryTrait<T = f64>>(geometry: &G) -> Result<(f64, f64)> {
-  match geometry.as_type() {
-    GeometryType::Point(point) => point
-      .coord()
-      .map(|coord| coord.x_y())
-      .context("point missing coordinate"),
-    _ => bail!("expected point geometry"),
-  }
-}
-
+#[cfg(test)]
 fn visit_point<P: PointTrait<T = f64>, S: GeometryPartSink>(point: &P, sink: &mut S) {
   sink.start_part(GeometryPartRole::Other);
   if let Some(coord) = point.coord() {
@@ -114,6 +108,7 @@ fn visit_point<P: PointTrait<T = f64>, S: GeometryPartSink>(point: &P, sink: &mu
   sink.finish_part();
 }
 
+#[cfg(test)]
 fn visit_multipoint<MP: MultiPointTrait<T = f64>, S: GeometryPartSink>(points: &MP, sink: &mut S) {
   sink.start_part(GeometryPartRole::Other);
   for point in points.points() {
@@ -125,6 +120,7 @@ fn visit_multipoint<MP: MultiPointTrait<T = f64>, S: GeometryPartSink>(points: &
   sink.finish_part();
 }
 
+#[cfg(test)]
 fn visit_multiline_string<ML: MultiLineStringTrait<T = f64>, S: GeometryPartSink>(
   lines: &ML,
   sink: &mut S,
@@ -134,27 +130,33 @@ fn visit_multiline_string<ML: MultiLineStringTrait<T = f64>, S: GeometryPartSink
   }
 }
 
-fn visit_multipolygon<MP: MultiPolygonTrait<T = f64>, S: GeometryPartSink>(
+#[cfg(test)]
+fn visit_multipolygon_reversed<MP: MultiPolygonTrait<T = f64>, S: GeometryPartSink>(
   polygons: &MP,
   sink: &mut S,
 ) {
   for polygon in polygons.polygons() {
-    visit_polygon(&polygon, sink);
+    visit_polygon_reversed(&polygon, sink);
   }
 }
 
-fn visit_polygon<P: PolygonTrait<T = f64>, S: GeometryPartSink>(polygon: &P, sink: &mut S) {
+#[cfg(test)]
+fn visit_polygon_reversed<P: PolygonTrait<T = f64>, S: GeometryPartSink>(
+  polygon: &P,
+  sink: &mut S,
+) {
   if let Some(exterior) = polygon.exterior() {
-    visit_line_string(&exterior, GeometryPartRole::Exterior, sink);
+    visit_line_string_reversed(&exterior, GeometryPartRole::Exterior, sink);
   } else {
     sink.start_part(GeometryPartRole::Exterior);
     sink.finish_part();
   }
   for interior in polygon.interiors() {
-    visit_line_string(&interior, GeometryPartRole::Interior, sink);
+    visit_line_string_reversed(&interior, GeometryPartRole::Interior, sink);
   }
 }
 
+#[cfg(test)]
 fn visit_line_string<L: LineStringTrait<T = f64>, S: GeometryPartSink>(
   line: &L,
   role: GeometryPartRole,
@@ -168,17 +170,18 @@ fn visit_line_string<L: LineStringTrait<T = f64>, S: GeometryPartSink>(
   sink.finish_part();
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum GeometryPartRole {
-  Exterior,
-  Interior,
-  Other,
-}
-
-pub(crate) trait GeometryPartSink {
-  fn start_part(&mut self, role: GeometryPartRole);
-  fn push_coord(&mut self, x: f64, y: f64);
-  fn finish_part(&mut self);
+#[cfg(test)]
+fn visit_line_string_reversed<L: LineStringTrait<T = f64>, S: GeometryPartSink>(
+  line: &L,
+  role: GeometryPartRole,
+  sink: &mut S,
+) {
+  let coordinates: Vec<_> = line.coords().map(|coordinate| coordinate.x_y()).collect();
+  sink.start_part(role);
+  for (x, y) in coordinates.into_iter().rev() {
+    sink.push_coord(x, y);
+  }
+  sink.finish_part();
 }
 
 #[derive(Default)]

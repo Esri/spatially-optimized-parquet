@@ -346,7 +346,7 @@ fn optimized_output_writes_non_point_display_struct_and_metadata() {
     parquet::basic::Compression::SNAPPY,
     &[geoparquet_kv("geometry", &["Polygon"])],
   );
-  run_optimized(
+  let result = run_optimized(
     &input,
     &output,
     RowRange::default(),
@@ -356,6 +356,13 @@ fn optimized_output_writes_non_point_display_struct_and_metadata() {
     false,
   )
   .unwrap();
+  let validation = result.validation_report().expect("automatic validation");
+  assert!(
+    validation
+      .findings()
+      .iter()
+      .all(|finding| finding.rule() != ValidationRule::PbfWinding)
+  );
 
   let dataframe = runtime()
     .block_on(scan_parquet(output.to_str().unwrap()))

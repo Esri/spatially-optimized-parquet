@@ -68,9 +68,7 @@ mod tests {
 
   fn wkb_point(x: f64, y: f64) -> Vec<u8> {
     let geometry = geo::Geometry::Point(geo::Point::new(x, y));
-    let mut buffer = Vec::new();
-    wkb::writer::write_geometry(&mut buffer, &geometry, &Default::default()).unwrap();
-    buffer
+    crate::geometry::write_test_geometry(&geometry)
   }
 
   fn write_parquet(

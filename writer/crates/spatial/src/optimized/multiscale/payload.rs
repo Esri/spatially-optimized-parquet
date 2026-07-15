@@ -1,12 +1,15 @@
 //! Creates reusable flat coordinate payloads through shared geometry traversal.
 
 use anyhow::Result;
+#[cfg(test)]
 use geo_traits::GeometryTrait;
 #[cfg(test)]
 use geo_types::Geometry;
 
+#[cfg(test)]
+use super::traversal::visit_geometry_for_display;
 use super::traversal::{
-  ExtentAccumulator, GeometryPartRole, GeometryPartSink, visit_geometry_for_display,
+  ExtentAccumulator, GeometryPartRole, GeometryPartSink, visit_wkb_geometry_for_display,
 };
 use crate::geometry::Extent2D;
 use crate::optimized::OptimizedGeometryType;
@@ -74,10 +77,12 @@ fn geometry_payload_parts_from_wkb(
   geometry_type: OptimizedGeometryType,
   track_bounds: bool,
 ) -> Result<(FlatGeometryPayload, Option<Extent2D>)> {
-  let geometry = wkb::reader::read_wkb(bytes)?;
-  geometry_payload_parts_from_geometry_trait(&geometry, geometry_type, track_bounds)
+  let mut builder = PayloadBuilder::new(track_bounds);
+  visit_wkb_geometry_for_display(bytes, geometry_type, &mut builder)?;
+  Ok(builder.finish())
 }
 
+#[cfg(test)]
 fn geometry_payload_parts_from_geometry_trait<G: GeometryTrait<T = f64>>(
   geometry: &G,
   geometry_type: OptimizedGeometryType,
@@ -150,13 +155,7 @@ mod tests {
         (x: 2.0, y: 1.0),
         (x: 0.0, y: 0.0),
     ]);
-    let mut buffer = Vec::new();
-    wkb::writer::write_geometry(
-      &mut buffer,
-      &geometry,
-      &wkb::writer::WriteOptions::default(),
-    )
-    .unwrap();
+    let buffer = crate::geometry::write_test_geometry(&geometry);
 
     let from_geometry =
       geometry_payload_from_geometry(&geometry, OptimizedGeometryType::Polygon).unwrap();
