@@ -95,18 +95,7 @@ impl OptimizedPartitionedPipeline {
 }
 
 impl SpatialPipelineState {
-  fn finish_plain(&self, rows_written: u64) -> SpatialPipelineResult {
-    SpatialPipelineResult::new(self.total_input_rows, rows_written, None)
-  }
-
-  fn finish_validated(&self, rows_written: u64) -> Result<SpatialPipelineResult> {
-    let report = crate::validate::validate(self.output_layout.path())?
-      .ensure_valid()
-      .map_err(anyhow::Error::new)?;
-    Ok(SpatialPipelineResult::new(
-      self.total_input_rows,
-      rows_written,
-      Some(report),
-    ))
+  fn finish(&self, rows_written: u64) -> SpatialPipelineResult {
+    SpatialPipelineResult::new(self.total_input_rows, rows_written)
   }
 }

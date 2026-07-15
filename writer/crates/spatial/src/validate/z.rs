@@ -129,11 +129,17 @@ pub(crate) fn validate_z_file(
   let code_path = display_column_path(parent_column, &index.code);
   let x_path = display_column_path(parent_column, &index.x_column);
   let y_path = display_column_path(parent_column, &index.y_column);
+  let projected_columns = vec![
+    contract.geometry_column().to_string(),
+    code_path.clone(),
+    x_path.clone(),
+    y_path.clone(),
+  ];
   let mut previous_code = None;
   let mut minimum = None::<u64>;
   let mut maximum = None::<u64>;
   let mut sampled_geometry_count = 0usize;
-  let read_result = read_row_groups(file, |row_group, row_offset, batch| {
+  let read_result = read_row_groups(file, &projected_columns, |row_group, row_offset, batch| {
     let Ok(geometry) = array_at_path(batch, contract.geometry_column()) else {
       return;
     };

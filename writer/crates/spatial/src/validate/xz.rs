@@ -121,6 +121,10 @@ pub(crate) fn validate_xz_file(
     .iter()
     .map(|level| display_column_path(parent_column, &level.column))
     .collect::<Vec<_>>();
+  let projected_columns = std::iter::once(contract.geometry_column().to_string())
+    .chain(std::iter::once(code_path.clone()))
+    .chain(level_paths.iter().cloned())
+    .collect::<Vec<_>>();
   let mut previous_code = None;
   let mut minimum = None::<u64>;
   let mut maximum = None::<u64>;
@@ -133,7 +137,7 @@ pub(crate) fn validate_xz_file(
     .iter()
     .all(|geometry_type| geometry_base_type(geometry_type) == "Polygon");
 
-  let read_result = read_row_groups(file, |row_group, row_offset, batch| {
+  let read_result = read_row_groups(file, &projected_columns, |row_group, row_offset, batch| {
     let Ok(geometry) = array_at_path(batch, contract.geometry_column()) else {
       return;
     };

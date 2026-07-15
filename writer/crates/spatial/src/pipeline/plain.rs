@@ -26,6 +26,6 @@ impl PlainPipeline {
       state.compression.as_deref(),
     )
     .await?;
-    Ok(state.finish_plain(rows_written))
+    Ok(state.finish(rows_written))
   }
 }

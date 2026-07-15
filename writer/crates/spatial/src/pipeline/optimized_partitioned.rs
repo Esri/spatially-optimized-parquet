@@ -26,6 +26,6 @@ impl OptimizedPartitionedPipeline {
     )
     .await?;
     let rows_written = output.write_partitioned().await?;
-    state.finish_validated(rows_written)
+    Ok(state.finish(rows_written))
   }
 }

@@ -147,9 +147,6 @@ async fn run(cli: Cli) -> Result<()> {
       let options = SpatialPipelineOptions::from(args).with_write_reporter(reporter.clone());
       let result = spatial::run(options).await?;
       reporter.finish(result.rows_written(), result.rows_expected());
-      if let Some(report) = result.validation_report() {
-        render_validation_report(report);
-      }
       Ok(())
     }
     Command::Validate(args) => match spatial::validate(&args.path)?.ensure_valid() {

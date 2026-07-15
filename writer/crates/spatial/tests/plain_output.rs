@@ -89,7 +89,6 @@ fn plain_output_preserves_wkb_rows_and_passthrough_metadata() {
   let progress = progress.lock().unwrap();
   assert_eq!(progress.last().map(|update| update.rows_written()), Some(2));
   assert_eq!(progress.last().map(|update| update.total_rows()), Some(2));
-  assert!(result.validation_report().is_none());
   assert!(output.exists());
 
   let dataframe = runtime()

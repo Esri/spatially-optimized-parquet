@@ -42,7 +42,7 @@ fn normalized_stdout(output: &[u8]) -> String {
 }
 
 #[test]
-fn write_subcommand_prints_automatic_validation_report() {
+fn validation_runs_only_through_validate_subcommand() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("input.parquet");
   let output = temp.path().join("output.parquet");
@@ -70,14 +70,19 @@ fn write_subcommand_prints_automatic_validation_report() {
     String::from_utf8_lossy(&result.stderr)
   );
   let stdout = normalized_stdout(&result.stdout);
-  assert!(stdout.contains("Wrote 2/2 features\n"));
-  assert!(stdout.contains("valid:"));
-  assert!(stdout.contains("warning SOP-META-006"));
-  assert!(
-    stdout.find("Wrote 2/2 features").unwrap() < stdout.find("valid:").unwrap(),
-    "{stdout}"
-  );
+  assert_eq!(stdout.matches("Wrote 2/2 features").count(), 2);
+  assert!(!stdout.contains("valid:"));
+  assert!(!stdout.contains("SOP-META"));
   assert!(output.exists());
+
+  let validation = Command::new(env!("CARGO_BIN_EXE_parquet-opt"))
+    .args(["validate", output.to_str().unwrap()])
+    .output()
+    .unwrap();
+  assert!(validation.status.success());
+  let validation_stdout = normalized_stdout(&validation.stdout);
+  assert!(validation_stdout.contains("valid:"));
+  assert!(validation_stdout.contains("warning SOP-META-006"));
 }
 
 #[test]

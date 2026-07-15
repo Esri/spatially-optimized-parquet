@@ -1,7 +1,8 @@
 # Writer benchmarks
 
 The benchmark target runs optimized single-file and eight-file partitioned output through the
-complete public pipeline, including output validation, using approximately 512 MiB fixtures.
+complete write pipeline using approximately 512 MiB fixtures. Run the standalone validation
+command separately when measuring validation performance.
 
 Fixtures are generated before Criterion starts measuring. Outputs are removed after each timed run,
 and throughput uses the actual input Parquet file size.

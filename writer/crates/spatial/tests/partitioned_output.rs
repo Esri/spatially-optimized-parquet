@@ -109,11 +109,7 @@ fn partitioned_output_writes_sorted_range_partitions() {
 
   assert_eq!(result.rows_expected(), 3);
   assert_eq!(result.rows_written(), 3);
-  assert!(
-    result
-      .validation_report()
-      .is_some_and(|report| !report.has_errors())
-  );
+  assert!(!validate(&output).unwrap().has_errors());
   let progress = progress.lock().unwrap();
   assert_eq!(progress.last().map(|update| update.rows_written()), Some(3));
   assert_eq!(progress.last().map(|update| update.total_rows()), Some(3));
@@ -275,11 +271,6 @@ fn partitioned_output_combines_row_range_covering_and_compression() {
     .unwrap();
   assert_eq!(result.rows_expected(), 3);
   assert_eq!(result.rows_written(), 3);
-  assert!(
-    result
-      .validation_report()
-      .is_some_and(|report| !report.has_errors())
-  );
   assert!(!validate(&output).unwrap().has_errors());
 
   let dataframe = runtime()

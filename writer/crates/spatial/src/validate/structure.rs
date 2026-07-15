@@ -3,6 +3,7 @@ use std::fs::File;
 use anyhow::{Context, Result};
 use arrow_array::{Array, RecordBatch, StructArray};
 use arrow_schema::{DataType, Field, Schema};
+use parquet::arrow::ProjectionMask;
 use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ParquetRecordBatchReaderBuilder};
 
 use crate::output::GeodisplayIndex;
@@ -374,13 +375,19 @@ pub(crate) fn array_at_path<'a>(batch: &'a RecordBatch, path: &str) -> Result<&'
 
 pub(crate) fn read_row_groups(
   file: &LoadedDatasetFile,
+  columns: &[String],
   mut visit_batch: impl FnMut(usize, u64, &RecordBatch),
 ) -> Result<()> {
+  let projection = ProjectionMask::columns(
+    file.metadata.parquet_schema(),
+    columns.iter().map(String::as_str),
+  );
   for row_group in 0..file.metadata.metadata().num_row_groups() {
     let input = File::open(&file.file.path)
       .with_context(|| format!("open parquet file: {}", file.file.path.display()))?;
     let reader = ParquetRecordBatchReaderBuilder::new_with_metadata(input, file.metadata.clone())
       .with_row_groups(vec![row_group])
+      .with_projection(projection.clone())
       .with_batch_size(1024)
       .build()
       .with_context(|| format!("build parquet reader: {}", file.file.path.display()))?;

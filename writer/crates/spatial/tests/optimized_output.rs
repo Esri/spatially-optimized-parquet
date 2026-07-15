@@ -125,20 +125,13 @@ fn optimized_output_sorts_points_and_writes_metadata() {
   let progress = progress.lock().unwrap();
   assert_eq!(progress.last().map(|update| update.rows_written()), Some(2));
   assert_eq!(progress.last().map(|update| update.total_rows()), Some(2));
-  let automatic_report = result.validation_report().expect("automatic validation");
-  assert!(!automatic_report.has_errors());
+  let explicit_report = validate(&output).unwrap();
+  assert!(!explicit_report.has_errors());
   assert!(
-    automatic_report
+    explicit_report
       .findings()
       .iter()
       .any(|finding| finding.rule() == ValidationRule::WriterMetadata)
-  );
-
-  let explicit_report = validate(&output).unwrap();
-  assert!(!explicit_report.has_errors());
-  assert_eq!(
-    explicit_report.warning_count(),
-    automatic_report.warning_count()
   );
 
   let dataframe = runtime()
@@ -213,12 +206,8 @@ fn optimized_output_writes_covering_bbox_for_reprojected_points() {
     &[geoparquet_kv_with_epsg("geometry", &["Point"], 3857)],
   );
 
-  let result = run_optimized(&input, &output, RowRange::default(), None, None, None, true).unwrap();
-  assert!(
-    result
-      .validation_report()
-      .is_some_and(|report| !report.has_errors())
-  );
+  run_optimized(&input, &output, RowRange::default(), None, None, None, true).unwrap();
+  assert!(!validate(&output).unwrap().has_errors());
 
   let dataframe = runtime()
     .block_on(scan_parquet(output.to_str().unwrap()))
@@ -366,7 +355,7 @@ fn optimized_output_writes_non_point_display_struct_and_metadata() {
     parquet::basic::Compression::SNAPPY,
     &[geoparquet_kv("geometry", &["Polygon"])],
   );
-  let result = run_optimized(
+  run_optimized(
     &input,
     &output,
     RowRange::default(),
@@ -376,7 +365,7 @@ fn optimized_output_writes_non_point_display_struct_and_metadata() {
     false,
   )
   .unwrap();
-  let validation = result.validation_report().expect("automatic validation");
+  let validation = validate(&output).unwrap();
   assert!(
     validation
       .findings()
