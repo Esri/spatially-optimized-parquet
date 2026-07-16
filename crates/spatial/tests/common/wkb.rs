@@ -1,9 +1,43 @@
 use anyhow::{Result, bail};
 
+pub type DimensionalCoordinate = (f64, f64, Option<f64>, Option<f64>);
+
 pub fn point(x: f64, y: f64) -> Vec<u8> {
   let mut output = Vec::with_capacity(21);
   header(&mut output, 1);
   coordinate(&mut output, x, y);
+  output
+}
+
+pub fn dimensional_point(x: f64, y: f64, z: Option<f64>, m: Option<f64>) -> Vec<u8> {
+  let mut output = Vec::with_capacity(37);
+  header(&mut output, dimensional_type(1, z.is_some(), m.is_some()));
+  dimensional_coordinate(&mut output, x, y, z, m);
+  output
+}
+
+pub fn dimensional_multi_point(coordinates: &[DimensionalCoordinate]) -> Vec<u8> {
+  let (has_z, has_m) = dimensions(coordinates);
+  let coordinate_size = (2 + usize::from(has_z) + usize::from(has_m)) * 8;
+  let mut output = Vec::with_capacity(9 + coordinates.len() * (5 + coordinate_size));
+  header(&mut output, dimensional_type(4, has_z, has_m));
+  coordinate_count(&mut output, coordinates.len());
+  for &(x, y, z, m) in coordinates {
+    header(&mut output, dimensional_type(1, has_z, has_m));
+    dimensional_coordinate(&mut output, x, y, z, m);
+  }
+  output
+}
+
+pub fn dimensional_line_string(coordinates: &[DimensionalCoordinate]) -> Vec<u8> {
+  let (has_z, has_m) = dimensions(coordinates);
+  let coordinate_size = (2 + usize::from(has_z) + usize::from(has_m)) * 8;
+  let mut output = Vec::with_capacity(9 + coordinates.len() * coordinate_size);
+  header(&mut output, dimensional_type(2, has_z, has_m));
+  coordinate_count(&mut output, coordinates.len());
+  for &(x, y, z, m) in coordinates {
+    dimensional_coordinate(&mut output, x, y, z, m);
+  }
   output
 }
 
@@ -18,6 +52,32 @@ pub fn polygon(coordinates: &[(f64, f64)]) -> Vec<u8> {
   );
   for &(x, y) in coordinates {
     coordinate(&mut output, x, y);
+  }
+  output
+}
+
+pub fn dimensional_polygon(coordinates: &[(f64, f64, Option<f64>, Option<f64>)]) -> Vec<u8> {
+  dimensional_polygon_rings(&[coordinates])
+}
+
+pub fn dimensional_polygon_rings(rings: &[&[DimensionalCoordinate]]) -> Vec<u8> {
+  let coordinates = rings
+    .iter()
+    .flat_map(|ring| ring.iter())
+    .copied()
+    .collect::<Vec<_>>();
+  let (has_z, has_m) = dimensions(&coordinates);
+  let coordinate_size = (2 + usize::from(has_z) + usize::from(has_m)) * 8;
+  let total_coordinate_count = coordinates.len();
+  let mut output =
+    Vec::with_capacity(9 + rings.len() * 4 + total_coordinate_count * coordinate_size);
+  header(&mut output, dimensional_type(3, has_z, has_m));
+  coordinate_count(&mut output, rings.len());
+  for ring in rings {
+    coordinate_count(&mut output, ring.len());
+    for &(x, y, z, m) in *ring {
+      dimensional_coordinate(&mut output, x, y, z, m);
+    }
   }
   output
 }
@@ -60,6 +120,41 @@ fn header(output: &mut Vec<u8>, geometry_type: u32) {
 fn coordinate(output: &mut Vec<u8>, x: f64, y: f64) {
   output.extend_from_slice(&x.to_le_bytes());
   output.extend_from_slice(&y.to_le_bytes());
+}
+
+fn coordinate_count(output: &mut Vec<u8>, count: usize) {
+  output.extend_from_slice(
+    &u32::try_from(count)
+      .expect("fixture coordinate count fits u32")
+      .to_le_bytes(),
+  );
+}
+
+fn dimensional_coordinate(output: &mut Vec<u8>, x: f64, y: f64, z: Option<f64>, m: Option<f64>) {
+  coordinate(output, x, y);
+  if let Some(z) = z {
+    output.extend_from_slice(&z.to_le_bytes());
+  }
+  if let Some(m) = m {
+    output.extend_from_slice(&m.to_le_bytes());
+  }
+}
+
+fn dimensions(coordinates: &[DimensionalCoordinate]) -> (bool, bool) {
+  (
+    coordinates.iter().any(|coordinate| coordinate.2.is_some()),
+    coordinates.iter().any(|coordinate| coordinate.3.is_some()),
+  )
+}
+
+fn dimensional_type(base_type: u32, has_z: bool, has_m: bool) -> u32 {
+  base_type
+    + match (has_z, has_m) {
+      (false, false) => 0,
+      (true, false) => 1000,
+      (false, true) => 2000,
+      (true, true) => 3000,
+    }
 }
 
 fn require_little_endian_type(bytes: &[u8], expected_type: u32) -> Result<()> {

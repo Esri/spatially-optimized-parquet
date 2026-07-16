@@ -58,9 +58,11 @@ impl<'a> PlainOutput<'a> {
     self,
     output_wkid: u32,
     covering: bool,
+    strip_z: bool,
+    strip_m: bool,
     compression: Option<&str>,
   ) -> Result<u64> {
-    let source = resolve_source(
+    let mut source = resolve_source(
       self.input,
       self.input_dataframe.clone(),
       self.source_schema,
@@ -69,6 +71,7 @@ impl<'a> PlainOutput<'a> {
       self.row_range,
     )
     .await?;
+    source.strip_dimensions(strip_z, strip_m);
     let source_projjson = source
       .source_spatial_reference
       .projjson
@@ -80,6 +83,8 @@ impl<'a> PlainOutput<'a> {
       self.source_schema,
       &source,
       &reprojection,
+      strip_z,
+      strip_m,
     )?;
     let target_extent = TargetExtentResolver::new(self.input, self.row_range)
       .resolve(&source, &prepared, &reprojection)

@@ -29,6 +29,26 @@ pub fn wkb_point(x: f64, y: f64) -> Vec<u8> {
   wkb::point(x, y)
 }
 
+pub fn wkb_dimensional_point(x: f64, y: f64, z: Option<f64>, m: Option<f64>) -> Vec<u8> {
+  wkb::dimensional_point(x, y, z, m)
+}
+
+pub fn wkb_dimensional_multi_point(coordinates: &[wkb::DimensionalCoordinate]) -> Vec<u8> {
+  wkb::dimensional_multi_point(coordinates)
+}
+
+pub fn wkb_dimensional_line_string(coordinates: &[wkb::DimensionalCoordinate]) -> Vec<u8> {
+  wkb::dimensional_line_string(coordinates)
+}
+
 pub fn wkb_polygon(coords: &[(f64, f64)]) -> Vec<u8> {
   wkb::polygon(coords)
+}
+
+pub fn wkb_dimensional_polygon(coordinates: &[(f64, f64, Option<f64>, Option<f64>)]) -> Vec<u8> {
+  wkb::dimensional_polygon(coordinates)
+}
+
+pub fn wkb_dimensional_polygon_rings(rings: &[&[wkb::DimensionalCoordinate]]) -> Vec<u8> {
+  wkb::dimensional_polygon_rings(rings)
 }

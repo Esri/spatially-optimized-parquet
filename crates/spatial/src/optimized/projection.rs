@@ -3,11 +3,11 @@
 use crate::geoparquet::bbox_field_expr;
 use crate::optimized::clustering::{
   ClusterRangeBoundaries, cluster_key_column, cluster_partition_column, cluster_sort_expr,
-  non_point_xzcode_from_bounds_expr, point_expr, point_zcode_from_xy_expr,
+  non_point_xzcode_from_bounds_expr, point_expr_with_dimensions, point_zcode_from_xy_expr,
 };
 use crate::optimized::multiscale::{
-  COVERING_BBOX_COLUMN, GEODISPLAY_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_CODE_COLUMN,
-  TEMP_XZ_CODE_COLUMN,
+  COVERING_BBOX_COLUMN, GEODISPLAY_COLUMN, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN,
+  POINT_Z_CODE_COLUMN, POINT_Z_COLUMN, TEMP_XZ_CODE_COLUMN,
 };
 use crate::optimized::multiscale::{non_point_geodisplay_expr, point_geodisplay_expr};
 use crate::optimized::{ClusteringFamily, OptimizedGeometry, ResolvedOptimization};
@@ -17,12 +17,15 @@ use datafusion::functions::core::expr_ext::FieldAccessor;
 use datafusion::logical_expr::Expr;
 use datafusion::logical_expr::expr_fn::ident;
 
+use crate::pipeline::PipelineWarningStore;
+
 /// Create the globally sorted lazy projection for single-file output.
 pub(super) fn single_file_projection(
   context: &ResolvedOptimization,
   input_dataframe: DataFrame,
   source_schema: &arrow_schema::Schema,
   covering: bool,
+  warning_store: PipelineWarningStore,
 ) -> Result<DataFrame> {
   let retained_cluster_key_column = Some(cluster_key_column(context.geometry().clustering_family));
   let ordered_dataframe = helper_projection(input_dataframe, source_schema, context)?.sort(
@@ -35,6 +38,7 @@ pub(super) fn single_file_projection(
       None,
       retained_cluster_key_column,
       covering,
+      warning_store,
     ))
     .map_err(Into::into)
 }
@@ -57,6 +61,7 @@ pub(super) fn partitioned_projection(
   source_schema: &arrow_schema::Schema,
   boundaries: &ClusterRangeBoundaries,
   covering: bool,
+  warning_store: PipelineWarningStore,
 ) -> Result<DataFrame> {
   let partition_column = cluster_partition_column(context.geometry().clustering_family);
   let dataframe = helper_projection(input_dataframe, source_schema, context)?.with_column(
@@ -71,6 +76,7 @@ pub(super) fn partitioned_projection(
       Some(partition_column),
       retained_cluster_key_column,
       covering,
+      warning_store,
     ))
     .map_err(Into::into)
 }
@@ -92,6 +98,7 @@ fn output_projection_expressions(
   partition_column: Option<&str>,
   retained_cluster_key_column: Option<&str>,
   covering: bool,
+  warning_store: PipelineWarningStore,
 ) -> Vec<Expr> {
   let mut expressions = source_schema
     .fields()
@@ -107,12 +114,18 @@ fn output_projection_expressions(
   }
   match context.geometry().clustering_family {
     ClusteringFamily::Point => {
-      expressions.push(point_geodisplay_expr());
+      expressions.push(point_geodisplay_expr(
+        context.geometry().has_z,
+        context.geometry().has_m,
+      ));
     }
     ClusteringFamily::NonPoint => expressions.push(non_point_geodisplay_expr(
       &context.geometry().geometry_spec.column,
       context.geometry().geometry_type,
+      context.geometry().has_z,
+      context.geometry().has_m,
       context.encodings(),
+      warning_store,
     )),
   }
   if let Some(partition_column) = partition_column {
@@ -147,9 +160,19 @@ fn add_geometry_helper_columns_dataframe(
 ) -> Result<DataFrame> {
   match geometry.clustering_family {
     ClusteringFamily::Point => {
-      let point = point_expr(&geometry.geometry_spec.column);
+      let point = point_expr_with_dimensions(
+        &geometry.geometry_spec.column,
+        geometry.has_z,
+        geometry.has_m,
+      );
       projected = projected.with_column(POINT_X_COLUMN, point.clone().field("x"))?;
-      projected = projected.with_column(POINT_Y_COLUMN, point.field("y"))?;
+      projected = projected.with_column(POINT_Y_COLUMN, point.clone().field("y"))?;
+      if geometry.has_z {
+        projected = projected.with_column(POINT_Z_COLUMN, point.clone().field("z"))?;
+      }
+      if geometry.has_m {
+        projected = projected.with_column(POINT_M_COLUMN, point.field("m"))?;
+      }
     }
     ClusteringFamily::NonPoint => {}
   }
@@ -196,7 +219,12 @@ fn is_generated_optimized_output_column(name: &str, clustering_family: Clusterin
     ClusteringFamily::Point => {
       matches!(
         name,
-        GEODISPLAY_COLUMN | POINT_Z_CODE_COLUMN | POINT_X_COLUMN | POINT_Y_COLUMN
+        GEODISPLAY_COLUMN
+          | POINT_Z_CODE_COLUMN
+          | POINT_X_COLUMN
+          | POINT_Y_COLUMN
+          | POINT_Z_COLUMN
+          | POINT_M_COLUMN
       )
     }
     ClusteringFamily::NonPoint => name == GEODISPLAY_COLUMN,

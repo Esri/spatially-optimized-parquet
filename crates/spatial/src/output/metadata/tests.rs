@@ -142,6 +142,8 @@ fn point_geodisplay_metadata_serializes_z_clustering() {
         code: "zCode".to_string(),
         x_column: "x".to_string(),
         y_column: "y".to_string(),
+        z_column: None,
+        m_column: None,
         coordinate_precision: 20,
         full_extent: Extent2D {
           xmin: -180.0,

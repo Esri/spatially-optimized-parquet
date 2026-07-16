@@ -15,7 +15,7 @@ use tokio::runtime::Runtime;
 use common::assertion::{
   assert_close, assert_covering_metadata, binary_value, string_value, struct_f64_value,
 };
-use common::fixture::wkb_point;
+use common::fixture::{wkb_dimensional_point, wkb_point};
 use common::geometry::{point_xy_from_wkb, transform_point_between_epsg};
 use common::parquet::{
   geoparquet_kv, geoparquet_kv_with_epsg, kv_map, scan_parquet, write_parquet,
@@ -126,6 +126,67 @@ fn plain_output_preserves_wkb_rows_and_passthrough_metadata() {
       .iter()
       .any(|finding| finding.rule() == ValidationRule::MetadataMissing)
   );
+}
+
+#[test]
+fn plain_output_strips_z_and_m_independently() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("point-zm.parquet");
+  let schema = Arc::new(Schema::new(vec![Field::new(
+    "geometry",
+    DataType::Binary,
+    false,
+  )]));
+  let point = wkb_dimensional_point(1.0, 2.0, Some(30.0), Some(40.0));
+  let batch = arrow_array::RecordBatch::try_new(
+    schema.clone(),
+    vec![Arc::new(BinaryArray::from(vec![Some(point.as_slice())]))],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv("geometry", &["Point ZM"])],
+  );
+
+  for (name, strip_z, strip_m, expected_type, expected_geometry_type) in [
+    ("strip-z", true, false, 2001_u32, "Point M"),
+    ("strip-m", false, true, 1001_u32, "Point Z"),
+  ] {
+    let output = temp.path().join(format!("{name}.parquet"));
+    runtime()
+      .block_on(run(SpatialPipelineOptions::new(
+        InputOptions::new(
+          input.to_string_lossy(),
+          None,
+          RowRange::default(),
+          None,
+          None,
+          None,
+        ),
+        OutputOptions::new(&output, OutputMode::Plain, None, None, 4326, false, true)
+          .with_stripped_dimensions(strip_z, strip_m),
+      )))
+      .unwrap();
+
+    let dataframe = runtime()
+      .block_on(scan_parquet(output.to_str().unwrap()))
+      .unwrap();
+    let batches = runtime().block_on(dataframe.collect()).unwrap();
+    let geometry = binary_value(batches[0].column_by_name("geometry").unwrap().as_ref(), 0);
+    assert_eq!(
+      u32::from_le_bytes(geometry[1..5].try_into().unwrap()),
+      expected_type
+    );
+    let metadata = kv_map(&output);
+    let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").unwrap()).unwrap();
+    assert_eq!(
+      geo["columns"]["geometry"]["geometry_types"][0],
+      expected_geometry_type
+    );
+  }
 }
 
 #[test]

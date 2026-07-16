@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use arrow_array::{
-  BinaryArray, Float64Array, Int32Array, RecordBatch, StringArray, StructArray, UInt64Array,
+  Array, BinaryArray, Float64Array, Int32Array, RecordBatch, StringArray, StructArray, UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema};
 use gdal_sys::OGRwkbGeometryType;
@@ -20,7 +20,7 @@ use common::assertion::{
   assert_close, assert_covering_metadata, assert_json_extent, binary_value, string_value,
   struct_f64_value,
 };
-use common::fixture::{wkb_point, wkb_polygon};
+use common::fixture::{wkb_dimensional_point, wkb_dimensional_polygon, wkb_point, wkb_polygon};
 use common::geometry::{point_xy_from_wkb, polygon_extent_from_wkb, transform_point_between_epsg};
 use common::gpkg::{GpkgFeature, GpkgLayerSpec, write_gpkg};
 use common::parquet::{
@@ -40,6 +40,31 @@ fn run_optimized(
   input_wkid: Option<u32>,
   covering: bool,
 ) -> Result<SpatialPipelineResult> {
+  run_optimized_with_stripping(
+    input,
+    output,
+    row_range,
+    layer,
+    geometry_column,
+    input_wkid,
+    covering,
+    false,
+    false,
+  )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_optimized_with_stripping(
+  input: &Path,
+  output: &Path,
+  row_range: RowRange,
+  layer: Option<String>,
+  geometry_column: Option<String>,
+  input_wkid: Option<u32>,
+  covering: bool,
+  strip_z: bool,
+  strip_m: bool,
+) -> Result<SpatialPipelineResult> {
   runtime().block_on(run(SpatialPipelineOptions::new(
     InputOptions::new(
       input.to_string_lossy(),
@@ -57,7 +82,8 @@ fn run_optimized(
       4326,
       covering,
       true,
-    ),
+    )
+    .with_stripped_dimensions(strip_z, strip_m),
   )))
 }
 
@@ -141,7 +167,7 @@ fn optimized_output_sorts_points_and_writes_metadata() {
   let batches = runtime().block_on(dataframe.collect()).unwrap();
   let batch = &batches[0];
   let geodisplay = output_schema.field_with_name("geodisplay").unwrap();
-  assert!(!geodisplay.is_nullable());
+  assert!(geodisplay.is_nullable());
   let DataType::Struct(fields) = geodisplay.data_type() else {
     panic!("geodisplay must be a struct");
   };
@@ -169,14 +195,536 @@ fn optimized_output_sorts_points_and_writes_metadata() {
   assert_eq!(geodisplay["index"]["xColumn"], "x");
   assert_eq!(geodisplay["index"]["yColumn"], "y");
   assert_eq!(geodisplay["index"]["wkid"], 4326);
-  assert!(
-    geodisplay["index"]["wkt"]
-      .as_str()
-      .unwrap()
-      .contains("WGS 84")
-  );
+  assert!(geodisplay["index"].get("wkt").is_none());
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["authority"], "EPSG");
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
+}
+
+#[test]
+fn optimized_output_uses_null_geodisplay_for_null_points() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("nullable-points.parquet");
+  let output = temp.path().join("nullable-points-optimized.parquet");
+  let schema = Arc::new(Schema::new(vec![
+    Field::new("name", DataType::Utf8, false),
+    Field::new("geometry", DataType::Binary, true),
+  ]));
+  let point = wkb_point(1.0, 2.0);
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![
+      Arc::new(StringArray::from(vec!["missing", "point"])),
+      Arc::new(BinaryArray::from(vec![None, Some(point.as_slice())])),
+    ],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv("geometry", &["Point"])],
+  );
+
+  run_optimized(
+    &input,
+    &output,
+    RowRange::default(),
+    None,
+    None,
+    None,
+    false,
+  )
+  .unwrap();
+
+  let dataframe = runtime()
+    .block_on(scan_parquet(output.to_str().unwrap()))
+    .unwrap();
+  let output_schema = dataframe.schema().as_arrow().clone();
+  let batches = runtime().block_on(dataframe.collect()).unwrap();
+  let (batch, missing_index) = batches
+    .iter()
+    .find_map(|batch| {
+      let names = batch.column_by_name("name").unwrap();
+      (0..batch.num_rows())
+        .find(|index| string_value(names.as_ref(), *index) == "missing")
+        .map(|index| (batch, index))
+    })
+    .unwrap();
+  let geodisplay_field = output_schema.field_with_name("geodisplay").unwrap();
+  let DataType::Struct(fields) = geodisplay_field.data_type() else {
+    panic!("geodisplay must be a struct");
+  };
+  let geodisplay = batch
+    .column_by_name("geodisplay")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap();
+
+  assert!(geodisplay_field.is_nullable());
+  assert!(!fields.find("zCode").unwrap().1.is_nullable());
+  assert!(!fields.find("x").unwrap().1.is_nullable());
+  assert!(!fields.find("y").unwrap().1.is_nullable());
+  assert!(geodisplay.is_null(missing_index));
+}
+
+#[test]
+fn optimized_output_keeps_point_z_and_m_in_wkb_columns_and_metadata() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("points-zm.parquet");
+  let output = temp.path().join("points-zm-optimized.parquet");
+  let schema = Arc::new(Schema::new(vec![
+    Field::new("name", DataType::Utf8, false),
+    Field::new("geometry", DataType::Binary, true),
+  ]));
+  let point = wkb_dimensional_point(1.0, 2.0, Some(30.0), Some(40.0));
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![
+      Arc::new(StringArray::from(vec!["dimensional"])),
+      Arc::new(BinaryArray::from(vec![Some(point.as_slice())])),
+    ],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv("geometry", &["Point ZM"])],
+  );
+
+  run_optimized(
+    &input,
+    &output,
+    RowRange::default(),
+    None,
+    None,
+    None,
+    false,
+  )
+  .unwrap();
+  assert!(!validate(&output).unwrap().has_errors());
+
+  let dataframe = runtime()
+    .block_on(scan_parquet(output.to_str().unwrap()))
+    .unwrap();
+  let batches = runtime().block_on(dataframe.collect()).unwrap();
+  let batch = &batches[0];
+  assert_eq!(
+    binary_value(batch.column_by_name("geometry").unwrap().as_ref(), 0),
+    point
+  );
+  let geodisplay = batch
+    .column_by_name("geodisplay")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap();
+  assert_eq!(struct_f64_value(geodisplay, "x", 0), 1.0);
+  assert_eq!(struct_f64_value(geodisplay, "y", 0), 2.0);
+  assert_eq!(struct_f64_value(geodisplay, "z", 0), 30.0);
+  assert_eq!(struct_f64_value(geodisplay, "m", 0), 40.0);
+
+  let metadata = kv_map(&output);
+  let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").unwrap()).unwrap();
+  let geodisplay_metadata: serde_json::Value =
+    serde_json::from_str(metadata.get("geodisplay").unwrap()).unwrap();
+  assert_eq!(geo["columns"]["geometry"]["geometry_types"][0], "Point ZM");
+  assert_eq!(geodisplay_metadata["index"]["hasZ"], true);
+  assert_eq!(geodisplay_metadata["index"]["hasM"], true);
+  assert_eq!(geodisplay_metadata["index"]["zColumn"], "z");
+  assert_eq!(geodisplay_metadata["index"]["mColumn"], "m");
+}
+
+#[test]
+fn optimized_output_supports_xyz_and_xym_points() {
+  let temp = TempDir::new().unwrap();
+  for (suffix, geometry_type, z, m) in [
+    ("xyz", "Point Z", Some(30.0), None),
+    ("xym", "Point M", None, Some(40.0)),
+  ] {
+    let input = temp.path().join(format!("point-{suffix}.parquet"));
+    let output = temp
+      .path()
+      .join(format!("point-{suffix}-optimized.parquet"));
+    let schema = Arc::new(Schema::new(vec![Field::new(
+      "geometry",
+      DataType::Binary,
+      false,
+    )]));
+    let point = wkb_dimensional_point(1.0, 2.0, z, m);
+    let batch = RecordBatch::try_new(
+      schema.clone(),
+      vec![Arc::new(BinaryArray::from(vec![Some(point.as_slice())]))],
+    )
+    .unwrap();
+    write_parquet(
+      &input,
+      &schema,
+      &[batch],
+      parquet::basic::Compression::SNAPPY,
+      &[geoparquet_kv("geometry", &[geometry_type])],
+    );
+
+    run_optimized(
+      &input,
+      &output,
+      RowRange::default(),
+      None,
+      None,
+      None,
+      false,
+    )
+    .unwrap();
+    assert!(!validate(&output).unwrap().has_errors());
+
+    let dataframe = runtime()
+      .block_on(scan_parquet(output.to_str().unwrap()))
+      .unwrap();
+    let batches = runtime().block_on(dataframe.collect()).unwrap();
+    let geodisplay = batches[0]
+      .column_by_name("geodisplay")
+      .unwrap()
+      .as_any()
+      .downcast_ref::<StructArray>()
+      .unwrap();
+    assert_eq!(geodisplay.column_by_name("z").is_some(), z.is_some());
+    assert_eq!(geodisplay.column_by_name("m").is_some(), m.is_some());
+    if let Some(z) = z {
+      assert_eq!(struct_f64_value(geodisplay, "z", 0), z);
+    }
+    if let Some(m) = m {
+      assert_eq!(struct_f64_value(geodisplay, "m", 0), m);
+    }
+  }
+}
+
+#[test]
+fn optimized_output_strips_z_and_m_independently() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("point-zm.parquet");
+  let schema = Arc::new(Schema::new(vec![Field::new(
+    "geometry",
+    DataType::Binary,
+    false,
+  )]));
+  let point = wkb_dimensional_point(1.0, 2.0, Some(30.0), Some(40.0));
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![Arc::new(BinaryArray::from(vec![Some(point.as_slice())]))],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv("geometry", &["Point ZM"])],
+  );
+
+  for (name, strip_z, strip_m, expected_type, expected_geometry_type) in [
+    ("strip-z", true, false, 2001_u32, "Point M"),
+    ("strip-m", false, true, 1001_u32, "Point Z"),
+    ("strip-zm", true, true, 1_u32, "Point"),
+  ] {
+    let output = temp.path().join(format!("{name}.parquet"));
+    run_optimized_with_stripping(
+      &input,
+      &output,
+      RowRange::default(),
+      None,
+      None,
+      None,
+      false,
+      strip_z,
+      strip_m,
+    )
+    .unwrap();
+    assert!(!validate(&output).unwrap().has_errors());
+
+    let dataframe = runtime()
+      .block_on(scan_parquet(output.to_str().unwrap()))
+      .unwrap();
+    let batches = runtime().block_on(dataframe.collect()).unwrap();
+    let geometry = binary_value(batches[0].column_by_name("geometry").unwrap().as_ref(), 0);
+    assert_eq!(
+      u32::from_le_bytes(geometry[1..5].try_into().unwrap()),
+      expected_type
+    );
+    let geodisplay = batches[0]
+      .column_by_name("geodisplay")
+      .unwrap()
+      .as_any()
+      .downcast_ref::<StructArray>()
+      .unwrap();
+    assert_eq!(geodisplay.column_by_name("z").is_some(), !strip_z);
+    assert_eq!(geodisplay.column_by_name("m").is_some(), !strip_m);
+
+    let metadata = kv_map(&output);
+    let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").unwrap()).unwrap();
+    let geodisplay_metadata: serde_json::Value =
+      serde_json::from_str(metadata.get("geodisplay").unwrap()).unwrap();
+    assert_eq!(
+      geo["columns"]["geometry"]["geometry_types"][0],
+      expected_geometry_type
+    );
+    assert_eq!(geodisplay_metadata["index"]["hasZ"], !strip_z);
+    assert_eq!(geodisplay_metadata["index"]["hasM"], !strip_m);
+  }
+}
+
+#[test]
+fn optimized_point_output_rejects_wkb_dimensions_that_disagree_with_metadata() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("point-mismatch.parquet");
+  let output = temp.path().join("point-mismatch-output.parquet");
+  let schema = Arc::new(Schema::new(vec![Field::new(
+    "geometry",
+    DataType::Binary,
+    false,
+  )]));
+  let geometry = wkb_point(1.0, 2.0);
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![Arc::new(BinaryArray::from(vec![Some(geometry.as_slice())]))],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv("geometry", &["Point Z"])],
+  );
+
+  let error = run_optimized(
+    &input,
+    &output,
+    RowRange::default(),
+    None,
+    None,
+    None,
+    false,
+  )
+  .unwrap_err();
+  assert!(
+    error
+      .to_string()
+      .contains("WKB dimensions do not match GeoParquet metadata")
+  );
+}
+
+#[test]
+fn optimized_non_point_output_zero_fills_dimensions_that_disagree_with_metadata() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("polygon-mismatch.parquet");
+  let output = temp.path().join("polygon-mismatch-output.parquet");
+  let schema = Arc::new(Schema::new(vec![Field::new(
+    "geometry",
+    DataType::Binary,
+    false,
+  )]));
+  let geometry = wkb_polygon(&[(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 0.0)]);
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![Arc::new(BinaryArray::from(vec![Some(geometry.as_slice())]))],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv("geometry", &["Polygon M"])],
+  );
+
+  let result = run_optimized(
+    &input,
+    &output,
+    RowRange::default(),
+    None,
+    None,
+    None,
+    false,
+  )
+  .unwrap();
+
+  assert_eq!(result.rows_written(), 1);
+  assert_eq!(result.warnings().len(), 1);
+  assert!(result.warnings()[0].contains("encoding missing ordinates as 0"));
+}
+
+#[test]
+fn optimized_output_writes_dimensional_polygon_pbf_with_absolute_z_and_m() {
+  use prost::Message;
+
+  #[derive(Clone, PartialEq, Message)]
+  struct PbfGeometry {
+    #[prost(uint32, repeated, tag = "2")]
+    lengths: Vec<u32>,
+    #[prost(sint64, repeated, tag = "3")]
+    coords: Vec<i64>,
+  }
+
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("polygon-zm.parquet");
+  let output = temp.path().join("polygon-zm-optimized.parquet");
+  let schema = Arc::new(Schema::new(vec![Field::new(
+    "geometry",
+    DataType::Binary,
+    false,
+  )]));
+  let polygon = wkb_dimensional_polygon(&[
+    (0.0, 0.0, Some(10.0), Some(100.0)),
+    (4.0, 0.0, Some(20.0), Some(200.0)),
+    (4.0, 4.0, Some(30.0), Some(300.0)),
+    (0.0, 4.0, Some(40.0), Some(400.0)),
+    (0.0, 0.0, Some(10.0), Some(100.0)),
+  ]);
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![Arc::new(BinaryArray::from(vec![Some(polygon.as_slice())]))],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv("geometry", &["Polygon ZM"])],
+  );
+
+  run_optimized(
+    &input,
+    &output,
+    RowRange::default(),
+    None,
+    None,
+    None,
+    false,
+  )
+  .unwrap();
+  assert!(!validate(&output).unwrap().has_errors());
+
+  let dataframe = runtime()
+    .block_on(scan_parquet(output.to_str().unwrap()))
+    .unwrap();
+  let batches = runtime().block_on(dataframe.collect()).unwrap();
+  let geodisplay = batches[0]
+    .column_by_name("geodisplay")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap();
+  let level_16 = binary_value(geodisplay.column_by_name("level_16").unwrap().as_ref(), 0);
+  let decoded = PbfGeometry::decode(level_16.as_slice()).unwrap();
+  assert_eq!(decoded.lengths, vec![5]);
+  assert_eq!(decoded.coords.len(), 20);
+  assert_eq!(
+    decoded
+      .coords
+      .chunks_exact(4)
+      .map(|coordinate| (coordinate[2], coordinate[3]))
+      .collect::<Vec<_>>(),
+    vec![(10, 100), (40, 400), (30, 300), (20, 200), (10, 100)]
+  );
+
+  let metadata = kv_map(&output);
+  let geodisplay_metadata: serde_json::Value =
+    serde_json::from_str(metadata.get("geodisplay").unwrap()).unwrap();
+  assert_eq!(geodisplay_metadata["index"]["hasZ"], true);
+  assert_eq!(geodisplay_metadata["index"]["hasM"], true);
+  assert_eq!(
+    geodisplay_metadata["index"]["levels"][0]["transform"]["scale"][2],
+    1.0
+  );
+  assert_eq!(
+    geodisplay_metadata["index"]["levels"][0]["transform"]["scale"][3],
+    1.0
+  );
+}
+
+#[test]
+fn optimized_output_strips_polygon_pbf_dimensions() {
+  use prost::Message;
+
+  #[derive(Clone, PartialEq, Message)]
+  struct PbfGeometry {
+    #[prost(uint32, repeated, tag = "2")]
+    lengths: Vec<u32>,
+    #[prost(sint64, repeated, tag = "3")]
+    coords: Vec<i64>,
+  }
+
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("polygon-zm.parquet");
+  let schema = Arc::new(Schema::new(vec![Field::new(
+    "geometry",
+    DataType::Binary,
+    false,
+  )]));
+  let polygon = wkb_dimensional_polygon(&[
+    (0.0, 0.0, Some(10.0), Some(100.0)),
+    (4.0, 0.0, Some(20.0), Some(200.0)),
+    (4.0, 4.0, Some(30.0), Some(300.0)),
+    (0.0, 0.0, Some(10.0), Some(100.0)),
+  ]);
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![Arc::new(BinaryArray::from(vec![Some(polygon.as_slice())]))],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv("geometry", &["Polygon ZM"])],
+  );
+
+  for (name, strip_z, strip_m, expected_ordinates) in [
+    ("strip-z", true, false, vec![100_i64, 300, 200, 100]),
+    ("strip-m", false, true, vec![10_i64, 30, 20, 10]),
+  ] {
+    let output = temp.path().join(format!("{name}.parquet"));
+    run_optimized_with_stripping(
+      &input,
+      &output,
+      RowRange::default(),
+      None,
+      None,
+      None,
+      false,
+      strip_z,
+      strip_m,
+    )
+    .unwrap();
+    assert!(!validate(&output).unwrap().has_errors());
+
+    let dataframe = runtime()
+      .block_on(scan_parquet(output.to_str().unwrap()))
+      .unwrap();
+    let batches = runtime().block_on(dataframe.collect()).unwrap();
+    let geodisplay = batches[0]
+      .column_by_name("geodisplay")
+      .unwrap()
+      .as_any()
+      .downcast_ref::<StructArray>()
+      .unwrap();
+    let payload = binary_value(geodisplay.column_by_name("level_16").unwrap().as_ref(), 0);
+    let decoded = PbfGeometry::decode(payload.as_slice()).unwrap();
+    assert_eq!(decoded.coords.len(), 12);
+    assert_eq!(
+      decoded
+        .coords
+        .chunks_exact(3)
+        .map(|coordinate| coordinate[2])
+        .collect::<Vec<_>>(),
+      expected_ordinates
+    );
+  }
 }
 
 #[test]
@@ -229,6 +777,59 @@ fn optimized_output_writes_covering_bbox_for_reprojected_points() {
   let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").unwrap()).unwrap();
   assert_covering_metadata(&geo);
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
+}
+
+#[test]
+fn optimized_output_reprojects_xy_and_preserves_point_z_and_m() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("point-zm-3857.parquet");
+  let output = temp.path().join("point-zm-4326.parquet");
+  let schema = Arc::new(Schema::new(vec![Field::new(
+    "geometry",
+    DataType::Binary,
+    false,
+  )]));
+  let (x, y) = transform_point_between_epsg(1.0, 2.0, 4326, 3857);
+  let point = wkb_dimensional_point(x, y, Some(30.0), Some(40.0));
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![Arc::new(BinaryArray::from(vec![Some(point.as_slice())]))],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv_with_epsg("geometry", &["Point ZM"], 3857)],
+  );
+
+  run_optimized(
+    &input,
+    &output,
+    RowRange::default(),
+    None,
+    None,
+    None,
+    false,
+  )
+  .unwrap();
+  assert!(!validate(&output).unwrap().has_errors());
+
+  let dataframe = runtime()
+    .block_on(scan_parquet(output.to_str().unwrap()))
+    .unwrap();
+  let batches = runtime().block_on(dataframe.collect()).unwrap();
+  let geodisplay = batches[0]
+    .column_by_name("geodisplay")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap();
+  assert_close(struct_f64_value(geodisplay, "x", 0), 1.0);
+  assert_close(struct_f64_value(geodisplay, "y", 0), 2.0);
+  assert_eq!(struct_f64_value(geodisplay, "z", 0), 30.0);
+  assert_eq!(struct_f64_value(geodisplay, "m", 0), 40.0);
 }
 
 #[test]
@@ -316,12 +917,7 @@ fn optimized_output_reprojects_selected_geoparquet_rows() {
   assert_json_extent(&geo["columns"]["geometry"]["bbox"], [1.0, 1.0, 1.0, 1.0]);
   assert_json_extent(&geodisplay["index"]["fullExtent"], [1.0, 1.0, 1.0, 1.0]);
   assert_eq!(geodisplay["index"]["wkid"], 4326);
-  assert!(
-    geodisplay["index"]["wkt"]
-      .as_str()
-      .unwrap()
-      .contains("WGS 84")
-  );
+  assert!(geodisplay["index"].get("wkt").is_none());
   assert!(!metadata.get("geo").unwrap().contains("3857"));
   assert!(!metadata.get("geodisplay").unwrap().contains("3857"));
 }
@@ -405,12 +1001,7 @@ fn optimized_output_writes_non_point_display_struct_and_metadata() {
   assert_eq!(geodisplay["index"]["version"], "0.1");
   assert_eq!(geodisplay["index"]["encoding"], "esriPBF");
   assert_eq!(geodisplay["index"]["wkid"], 4326);
-  assert!(
-    geodisplay["index"]["wkt"]
-      .as_str()
-      .unwrap()
-      .contains("WGS 84")
-  );
+  assert!(geodisplay["index"].get("wkt").is_none());
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["authority"], "EPSG");
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
   let levels = geodisplay["index"]["levels"].as_array().unwrap();
@@ -886,12 +1477,7 @@ fn optimized_output_reprojects_geopackage_polygon() {
   assert_json_extent(&geo["columns"]["geometry"]["bbox"], [0.0, 0.0, 1.0, 1.0]);
   assert_json_extent(&geodisplay["index"]["fullExtent"], [0.0, 0.0, 1.0, 1.0]);
   assert_eq!(geodisplay["index"]["wkid"], 4326);
-  assert!(
-    geodisplay["index"]["wkt"]
-      .as_str()
-      .unwrap()
-      .contains("WGS 84")
-  );
+  assert!(geodisplay["index"].get("wkt").is_none());
   assert_eq!(geodisplay["index"]["levels"][0]["column"], "level_0");
   assert_eq!(geodisplay["index"]["levels"][0]["resolution"], 0.703125);
   assert_eq!(

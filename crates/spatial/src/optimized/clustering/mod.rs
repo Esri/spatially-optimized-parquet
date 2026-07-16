@@ -16,4 +16,4 @@ pub(crate) use xz::{DEFAULT_XZ_MAX_LEVEL, extent_xz_code};
 pub(crate) use z::DEFAULT_COORDINATE_PRECISION;
 pub(crate) use z::point_expr;
 pub(crate) use z::point_z_code;
-pub(in crate::optimized) use z::point_zcode_from_xy_expr;
+pub(in crate::optimized) use z::{point_expr_with_dimensions, point_zcode_from_xy_expr};

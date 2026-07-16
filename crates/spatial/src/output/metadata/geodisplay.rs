@@ -95,6 +95,10 @@ pub(crate) struct ZClusteringIndexInput {
   pub(crate) x_column: String,
   /// Names the y-coordinate column.
   pub(crate) y_column: String,
+  /// Names the z-coordinate column when present.
+  pub(crate) z_column: Option<String>,
+  /// Names the m-coordinate column when present.
+  pub(crate) m_column: Option<String>,
   /// Stores coordinate quantization precision.
   pub(crate) coordinate_precision: u32,
   /// Stores the indexed dataset extent.
@@ -195,8 +199,8 @@ impl ZClusteringIndex {
       wkt: input.wkt,
       x_column: input.x_column,
       y_column: input.y_column,
-      z_column: None,
-      m_column: None,
+      z_column: input.z_column,
+      m_column: input.m_column,
       coordinate_precision: input.coordinate_precision,
       full_extent: input.full_extent,
       geometry_type: "point".to_string(),

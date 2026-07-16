@@ -50,6 +50,8 @@ pub struct OutputOptions {
   pub(super) output_wkid: u32,
   pub(super) covering: bool,
   pub(super) overwrite: bool,
+  pub(super) strip_z: bool,
+  pub(super) strip_m: bool,
 }
 
 impl OutputOptions {
@@ -71,7 +73,16 @@ impl OutputOptions {
       output_wkid,
       covering,
       overwrite,
+      strip_z: false,
+      strip_m: false,
     }
+  }
+
+  /// Remove selected dimensional ordinates from output geometry.
+  pub fn with_stripped_dimensions(mut self, strip_z: bool, strip_m: bool) -> Self {
+    self.strip_z = strip_z;
+    self.strip_m = strip_m;
+    self
   }
 }
 

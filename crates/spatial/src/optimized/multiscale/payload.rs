@@ -11,28 +11,32 @@ use super::traversal::visit_geometry_for_display;
 use super::traversal::{
   ExtentAccumulator, GeometryPartRole, GeometryPartSink, visit_wkb_geometry_for_display,
 };
-use crate::geometry::Extent2D;
+use crate::geometry::{Extent2D, WkbCoordinate};
 use crate::optimized::OptimizedGeometryType;
 
 /// Stores flattened coordinate and part-length sequences without computed bounds.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct FlatGeometryPayload {
-  /// Stores interleaved x/y coordinates for every traversed part.
-  pub(super) coords: Vec<f64>,
+  /// Stores complete coordinates for every traversed part.
+  pub(super) coordinates: Vec<WkbCoordinate>,
   /// Stores the coordinate-pair count of each geometry part.
   pub(super) lengths: Vec<u32>,
+  pub(super) has_z: bool,
+  pub(super) has_m: bool,
 }
 
 /// Stores flattened geometry sequences together with their source extent.
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct GeometryPayload {
-  /// Stores interleaved x/y coordinates for every traversed part.
-  pub(super) coords: Vec<f64>,
+  /// Stores complete coordinates for every traversed part.
+  pub(super) coordinates: Vec<WkbCoordinate>,
   /// Stores the coordinate-pair count of each geometry part.
   pub(super) lengths: Vec<u32>,
   /// Stores the extent observed while flattening coordinates.
   pub(super) bounds: Extent2D,
+  pub(super) has_z: bool,
+  pub(super) has_m: bool,
 }
 
 /// Decode WKB into flattened optimized geometry and bounds.
@@ -43,9 +47,11 @@ fn geometry_payload_from_wkb(
 ) -> Result<GeometryPayload> {
   let (payload, bounds) = geometry_payload_parts_from_wkb(bytes, geometry_type, true)?;
   Ok(GeometryPayload {
-    coords: payload.coords,
+    coordinates: payload.coordinates,
     lengths: payload.lengths,
     bounds: bounds.unwrap_or_default(),
+    has_z: payload.has_z,
+    has_m: payload.has_m,
   })
 }
 
@@ -66,9 +72,11 @@ pub(super) fn geometry_payload_from_geometry(
   let (payload, bounds) =
     geometry_payload_parts_from_geometry_trait(geometry, geometry_type, true)?;
   Ok(GeometryPayload {
-    coords: payload.coords,
+    coordinates: payload.coordinates,
     lengths: payload.lengths,
     bounds: bounds.unwrap_or_default(),
+    has_z: payload.has_z,
+    has_m: payload.has_m,
   })
 }
 
@@ -78,8 +86,17 @@ fn geometry_payload_parts_from_wkb(
   track_bounds: bool,
 ) -> Result<(FlatGeometryPayload, Option<Extent2D>)> {
   let mut builder = PayloadBuilder::new(track_bounds);
-  visit_wkb_geometry_for_display(bytes, geometry_type, &mut builder)?;
-  Ok(builder.finish())
+  let dimensions = visit_wkb_geometry_for_display(bytes, geometry_type, &mut builder)?;
+  Ok(builder.finish(
+    matches!(
+      dimensions,
+      geo_traits::Dimensions::Xyz | geo_traits::Dimensions::Xyzm
+    ),
+    matches!(
+      dimensions,
+      geo_traits::Dimensions::Xym | geo_traits::Dimensions::Xyzm
+    ),
+  ))
 }
 
 #[cfg(test)]
@@ -90,11 +107,11 @@ fn geometry_payload_parts_from_geometry_trait<G: GeometryTrait<T = f64>>(
 ) -> Result<(FlatGeometryPayload, Option<Extent2D>)> {
   let mut builder = PayloadBuilder::new(track_bounds);
   visit_geometry_for_display(geometry, geometry_type, &mut builder)?;
-  Ok(builder.finish())
+  Ok(builder.finish(false, false))
 }
 
 struct PayloadBuilder {
-  coords: Vec<f64>,
+  coordinates: Vec<WkbCoordinate>,
   lengths: Vec<u32>,
   current_len: u32,
   bounds: Option<ExtentAccumulator>,
@@ -103,18 +120,20 @@ struct PayloadBuilder {
 impl PayloadBuilder {
   fn new(track_bounds: bool) -> Self {
     Self {
-      coords: Vec::new(),
+      coordinates: Vec::new(),
       lengths: Vec::new(),
       current_len: 0,
       bounds: track_bounds.then(ExtentAccumulator::default),
     }
   }
 
-  fn finish(self) -> (FlatGeometryPayload, Option<Extent2D>) {
+  fn finish(self, has_z: bool, has_m: bool) -> (FlatGeometryPayload, Option<Extent2D>) {
     (
       FlatGeometryPayload {
-        coords: self.coords,
+        coordinates: self.coordinates,
         lengths: self.lengths,
+        has_z,
+        has_m,
       },
       self.bounds.and_then(ExtentAccumulator::finish),
     )
@@ -126,12 +145,11 @@ impl GeometryPartSink for PayloadBuilder {
     self.current_len = 0;
   }
 
-  fn push_coord(&mut self, x: f64, y: f64) {
-    self.coords.push(x);
-    self.coords.push(y);
+  fn push_coord(&mut self, coordinate: WkbCoordinate) {
+    self.coordinates.push(coordinate);
     self.current_len += 1;
     if let Some(bounds) = self.bounds.as_mut() {
-      bounds.push(x, y);
+      bounds.push(coordinate.x, coordinate.y);
     }
   }
 
@@ -163,7 +181,7 @@ mod tests {
     let flat = flat_geometry_payload_from_wkb(&buffer, OptimizedGeometryType::Polygon).unwrap();
 
     assert_eq!(from_wkb, from_geometry);
-    assert_eq!(flat.coords, from_geometry.coords);
+    assert_eq!(flat.coordinates, from_geometry.coordinates);
     assert_eq!(flat.lengths, from_geometry.lengths);
   }
 }

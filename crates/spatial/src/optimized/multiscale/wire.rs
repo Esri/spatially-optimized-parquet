@@ -34,7 +34,14 @@ pub(crate) fn decode_pbf_geometry(bytes: &[u8]) -> Result<PbfGeometry> {
 #[cfg(test)]
 fn encode_geometry(payload: &GeometryPayload, encoding: &GeometryEncoding) -> Result<Vec<u8>> {
   let mut scratch = GeometryEncodeScratch::default();
-  encode_geometry_owned_with_scratch_impl(&payload.coords, &payload.lengths, encoding, &mut scratch)
+  encode_geometry_owned_with_scratch_impl(
+    &payload.coordinates,
+    &payload.lengths,
+    encoding,
+    payload.has_z,
+    payload.has_m,
+    &mut scratch,
+  )
 }
 
 /// Quantize and encode a flat payload into reusable scratch storage.
@@ -45,16 +52,26 @@ pub(super) fn encode_flat_geometry_with_scratch<'a>(
   encoding: &GeometryEncoding,
   scratch: &'a mut GeometryEncodeScratch,
 ) -> Result<&'a [u8]> {
-  encode_geometry_with_scratch_impl(&payload.coords, &payload.lengths, encoding, scratch)
+  encode_geometry_with_scratch_impl(
+    &payload.coordinates,
+    &payload.lengths,
+    encoding,
+    payload.has_z,
+    payload.has_m,
+    scratch,
+  )
 }
 
 fn encode_geometry_with_scratch_impl<'a>(
-  coords: &[f64],
+  coordinates: &[crate::geometry::WkbCoordinate],
   lengths: &[u32],
   encoding: &GeometryEncoding,
+  has_z: bool,
+  has_m: bool,
   scratch: &'a mut GeometryEncodeScratch,
 ) -> Result<&'a [u8]> {
-  let message = quantized_message_from_slices(coords, lengths, encoding, scratch)?;
+  let message =
+    quantized_message_from_slices(coordinates, lengths, encoding, has_z, has_m, scratch)?;
   scratch.buffer.clear();
   scratch.buffer.reserve(message.encoded_len());
   message.encode(&mut scratch.buffer)?;
@@ -65,12 +82,15 @@ fn encode_geometry_with_scratch_impl<'a>(
 
 #[cfg(test)]
 fn encode_geometry_owned_with_scratch_impl(
-  coords: &[f64],
+  coordinates: &[crate::geometry::WkbCoordinate],
   lengths: &[u32],
   encoding: &GeometryEncoding,
+  has_z: bool,
+  has_m: bool,
   scratch: &mut GeometryEncodeScratch,
 ) -> Result<Vec<u8>> {
-  let message = quantized_message_from_slices(coords, lengths, encoding, scratch)?;
+  let message =
+    quantized_message_from_slices(coordinates, lengths, encoding, has_z, has_m, scratch)?;
   let mut buffer = Vec::with_capacity(message.encoded_len());
   message.encode(&mut buffer)?;
   scratch.quantized_coords = message.coords;
@@ -79,9 +99,11 @@ fn encode_geometry_owned_with_scratch_impl(
 }
 
 fn quantized_message_from_slices(
-  coords: &[f64],
+  coordinates: &[crate::geometry::WkbCoordinate],
   lengths: &[u32],
   encoding: &GeometryEncoding,
+  has_z: bool,
+  has_m: bool,
   scratch: &mut GeometryEncodeScratch,
 ) -> Result<PbfGeometry> {
   let mut message = PbfGeometry {
@@ -89,9 +111,11 @@ fn quantized_message_from_slices(
     coords: std::mem::take(&mut scratch.quantized_coords),
   };
   encode_quantized_payload_into(
-    coords,
+    coordinates,
     lengths,
     encoding,
+    has_z,
+    has_m,
     &mut message.coords,
     &mut message.lengths,
   )?;

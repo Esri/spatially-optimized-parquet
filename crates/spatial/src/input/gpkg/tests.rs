@@ -2,7 +2,9 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 
-use arrow_array::{Int32Array, StringArray, StringViewArray};
+use arrow_array::{
+  BinaryArray, BinaryViewArray, Int32Array, LargeBinaryArray, StringArray, StringViewArray,
+};
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
 use datafusion::physical_plan::ExecutionPlanProperties;
 use futures_util::StreamExt;
@@ -10,12 +12,17 @@ use gdal::spatial_ref::SpatialRef;
 use gdal::vector::{Feature, Geometry, LayerAccess, LayerOptions};
 use gdal::{Dataset, DriverManager};
 use gdal_sys::{OGRFieldType, OGRwkbGeometryType};
+use geo_traits::Dimensions;
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
-use crate::geometry::{Extent2D, GeometryKind};
+use crate::geometry::{
+  BinaryValueAccess, Extent2D, GeometryKind, PolygonRingOrder, WkbCoordinate, WkbPartRole, WkbSink,
+  visit_wkb_geometry,
+};
 use crate::input::{InputOpenOptions, InputSource, RowRange, SourceFormat, open_input};
 use crate::session::DataFusionSession;
+use crate::{InputOptions, OutputMode, OutputOptions, SpatialPipelineOptions, run, validate};
 
 fn runtime() -> Runtime {
   Runtime::new().unwrap()
@@ -103,6 +110,34 @@ fn string_value(array: &dyn arrow_array::Array, index: usize) -> String {
     return array.value(index).to_string();
   }
   panic!("unexpected string array type: {:?}", array.data_type());
+}
+
+fn binary_value(array: &dyn arrow_array::Array, index: usize) -> Vec<u8> {
+  if let Some(array) = array.as_any().downcast_ref::<BinaryArray>() {
+    return array.value_opt(index).unwrap().to_vec();
+  }
+  if let Some(array) = array.as_any().downcast_ref::<LargeBinaryArray>() {
+    return array.value_opt(index).unwrap().to_vec();
+  }
+  if let Some(array) = array.as_any().downcast_ref::<BinaryViewArray>() {
+    return array.value_opt(index).unwrap().to_vec();
+  }
+  panic!("unexpected binary array type: {:?}", array.data_type());
+}
+
+#[derive(Default)]
+struct CoordinateSink {
+  coordinates: Vec<WkbCoordinate>,
+}
+
+impl WkbSink for CoordinateSink {
+  fn start_part(&mut self, _role: WkbPartRole) {}
+
+  fn push_coord(&mut self, coordinate: WkbCoordinate) {
+    self.coordinates.push(coordinate);
+  }
+
+  fn finish_part(&mut self) {}
 }
 
 #[test]
@@ -613,6 +648,264 @@ fn open_input_uses_sampled_geometry_type_for_generic_layer_metadata() {
       ymax: 2.0,
     })
   );
+}
+
+#[test]
+fn open_input_infers_z_and_m_from_generic_geopackage_wkb() {
+  let temp = TempDir::new().unwrap();
+  let path = temp.path().join("generic-point-zm.gpkg");
+  let features = [GpkgFeature {
+    id: 1,
+    name: Some("dimensional"),
+    geometry_wkt: "POINT ZM (1 2 3 4)",
+  }];
+  write_gpkg(
+    &path,
+    &[GpkgLayerSpec {
+      name: "generic_spatial",
+      geometry_type: OGRwkbGeometryType::wkbUnknown,
+      epsg: Some(4326),
+      features: &features,
+    }],
+  );
+
+  let input = open_gpkg_input(&path, None);
+  let geometry = input.source_metadata().unwrap().geometry.unwrap();
+
+  assert_eq!(geometry.geometry_types, vec![GeometryKind::Point]);
+  assert!(geometry.has_z);
+  assert!(geometry.has_m);
+}
+
+#[test]
+fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
+  struct DimensionCase {
+    suffix: &'static str,
+    ordinates: &'static str,
+    has_z: bool,
+    has_m: bool,
+    dimensions: Dimensions,
+  }
+
+  struct GeometryCase {
+    name: &'static str,
+    geometry_kind: GeometryKind,
+    geometry_types: [OGRwkbGeometryType::Type; 3],
+    supports_optimized_output: bool,
+  }
+
+  let dimension_cases = [
+    DimensionCase {
+      suffix: "Z",
+      ordinates: "3",
+      has_z: true,
+      has_m: false,
+      dimensions: Dimensions::Xyz,
+    },
+    DimensionCase {
+      suffix: "M",
+      ordinates: "4",
+      has_z: false,
+      has_m: true,
+      dimensions: Dimensions::Xym,
+    },
+    DimensionCase {
+      suffix: "ZM",
+      ordinates: "3 4",
+      has_z: true,
+      has_m: true,
+      dimensions: Dimensions::Xyzm,
+    },
+  ];
+  let geometry_cases = [
+    GeometryCase {
+      name: "point",
+      geometry_kind: GeometryKind::Point,
+      geometry_types: [
+        OGRwkbGeometryType::wkbPoint25D,
+        OGRwkbGeometryType::wkbPointM,
+        OGRwkbGeometryType::wkbPointZM,
+      ],
+      supports_optimized_output: true,
+    },
+    GeometryCase {
+      name: "line_string",
+      geometry_kind: GeometryKind::LineString,
+      geometry_types: [
+        OGRwkbGeometryType::wkbLineString25D,
+        OGRwkbGeometryType::wkbLineStringM,
+        OGRwkbGeometryType::wkbLineStringZM,
+      ],
+      supports_optimized_output: true,
+    },
+    GeometryCase {
+      name: "polygon",
+      geometry_kind: GeometryKind::Polygon,
+      geometry_types: [
+        OGRwkbGeometryType::wkbPolygon25D,
+        OGRwkbGeometryType::wkbPolygonM,
+        OGRwkbGeometryType::wkbPolygonZM,
+      ],
+      supports_optimized_output: true,
+    },
+    GeometryCase {
+      name: "multi_point",
+      geometry_kind: GeometryKind::MultiPoint,
+      geometry_types: [
+        OGRwkbGeometryType::wkbMultiPoint25D,
+        OGRwkbGeometryType::wkbMultiPointM,
+        OGRwkbGeometryType::wkbMultiPointZM,
+      ],
+      supports_optimized_output: true,
+    },
+    GeometryCase {
+      name: "multi_line_string",
+      geometry_kind: GeometryKind::MultiLineString,
+      geometry_types: [
+        OGRwkbGeometryType::wkbMultiLineString25D,
+        OGRwkbGeometryType::wkbMultiLineStringM,
+        OGRwkbGeometryType::wkbMultiLineStringZM,
+      ],
+      supports_optimized_output: true,
+    },
+    GeometryCase {
+      name: "multi_polygon",
+      geometry_kind: GeometryKind::MultiPolygon,
+      geometry_types: [
+        OGRwkbGeometryType::wkbMultiPolygon25D,
+        OGRwkbGeometryType::wkbMultiPolygonM,
+        OGRwkbGeometryType::wkbMultiPolygonZM,
+      ],
+      supports_optimized_output: true,
+    },
+    GeometryCase {
+      name: "geometry_collection",
+      geometry_kind: GeometryKind::GeometryCollection,
+      geometry_types: [
+        OGRwkbGeometryType::wkbGeometryCollection25D,
+        OGRwkbGeometryType::wkbGeometryCollectionM,
+        OGRwkbGeometryType::wkbGeometryCollectionZM,
+      ],
+      supports_optimized_output: false,
+    },
+  ];
+
+  for geometry_case in geometry_cases {
+    for (dimension_index, dimension_case) in dimension_cases.iter().enumerate() {
+      let temp = TempDir::new().unwrap();
+      let path = temp.path().join(format!(
+        "{}-{}.gpkg",
+        geometry_case.name,
+        dimension_case.suffix.to_ascii_lowercase()
+      ));
+      let wkt = dimensional_geometry_wkt(
+        geometry_case.name,
+        dimension_case.suffix,
+        dimension_case.ordinates,
+      );
+      let features = [GpkgFeature {
+        id: 1,
+        name: Some("dimensional"),
+        geometry_wkt: &wkt,
+      }];
+      write_gpkg(
+        &path,
+        &[GpkgLayerSpec {
+          name: "dimensional",
+          geometry_type: geometry_case.geometry_types[dimension_index],
+          epsg: Some(4326),
+          features: &features,
+        }],
+      );
+
+      let input = open_gpkg_input(&path, None);
+      let geometry_metadata = input.source_metadata().unwrap().geometry.unwrap();
+      assert_eq!(
+        geometry_metadata.geometry_types,
+        vec![geometry_case.geometry_kind],
+        "{} {} metadata geometry type",
+        geometry_case.name,
+        dimension_case.suffix
+      );
+      assert_eq!(geometry_metadata.has_z, dimension_case.has_z);
+      assert_eq!(geometry_metadata.has_m, dimension_case.has_m);
+
+      let bytes = runtime().block_on(async {
+        let mut stream = input.read_batches(RowRange::default()).await.unwrap();
+        let batch = stream.next().await.unwrap().unwrap();
+        binary_value(batch.column_by_name("geometry").unwrap().as_ref(), 0)
+      });
+      let mut sink = CoordinateSink::default();
+      let header = visit_wkb_geometry(&bytes, PolygonRingOrder::Preserve, &mut sink).unwrap();
+      assert_eq!(header.kind, geometry_case.geometry_kind);
+      assert_eq!(header.dimensions, dimension_case.dimensions);
+      assert!(!sink.coordinates.is_empty());
+      assert_eq!(sink.coordinates[0].x, 1.0);
+      assert_eq!(sink.coordinates[0].y, 2.0);
+      assert_eq!(sink.coordinates[0].z, dimension_case.has_z.then_some(3.0));
+      assert_eq!(sink.coordinates[0].m, dimension_case.has_m.then_some(4.0));
+
+      let output = temp.path().join("optimized.parquet");
+      let optimization_result = runtime().block_on(run(SpatialPipelineOptions::new(
+        InputOptions::new(
+          path.to_string_lossy(),
+          None,
+          RowRange::default(),
+          None,
+          None,
+          None,
+        ),
+        OutputOptions::new(
+          &output,
+          OutputMode::Optimized,
+          None,
+          None,
+          4326,
+          false,
+          true,
+        ),
+      )));
+      if !geometry_case.supports_optimized_output {
+        let error = optimization_result.unwrap_err();
+        assert!(
+          error
+            .to_string()
+            .contains("unsupported geometry kind: GeometryCollection")
+        );
+        continue;
+      }
+      optimization_result.unwrap();
+      let report = validate(&output).unwrap();
+      assert!(
+        !report.has_errors(),
+        "{} {} output failed validation:\n{report}",
+        geometry_case.name,
+        dimension_case.suffix
+      );
+    }
+  }
+}
+
+fn dimensional_geometry_wkt(name: &str, suffix: &str, ordinates: &str) -> String {
+  let first = format!("1 2 {ordinates}");
+  let second = format!("5 2 {ordinates}");
+  let third = format!("5 6 {ordinates}");
+  match name {
+    "point" => format!("POINT {suffix} ({first})"),
+    "line_string" => format!("LINESTRING {suffix} ({first}, {second})"),
+    "polygon" => format!("POLYGON {suffix} (({first}, {second}, {third}, {first}))"),
+    "multi_point" => format!("MULTIPOINT {suffix} (({first}), ({second}))"),
+    "multi_line_string" => {
+      format!("MULTILINESTRING {suffix} (({first}, {second}), ({second}, {third}))")
+    }
+    "multi_polygon" => {
+      format!("MULTIPOLYGON {suffix} ((({first}, {second}, {third}, {first})))")
+    }
+    "geometry_collection" => {
+      format!("GEOMETRYCOLLECTION {suffix} (POINT {suffix} ({first}))")
+    }
+    _ => unreachable!("unsupported dimensional geometry fixture: {name}"),
+  }
 }
 
 #[test]

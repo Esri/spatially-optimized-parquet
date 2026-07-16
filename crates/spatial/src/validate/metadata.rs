@@ -283,8 +283,6 @@ fn validate_common_metadata(
   version: &str,
   writer: Option<(&str, &str)>,
   full_extent: Extent2D,
-  has_z: bool,
-  has_m: bool,
   file: &LoadedDatasetFile,
   report: &mut ValidationReport,
 ) {
@@ -313,14 +311,6 @@ fn validate_common_metadata(
     ),
     Some(_) => {}
   }
-  if has_z || has_m {
-    report.push(
-      ValidationRule::GeometryDimension,
-      ValidationSeverity::Error,
-      location.clone(),
-      "geodisplay hasZ and hasM must both be false",
-    );
-  }
   validate_extent(full_extent, location, "geodisplay fullExtent", report);
 }
 
@@ -336,8 +326,6 @@ fn validate_z_metadata(
       .as_ref()
       .map(|writer| (writer.name.as_str(), writer.version.as_str())),
     index.full_extent,
-    index.has_z,
-    index.has_m,
     file,
     report,
   );
@@ -395,8 +383,6 @@ fn validate_xz_metadata(
       .as_ref()
       .map(|writer| (writer.name.as_str(), writer.version.as_str())),
     index.full_extent,
-    index.has_z,
-    index.has_m,
     file,
     report,
   );
@@ -504,12 +490,14 @@ fn validate_xz_metadata(
       .any(|value| !value.is_finite())
       || level.transform.scale[0] <= 0.0
       || level.transform.scale[1] <= 0.0
+      || (index.has_z && level.transform.scale[2] <= 0.0)
+      || (index.has_m && level.transform.scale[3] <= 0.0)
     {
       report.push(
         ValidationRule::XzMetadata,
         ValidationSeverity::Error,
         level_location,
-        "transform values must be finite and x/y scales must be positive",
+        "transform values must be finite and scales for every present dimension must be positive",
       );
     }
   }
@@ -594,6 +582,15 @@ fn resolve_geodisplay_crs(
   };
   let location =
     ValidationLocation::file(file.file.relative_path.clone()).with_column("geodisplay");
+  if wkid.is_some() && wkt.is_some() {
+    report.push(
+      ValidationRule::Crs,
+      ValidationSeverity::Error,
+      location,
+      "geodisplay must define either wkid or wkt, not both",
+    );
+    return None;
+  }
   let wkid_crs = wkid.and_then(supported_crs);
   if wkid.is_some() && wkid_crs.is_none() {
     report.push(
@@ -621,17 +618,6 @@ fn resolve_geodisplay_crs(
       ValidationSeverity::Error,
       location,
       "geodisplay must define wkid or wkt",
-    );
-    return None;
-  }
-  if let (Some(wkid_crs), Some(wkt_crs)) = (wkid_crs, wkt_crs)
-    && wkid_crs != wkt_crs
-  {
-    report.push(
-      ValidationRule::Crs,
-      ValidationSeverity::Error,
-      location,
-      "geodisplay wkid and wkt resolve to different coordinate reference systems",
     );
     return None;
   }

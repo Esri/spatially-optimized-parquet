@@ -19,7 +19,7 @@ use crate::optimized::range_boundaries::compute_cluster_range_boundaries;
 use crate::optimized::write::{PartitionedOutputWriter, write_optimized_single_file};
 use crate::optimized::{ClusteringFamily, OptimizedGeometry, ResolvedOptimization};
 use crate::output::{OutputLayout, ReprojectionSpec};
-use crate::pipeline::SharedWriteReporter;
+use crate::pipeline::{PipelineWarningStore, SharedWriteReporter};
 
 /// Coordinates optimized resolution and output behind one crate-private product boundary.
 pub(crate) struct OptimizedOutput<'a, State> {
@@ -28,6 +28,7 @@ pub(crate) struct OptimizedOutput<'a, State> {
   source_schema: &'a Schema,
   total_input_rows: u64,
   write_reporter: Option<SharedWriteReporter>,
+  warning_store: PipelineWarningStore,
   state: State,
 }
 
@@ -54,6 +55,7 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
     total_input_rows: u64,
     row_range: RowRange,
     write_reporter: Option<SharedWriteReporter>,
+    warning_store: PipelineWarningStore,
   ) -> Self {
     Self {
       input_dataframe,
@@ -61,6 +63,7 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
       source_schema,
       total_input_rows,
       write_reporter,
+      warning_store,
       state: PendingOutputState { input, row_range },
     }
   }
@@ -72,9 +75,11 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
     input_wkid: Option<u32>,
     output_wkid: u32,
     covering: bool,
+    strip_z: bool,
+    strip_m: bool,
     compression: Option<&'a str>,
   ) -> Result<OptimizedOutput<'a, ResolvedOutputState<'a>>> {
-    let source = resolve_source(
+    let mut source = resolve_source(
       self.state.input,
       self.input_dataframe.clone(),
       self.source_schema,
@@ -83,6 +88,7 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
       self.state.row_range,
     )
     .await?;
+    source.strip_dimensions(strip_z, strip_m);
     let geometry = OptimizedGeometry::resolve(&source)?;
     let source_projjson = source
       .source_spatial_reference
@@ -95,6 +101,8 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
       self.source_schema,
       &source,
       &reprojection,
+      strip_z,
+      strip_m,
     )?;
     let target_extent = TargetExtentResolver::new(self.state.input, self.state.row_range)
       .resolve(&source, &prepared, &reprojection)
@@ -109,6 +117,7 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
       source_schema: self.source_schema,
       total_input_rows: self.total_input_rows,
       write_reporter: self.write_reporter,
+      warning_store: self.warning_store,
       state: ResolvedOutputState {
         covering,
         compression,
@@ -132,6 +141,7 @@ impl<'a> OptimizedOutput<'a, ResolvedOutputState<'a>> {
       self.input_dataframe.clone(),
       self.source_schema,
       self.state.covering,
+      self.warning_store.clone(),
     )?;
     let metadata = parquet_metadata(&self.state.optimization, self.state.covering)?;
     let hidden_sort_column = Some(cluster_key_column(
@@ -171,6 +181,7 @@ impl<'a> OptimizedOutput<'a, ResolvedOutputState<'a>> {
       self.source_schema,
       &boundaries,
       self.state.covering,
+      self.warning_store.clone(),
     )?;
     let metadata = parquet_metadata(&self.state.optimization, self.state.covering)?;
     PartitionedOutputWriter::new(

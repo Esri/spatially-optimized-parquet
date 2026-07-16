@@ -22,6 +22,7 @@ use crate::session::DataFusionSession;
 pub use options::{InputOptions, OutputOptions, SpatialPipelineOptions};
 pub(crate) use reporter::SharedWriteReporter;
 pub use reporter::{WriteProgress, WriteReporter};
+pub(crate) use result::PipelineWarningStore;
 pub use result::SpatialPipelineResult;
 pub use runner::run;
 
@@ -62,8 +63,11 @@ struct SpatialPipelineState {
   input_wkid: Option<u32>,
   output_wkid: u32,
   covering: bool,
+  strip_z: bool,
+  strip_m: bool,
   compression: Option<String>,
   write_reporter: Option<SharedWriteReporter>,
+  warning_store: PipelineWarningStore,
 }
 
 impl Pipeline {
@@ -96,6 +100,6 @@ impl OptimizedPartitionedPipeline {
 
 impl SpatialPipelineState {
   fn finish(&self, rows_written: u64) -> SpatialPipelineResult {
-    SpatialPipelineResult::new(self.total_input_rows, rows_written)
+    SpatialPipelineResult::new(self.total_input_rows, rows_written, &self.warning_store)
   }
 }

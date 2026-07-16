@@ -1,7 +1,5 @@
 //! Computes Morton Z-order codes and DataFusion expressions for point clustering.
 
-#![allow(dead_code)]
-
 use std::any::Any;
 use std::sync::{Arc, OnceLock};
 
@@ -13,14 +11,15 @@ use datafusion::common::cast::{
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
 use datafusion::logical_expr::{
   ColumnarValue, Expr, ReturnFieldArgs, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature,
-  TypeSignature, Volatility,
+  Volatility,
 };
 use datafusion::prelude::{col, lit};
 
-use crate::geometry::{
-  BinaryValueAccess, Extent2D, geometry_signature, map_geometry_to_u64, to_datafusion_error,
+use crate::geometry::read_wkb_point_coordinate;
+use crate::geometry::{BinaryValueAccess, Extent2D, geometry_signature, to_datafusion_error};
+use crate::optimized::multiscale::{
+  POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_CODE_COLUMN, POINT_Z_COLUMN,
 };
-use crate::optimized::multiscale::{POINT_Z_CODE_COLUMN, point_xy_from_wkb};
 
 use super::ClusterKey;
 
@@ -62,7 +61,9 @@ fn quantize_to_bits(value: f64, min: f64, max: f64, coordinate_precision: u32) -
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct PointUdf;
+struct PointUdf {
+  expected_dimensions: Option<(bool, bool)>,
+}
 
 impl ScalarUDFImpl for PointUdf {
   fn as_any(&self) -> &dyn Any {
@@ -85,7 +86,7 @@ impl ScalarUDFImpl for PointUdf {
     Ok(Arc::new(Field::new(
       self.name(),
       DataType::Struct(point_fields()),
-      false,
+      true,
     )))
   }
 
@@ -95,56 +96,24 @@ impl ScalarUDFImpl for PointUdf {
       .first()
       .ok_or_else(|| DataFusionError::Execution("missing geometry argument".to_string()))?;
     let output = match geometry.data_type() {
-      DataType::Binary => point_coords_struct(as_binary_array(geometry.as_ref())?)?,
-      DataType::LargeBinary => point_coords_struct(as_large_binary_array(geometry.as_ref())?)?,
-      DataType::BinaryView => point_coords_struct(as_binary_view_array(geometry.as_ref())?)?,
+      DataType::Binary => point_coords_struct(
+        as_binary_array(geometry.as_ref())?,
+        self.expected_dimensions,
+      )?,
+      DataType::LargeBinary => point_coords_struct(
+        as_large_binary_array(geometry.as_ref())?,
+        self.expected_dimensions,
+      )?,
+      DataType::BinaryView => point_coords_struct(
+        as_binary_view_array(geometry.as_ref())?,
+        self.expected_dimensions,
+      )?,
       other => {
         return Err(DataFusionError::Execution(format!(
           "unsupported geometry data type for UDF: {other}"
         )));
       }
     };
-    Ok(ColumnarValue::Array(Arc::new(output) as ArrayRef))
-  }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct ZGeometryClusterKeyUdf;
-
-impl ScalarUDFImpl for ZGeometryClusterKeyUdf {
-  fn as_any(&self) -> &dyn Any {
-    self
-  }
-
-  fn name(&self) -> &str {
-    "clustering_point_zcode"
-  }
-
-  fn signature(&self) -> &Signature {
-    geometry_cluster_signature()
-  }
-
-  fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
-    Ok(DataType::UInt64)
-  }
-
-  fn return_field_from_args(&self, _: ReturnFieldArgs) -> DataFusionResult<Arc<Field>> {
-    Ok(Arc::new(Field::new(self.name(), DataType::UInt64, false)))
-  }
-
-  fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
-    let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-    let geometry = arrays
-      .first()
-      .ok_or_else(|| DataFusionError::Execution("missing geometry argument".to_string()))?;
-    let full_extent = extent_from_args(&arrays, 1)?;
-    let output = map_geometry_to_u64(geometry, |bytes| match bytes {
-      Some(bytes) => {
-        let (x, y) = point_xy_from_wkb(bytes).map_err(to_datafusion_error)?;
-        Ok(point_z_code(full_extent, x, y, DEFAULT_COORDINATE_PRECISION).value())
-      }
-      None => Ok(0),
-    })?;
     Ok(ColumnarValue::Array(Arc::new(output) as ArrayRef))
   }
 }
@@ -170,7 +139,7 @@ impl ScalarUDFImpl for ZPointClusterKeyUdf {
   }
 
   fn return_field_from_args(&self, _: ReturnFieldArgs) -> DataFusionResult<Arc<Field>> {
-    Ok(Arc::new(Field::new(self.name(), DataType::UInt64, false)))
+    Ok(Arc::new(Field::new(self.name(), DataType::UInt64, true)))
   }
 
   fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
@@ -181,15 +150,17 @@ impl ScalarUDFImpl for ZPointClusterKeyUdf {
     let mut values = Vec::with_capacity(x.len());
     for index in 0..x.len() {
       values.push(if x.is_null(index) || y.is_null(index) {
-        0
+        None
       } else {
-        point_z_code(
-          full_extent,
-          x.value(index),
-          y.value(index),
-          DEFAULT_COORDINATE_PRECISION,
+        Some(
+          point_z_code(
+            full_extent,
+            x.value(index),
+            y.value(index),
+            DEFAULT_COORDINATE_PRECISION,
+          )
+          .value(),
         )
-        .value()
       });
     }
     Ok(ColumnarValue::Array(
@@ -198,37 +169,56 @@ impl ScalarUDFImpl for ZPointClusterKeyUdf {
   }
 }
 
-fn point_udf() -> ScalarUDF {
-  ScalarUDF::new_from_impl(PointUdf)
-}
-
-fn point_zcode_udf() -> ScalarUDF {
-  ScalarUDF::new_from_impl(ZGeometryClusterKeyUdf)
+fn point_udf(expected_dimensions: Option<(bool, bool)>) -> ScalarUDF {
+  ScalarUDF::new_from_impl(PointUdf {
+    expected_dimensions,
+  })
 }
 
 fn point_zcode_from_xy_udf() -> ScalarUDF {
   ScalarUDF::new_from_impl(ZPointClusterKeyUdf)
 }
 
-fn point_coords_struct<T>(array: &T) -> DataFusionResult<StructArray>
+fn point_coords_struct<T>(
+  array: &T,
+  expected_dimensions: Option<(bool, bool)>,
+) -> DataFusionResult<StructArray>
 where
   T: BinaryValueAccess,
 {
   let mut xs = Vec::with_capacity(array.len());
   let mut ys = Vec::with_capacity(array.len());
+  let mut zs = Vec::with_capacity(array.len());
+  let mut ms = Vec::with_capacity(array.len());
   for index in 0..array.len() {
-    let (x, y) = array
-      .value_opt(index)
-      .and_then(|bytes| point_xy_from_wkb(bytes).ok())
-      .unwrap_or((f64::NAN, f64::NAN));
-    xs.push(x);
-    ys.push(y);
+    let Some(bytes) = array.value_opt(index) else {
+      xs.push(None);
+      ys.push(None);
+      zs.push(None);
+      ms.push(None);
+      continue;
+    };
+    let coordinate = read_wkb_point_coordinate(bytes).map_err(to_datafusion_error)?;
+    if let Some((has_z, has_m)) = expected_dimensions
+      && (coordinate.z.is_some() != has_z || coordinate.m.is_some() != has_m)
+    {
+      return Err(DataFusionError::Execution(
+        "point WKB dimensions do not match GeoParquet metadata".to_string(),
+      ));
+    }
+    xs.push(Some(coordinate.x));
+    ys.push(Some(coordinate.y));
+    zs.push(coordinate.z);
+    ms.push(coordinate.m);
   }
-  let x_array = Float64Array::from(xs);
-  let y_array = Float64Array::from(ys);
   StructArray::try_new(
     point_fields(),
-    vec![Arc::new(x_array), Arc::new(y_array)],
+    vec![
+      Arc::new(Float64Array::from(xs)),
+      Arc::new(Float64Array::from(ys)),
+      Arc::new(Float64Array::from(zs)),
+      Arc::new(Float64Array::from(ms)),
+    ],
     None,
   )
   .map_err(to_datafusion_error)
@@ -239,36 +229,13 @@ fn point_fields() -> Fields {
   FIELDS
     .get_or_init(|| {
       Fields::from(vec![
-        Arc::new(Field::new("x", DataType::Float64, false)),
-        Arc::new(Field::new("y", DataType::Float64, false)),
+        Arc::new(Field::new(POINT_X_COLUMN, DataType::Float64, true)),
+        Arc::new(Field::new(POINT_Y_COLUMN, DataType::Float64, true)),
+        Arc::new(Field::new(POINT_Z_COLUMN, DataType::Float64, true)),
+        Arc::new(Field::new(POINT_M_COLUMN, DataType::Float64, true)),
       ])
     })
     .clone()
-}
-
-fn geometry_cluster_signature() -> &'static Signature {
-  static SIGNATURE: OnceLock<Signature> = OnceLock::new();
-  SIGNATURE.get_or_init(|| {
-    Signature::one_of(
-      [
-        DataType::Binary,
-        DataType::LargeBinary,
-        DataType::BinaryView,
-      ]
-      .into_iter()
-      .map(|geometry_type| {
-        TypeSignature::Exact(vec![
-          geometry_type,
-          DataType::Float64,
-          DataType::Float64,
-          DataType::Float64,
-          DataType::Float64,
-        ])
-      })
-      .collect(),
-      Volatility::Immutable,
-    )
-  })
 }
 
 fn z_cluster_signature() -> &'static Signature {
@@ -277,7 +244,15 @@ fn z_cluster_signature() -> &'static Signature {
 }
 
 pub(crate) fn point_expr(geometry_column: &str) -> Expr {
-  point_udf().call(vec![col(geometry_column)])
+  point_udf(None).call(vec![col(geometry_column)])
+}
+
+pub(in crate::optimized) fn point_expr_with_dimensions(
+  geometry_column: &str,
+  has_z: bool,
+  has_m: bool,
+) -> Expr {
+  point_udf(Some((has_z, has_m))).call(vec![col(geometry_column)])
 }
 
 pub(in crate::optimized) fn point_zcode_from_xy_expr(
@@ -324,16 +299,11 @@ mod tests {
   use super::*;
 
   #[test]
-  fn point_coordinates_are_required_and_use_nan_for_missing_or_invalid_geometry() {
+  fn point_coordinates_are_null_for_missing_geometry() {
     let point_wkb = crate::geometry::write_test_geometry(&Geometry::Point(Point::new(1.0, 2.0)));
-    let invalid_wkb = [0_u8, 1, 2];
-    let input = BinaryArray::from(vec![
-      Some(point_wkb.as_slice()),
-      None,
-      Some(invalid_wkb.as_slice()),
-    ]);
+    let input = BinaryArray::from(vec![Some(point_wkb.as_slice()), None]);
 
-    let coordinates = point_coords_struct(&input).unwrap();
+    let coordinates = point_coords_struct(&input, None).unwrap();
     let x = coordinates
       .column_by_name("x")
       .unwrap()
@@ -347,17 +317,25 @@ mod tests {
       .downcast_ref::<Float64Array>()
       .unwrap();
 
-    assert!(!coordinates.fields()[0].is_nullable());
-    assert!(!coordinates.fields()[1].is_nullable());
+    assert!(coordinates.fields()[0].is_nullable());
+    assert!(coordinates.fields()[1].is_nullable());
     assert_eq!(coordinates.null_count(), 0);
-    assert_eq!(x.null_count(), 0);
-    assert_eq!(y.null_count(), 0);
+    assert_eq!(x.null_count(), 1);
+    assert_eq!(y.null_count(), 1);
     assert_eq!(x.value(0), 1.0);
     assert_eq!(y.value(0), 2.0);
-    assert!(x.value(1).is_nan());
-    assert!(y.value(1).is_nan());
-    assert!(x.value(2).is_nan());
-    assert!(y.value(2).is_nan());
+    assert!(x.is_null(1));
+    assert!(y.is_null(1));
+  }
+
+  #[test]
+  fn point_coordinate_extraction_rejects_invalid_wkb() {
+    let invalid_wkb = [0_u8, 1, 2];
+    let input = BinaryArray::from(vec![Some(invalid_wkb.as_slice())]);
+
+    let error = point_coords_struct(&input, None).unwrap_err();
+
+    assert!(error.to_string().contains("unexpected end of WKB"));
   }
 
   #[test]

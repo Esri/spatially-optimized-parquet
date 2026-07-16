@@ -16,7 +16,7 @@ pub(super) enum ClusteringFamily {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Identifies geometry types supported by spatial optimization.
-pub(super) enum OptimizedGeometryType {
+pub(crate) enum OptimizedGeometryType {
   /// Represents single-point features.
   Point,
   /// Represents multipoint features.
@@ -88,26 +88,13 @@ impl OptimizedGeometry {
   /// Resolve optimized geometry from normalized source geometry facts.
   pub(super) fn resolve(source: &ResolvedGeoParquetSource) -> Result<Self> {
     let geometry_type = OptimizedGeometryType::from_kinds(&source.geometry_types)?;
-    let geometry = Self {
+    Ok(Self {
       geometry_spec: source.geometry_spec.clone(),
       geometry_type,
       clustering_family: geometry_type.clustering_family(),
       has_z: source.has_z,
       has_m: source.has_m,
-    };
-    geometry.validate()?;
-    Ok(geometry)
-  }
-
-  /// Validate geometry dimensions and categories implemented by optimized encoding.
-  fn validate(&self) -> Result<()> {
-    if self.has_z || self.has_m {
-      bail!("optimized output does not yet support Z/M geometries")
-    }
-    if matches!(self.geometry_type, OptimizedGeometryType::MultiPoint) {
-      bail!("optimized output does not yet support multipoint geometries")
-    }
-    Ok(())
+    })
   }
 }
 

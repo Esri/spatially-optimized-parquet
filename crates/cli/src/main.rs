@@ -103,6 +103,10 @@ struct WriteCommand {
     help = "Write a root bbox struct column and GeoParquet 1.1 covering metadata"
   )]
   covering: bool,
+  #[arg(long, help = "Remove Z ordinates from output geometry and metadata")]
+  strip_z: bool,
+  #[arg(long, help = "Remove M ordinates from output geometry and metadata")]
+  strip_m: bool,
   #[arg(
     long,
     help = "Overwrite the output file or replace the output directory if it exists"
@@ -147,6 +151,9 @@ async fn run(cli: Cli) -> Result<()> {
       let options = SpatialPipelineOptions::from(args).with_write_reporter(reporter.clone());
       let result = spatial::run(options).await?;
       reporter.finish(result.rows_written(), result.rows_expected());
+      for warning in result.warnings() {
+        eprintln!("{warning}");
+      }
       Ok(())
     }
     Command::Validate(args) => match spatial::validate(&args.path)?.ensure_valid() {
@@ -185,7 +192,8 @@ impl From<WriteCommand> for SpatialPipelineOptions {
         args.out_sr,
         args.covering,
         args.overwrite,
-      ),
+      )
+      .with_stripped_dimensions(args.strip_z, args.strip_m),
     );
     if let Some(memory_limit_bytes) = memory_limit_bytes {
       options = options.with_memory_limit_bytes(memory_limit_bytes);
@@ -289,6 +297,27 @@ mod tests {
       panic!("expected write command");
     };
     assert!(args.no_progress);
+  }
+
+  #[test]
+  fn write_subcommand_accepts_dimension_stripping_flags() {
+    let cli = Cli::try_parse_from([
+      "sop",
+      "write",
+      "--input",
+      "input.parquet",
+      "--output",
+      "output.parquet",
+      "--strip-z",
+      "--strip-m",
+    ])
+    .unwrap();
+
+    let Command::Write(args) = cli.command else {
+      panic!("expected write command");
+    };
+    assert!(args.strip_z);
+    assert!(args.strip_m);
   }
 
   #[test]

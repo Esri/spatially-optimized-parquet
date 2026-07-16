@@ -9,6 +9,10 @@ pub(crate) const POINT_Z_CODE_COLUMN: &str = "zCode";
 pub(crate) const POINT_X_COLUMN: &str = "x";
 /// Names the generated point y-coordinate column.
 pub(crate) const POINT_Y_COLUMN: &str = "y";
+/// Names the generated point z-coordinate column.
+pub(crate) const POINT_Z_COLUMN: &str = "z";
+/// Names the generated point m-coordinate column.
+pub(crate) const POINT_M_COLUMN: &str = "m";
 /// Names the generated non-point geodisplay struct column.
 pub(crate) const GEODISPLAY_COLUMN: &str = "geodisplay";
 /// Names the XZ-order field within the geodisplay struct.

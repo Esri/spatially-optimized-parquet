@@ -30,6 +30,19 @@ pub(crate) struct ResolvedGeoParquetSource {
   pub(crate) source_metadata: SourceDatasetMetadata,
 }
 
+impl ResolvedGeoParquetSource {
+  pub(crate) fn strip_dimensions(&mut self, strip_z: bool, strip_m: bool) {
+    self.has_z &= !strip_z;
+    self.has_m &= !strip_m;
+    if let Some(geometry) = self.source_metadata.geometry.as_mut()
+      && geometry.column == self.geometry_spec.column
+    {
+      geometry.has_z = self.has_z;
+      geometry.has_m = self.has_m;
+    }
+  }
+}
+
 /// Resolve geometry, CRS, exact type, and extent for the selected rows.
 pub(crate) async fn resolve_source(
   input: &dyn InputSource,

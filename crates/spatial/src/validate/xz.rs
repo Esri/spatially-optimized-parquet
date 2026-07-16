@@ -2,7 +2,11 @@ use arrow_array::{Array, Float64Array, UInt64Array};
 use arrow_schema::DataType;
 
 use crate::geometry::Extent2D;
-use crate::optimized::{decode_pbf_geometry, extent_xz_code};
+use crate::geometry::WkbCoordinate;
+use crate::optimized::{
+  GeometryPartRole, GeometryPartSink, OptimizedGeometryType, decode_pbf_geometry, extent_xz_code,
+  visit_wkb_geometry_for_display,
+};
 use crate::output::XzClusteringIndex;
 use crate::parquet_dataset::PartitionFamily;
 
@@ -241,14 +245,22 @@ pub(crate) fn validate_xz_file(
             let non_empty = validate_pbf_structure(
               &decoded.lengths,
               &decoded.coords,
+              index.has_z,
+              index.has_m,
               source_is_null,
               &level_location,
               report,
             );
             level_found_payload[level_index] |= non_empty;
             if non_empty && single_polygon && !level_winding_warned[level_index] {
-              level_winding_warned[level_index] =
-                warn_pbf_winding(&decoded.lengths, &decoded.coords, &level_location, report);
+              level_winding_warned[level_index] = warn_pbf_winding(
+                &decoded.lengths,
+                &decoded.coords,
+                index.has_z,
+                index.has_m,
+                &level_location,
+                report,
+              );
             }
           }
         }
@@ -290,9 +302,43 @@ pub(crate) fn validate_xz_file(
       validate_geometry_inspection(
         &inspection,
         &index.geometry_type,
+        index.has_z,
+        index.has_m,
         geometry_location.clone(),
         report,
       );
+      let optimized_geometry_type = match index.geometry_type.as_str() {
+        "multipoint" => OptimizedGeometryType::MultiPoint,
+        "polyline" => OptimizedGeometryType::Polyline,
+        "polygon" => OptimizedGeometryType::Polygon,
+        _ => continue,
+      };
+      for (level_index, level) in index.levels.iter().enumerate() {
+        let Some(level_array) = level_values[level_index] else {
+          continue;
+        };
+        let Ok(Some(payload)) = binary_value(level_array, row_index) else {
+          continue;
+        };
+        let Ok(decoded) = decode_pbf_geometry(&payload) else {
+          continue;
+        };
+        let level_location = ValidationLocation::file(file.file.relative_path.clone())
+          .with_row_group(row_group)
+          .with_row(row)
+          .with_column(level_paths[level_index].clone());
+        validate_pbf_vertex_provenance(
+          &bytes,
+          optimized_geometry_type,
+          &decoded.lengths,
+          &decoded.coords,
+          level,
+          index.has_z,
+          index.has_m,
+          &level_location,
+          report,
+        );
+      }
       let feature_extent = match covering_extent(batch, contract, row_index) {
         Ok(Some(extent)) => Some(extent),
         Ok(None) => inspection.extent,
@@ -344,7 +390,7 @@ pub(crate) fn validate_xz_file(
         ValidationLocation::file(file.file.relative_path.clone())
           .with_column(level_paths[level_index].clone()),
         format!(
-          "no non-empty PBF geometry found within the first {} records for multiscale level {}",
+          "no non-empty Esri PBF geometry found within the first {} records for multiscale level {}",
           level_search_count[level_index], level.level
         ),
       );
@@ -361,6 +407,131 @@ pub(crate) fn validate_xz_file(
     }),
     _ => None,
   }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_pbf_vertex_provenance(
+  wkb: &[u8],
+  geometry_type: OptimizedGeometryType,
+  lengths: &[u32],
+  coords: &[i64],
+  level: &crate::output::MultiscaleLevel,
+  has_z: bool,
+  has_m: bool,
+  location: &ValidationLocation,
+  report: &mut ValidationReport,
+) {
+  let stride = 2 + usize::from(has_z) + usize::from(has_m);
+  let expected_coordinate_count = lengths
+    .iter()
+    .try_fold(0usize, |total, length| total.checked_add(*length as usize))
+    .and_then(|count| count.checked_mul(stride));
+  if expected_coordinate_count != Some(coords.len()) {
+    return;
+  }
+  let mut collector = CoordinateCollector::default();
+  if visit_wkb_geometry_for_display(wkb, geometry_type, &mut collector).is_err() {
+    return;
+  }
+  let source_coordinates = collector
+    .coordinates
+    .into_iter()
+    .filter_map(|coordinate| {
+      Some((
+        quantized_value(
+          coordinate.x,
+          level.transform.scale[0],
+          level.transform.translate[0],
+        )?,
+        quantized_value(
+          coordinate.y,
+          level.transform.scale[1],
+          level.transform.translate[1],
+        )?,
+        has_z.then(|| {
+          quantized_ordinate(
+            coordinate.z,
+            level.transform.scale[2],
+            level.transform.translate[2],
+          )
+        }),
+        has_m.then(|| {
+          quantized_ordinate(
+            coordinate.m,
+            level.transform.scale[3],
+            level.transform.translate[3],
+          )
+        }),
+      ))
+    })
+    .collect::<Vec<_>>();
+  let mut offset = 0usize;
+  for length in lengths {
+    let mut x = 0i64;
+    let mut y = 0i64;
+    for vertex_index in 0..*length as usize {
+      let encoded_x = coords[offset];
+      let encoded_y = coords[offset + 1];
+      if vertex_index == 0 {
+        x = encoded_x;
+        y = encoded_y;
+      } else {
+        let Some(next_x) = x.checked_add(encoded_x) else {
+          return;
+        };
+        let Some(next_y) = y.checked_add(encoded_y) else {
+          return;
+        };
+        x = next_x;
+        y = next_y;
+      }
+      let mut dimension_offset = 2;
+      let z = has_z.then(|| {
+        let value = coords[offset + dimension_offset];
+        dimension_offset += 1;
+        value
+      });
+      let m = has_m.then(|| coords[offset + dimension_offset]);
+      if !source_coordinates.contains(&(x, y, z, m)) {
+        report.push(
+          ValidationRule::Pbf,
+          ValidationSeverity::Error,
+          location.clone(),
+          "Esri PBF coordinate does not match any quantized source WKB vertex",
+        );
+        return;
+      }
+      offset += stride;
+    }
+  }
+}
+
+fn quantized_ordinate(value: Option<f64>, scale: f64, translate: f64) -> i64 {
+  value
+    .filter(|value| value.is_finite())
+    .and_then(|value| quantized_value(value, scale, translate))
+    .unwrap_or(0)
+}
+
+fn quantized_value(value: f64, scale: f64, translate: f64) -> Option<i64> {
+  let quantized = ((value - translate) / scale).round();
+  (quantized.is_finite() && quantized >= i64::MIN as f64 && quantized <= i64::MAX as f64)
+    .then_some(quantized as i64)
+}
+
+#[derive(Default)]
+struct CoordinateCollector {
+  coordinates: Vec<WkbCoordinate>,
+}
+
+impl GeometryPartSink for CoordinateCollector {
+  fn start_part(&mut self, _: GeometryPartRole) {}
+
+  fn push_coord(&mut self, coordinate: WkbCoordinate) {
+    self.coordinates.push(coordinate);
+  }
+
+  fn finish_part(&mut self) {}
 }
 
 fn covering_extent(
@@ -414,23 +585,28 @@ fn covering_extent(
 fn validate_pbf_structure(
   lengths: &[u32],
   coords: &[i64],
+  has_z: bool,
+  has_m: bool,
   source_is_null: bool,
   location: &ValidationLocation,
   report: &mut ValidationReport,
 ) -> bool {
-  let coordinate_pairs = lengths
+  let vertex_count = lengths
     .iter()
     .try_fold(0usize, |total, length| total.checked_add(*length as usize));
-  let valid_width = coords.len() % 2 == 0;
-  let lengths_match = coordinate_pairs
-    .and_then(|pairs| pairs.checked_mul(2))
+  let stride = 2 + usize::from(has_z) + usize::from(has_m);
+  let valid_width = coords.len() % stride == 0;
+  let lengths_match = vertex_count
+    .and_then(|count| count.checked_mul(stride))
     .is_some_and(|coordinate_count| coordinate_count == coords.len());
-  if !valid_width || !lengths_match || lengths.iter().any(|length| *length == 0) {
+  if !valid_width || !lengths_match || lengths.contains(&0) {
     report.push(
       ValidationRule::Pbf,
       ValidationSeverity::Error,
       location.clone(),
-      "PBF lengths must be non-zero and account for every x/y coordinate pair",
+      format!(
+        "Esri PBF lengths must be non-zero and account for every coordinate with stride {stride}"
+      ),
     );
     return false;
   }
@@ -440,22 +616,22 @@ fn validate_pbf_structure(
       ValidationRule::Pbf,
       ValidationSeverity::Error,
       location.clone(),
-      "null source geometry must not contain a non-empty PBF payload",
+      "null source geometry must not contain a non-empty Esri PBF payload",
     );
   } else if !source_is_null && !non_empty {
     report.push(
       ValidationRule::PbfDegenerate,
       ValidationSeverity::Error,
       location.clone(),
-      "non-null source geometry must retain at least one PBF coordinate",
+      "non-null source geometry must retain at least one Esri PBF coordinate",
     );
   }
-  if lengths == [1] && coords.len() != 2 {
+  if lengths == [1] && coords.len() != stride {
     report.push(
       ValidationRule::PbfDegenerate,
       ValidationSeverity::Error,
       location.clone(),
-      "degenerated PBF geometry must contain one x/y coordinate",
+      "degenerated Esri PBF geometry must contain exactly one complete coordinate",
     );
   }
   non_empty
@@ -464,29 +640,32 @@ fn validate_pbf_structure(
 fn warn_pbf_winding(
   lengths: &[u32],
   coords: &[i64],
+  has_z: bool,
+  has_m: bool,
   location: &ValidationLocation,
   report: &mut ValidationReport,
 ) -> bool {
   let mut coordinate_offset = 0usize;
+  let stride = 2 + usize::from(has_z) + usize::from(has_m);
   let mut warned = false;
   for (part_index, length) in lengths.iter().copied().enumerate() {
     let length = length as usize;
     if length < 3 {
-      coordinate_offset += length * 2;
+      coordinate_offset += length * stride;
       continue;
     }
     let mut absolute = Vec::with_capacity(length);
     let mut x = coords[coordinate_offset];
     let mut y = coords[coordinate_offset + 1];
     absolute.push((x, y));
-    coordinate_offset += 2;
+    coordinate_offset += stride;
     for _ in 1..length {
       let Some(next_x) = x.checked_add(coords[coordinate_offset]) else {
         report.push(
           ValidationRule::Pbf,
           ValidationSeverity::Error,
           location.clone(),
-          "PBF x-coordinate delta overflows i64",
+          "Esri PBF x-coordinate delta overflows i64",
         );
         return warned;
       };
@@ -495,14 +674,14 @@ fn warn_pbf_winding(
           ValidationRule::Pbf,
           ValidationSeverity::Error,
           location.clone(),
-          "PBF y-coordinate delta overflows i64",
+          "Esri PBF y-coordinate delta overflows i64",
         );
         return warned;
       };
       x = next_x;
       y = next_y;
       absolute.push((x, y));
-      coordinate_offset += 2;
+      coordinate_offset += stride;
     }
     let area = signed_area(&absolute);
     if area == 0 {
@@ -515,7 +694,7 @@ fn warn_pbf_winding(
         ValidationSeverity::Warning,
         location.clone(),
         format!(
-          "non-degenerate PBF {} ring has unexpected winding",
+          "non-degenerate Esri PBF {} ring has unexpected winding",
           if exterior { "exterior" } else { "interior" }
         ),
       );
@@ -546,6 +725,7 @@ mod tests {
   use std::path::PathBuf;
 
   use super::*;
+  use crate::output::QuantizationTransform;
 
   #[test]
   fn accepts_degenerated_pbf_and_rejects_empty_non_null_payload() {
@@ -556,12 +736,16 @@ mod tests {
       &[1],
       &[10, 20],
       false,
+      false,
+      false,
       &location,
       &mut report
     ));
     assert!(!validate_pbf_structure(
       &[],
       &[],
+      false,
+      false,
       false,
       &location,
       &mut report
@@ -576,7 +760,14 @@ mod tests {
     let location = ValidationLocation::file("data.parquet").with_column("sop.level_0");
     let mut report = ValidationReport::new(PathBuf::from("dataset"));
 
-    let warned = warn_pbf_winding(&[4], &[0, 0, 1, 0, 0, 1, -1, -1], &location, &mut report);
+    let warned = warn_pbf_winding(
+      &[4],
+      &[0, 0, 1, 0, 0, 1, -1, -1],
+      false,
+      false,
+      &location,
+      &mut report,
+    );
 
     assert!(warned);
     assert_eq!(report.warning_count(), 1);
@@ -588,9 +779,72 @@ mod tests {
     let location = ValidationLocation::file("data.parquet").with_column("sop.level_0");
     let mut report = ValidationReport::new(PathBuf::from("dataset"));
 
-    let warned = warn_pbf_winding(&[3], &[i64::MAX, 0, 1, 0, 0, 1], &location, &mut report);
+    let warned = warn_pbf_winding(
+      &[3],
+      &[i64::MAX, 0, 1, 0, 0, 1],
+      false,
+      false,
+      &location,
+      &mut report,
+    );
 
     assert!(!warned);
+    assert_eq!(report.error_count(), 1);
+    assert_eq!(report.findings()[0].rule(), ValidationRule::Pbf);
+  }
+
+  #[test]
+  fn accepts_xyzm_coordinate_stride() {
+    let location = ValidationLocation::file("data.parquet").with_column("sop.level_0");
+    let mut report = ValidationReport::new(PathBuf::from("dataset"));
+
+    assert!(validate_pbf_structure(
+      &[2],
+      &[0, 0, 10, 100, 1, 1, 20, 200],
+      true,
+      true,
+      false,
+      &location,
+      &mut report,
+    ));
+    assert_eq!(report.error_count(), 0);
+  }
+
+  #[test]
+  fn rejects_dimensional_pbf_ordinate_not_present_in_wkb() {
+    let mut wkb = vec![1];
+    wkb.extend_from_slice(&1002_u32.to_le_bytes());
+    wkb.extend_from_slice(&2_u32.to_le_bytes());
+    for (x, y, z) in [(0.0_f64, 0.0_f64, 10.0_f64), (2.0, 0.0, 20.0)] {
+      wkb.extend_from_slice(&x.to_le_bytes());
+      wkb.extend_from_slice(&y.to_le_bytes());
+      wkb.extend_from_slice(&z.to_le_bytes());
+    }
+    let level = crate::output::MultiscaleLevel {
+      column: "level_0".to_string(),
+      level: 0,
+      resolution: 1.0,
+      scale: 1.0,
+      transform: QuantizationTransform {
+        scale: [1.0; 4],
+        translate: [0.0; 4],
+      },
+    };
+    let location = ValidationLocation::file("data.parquet").with_column("sop.level_0");
+    let mut report = ValidationReport::new(PathBuf::from("dataset"));
+
+    validate_pbf_vertex_provenance(
+      &wkb,
+      OptimizedGeometryType::Polyline,
+      &[2],
+      &[0, 0, 10, 2, 0, 999],
+      &level,
+      true,
+      false,
+      &location,
+      &mut report,
+    );
+
     assert_eq!(report.error_count(), 1);
     assert_eq!(report.findings()[0].rule(), ValidationRule::Pbf);
   }

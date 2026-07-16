@@ -76,6 +76,10 @@ The writer scans WKB to infer geometry types and the selected-row extent. `--in-
 the selected geometry already declares a CRS, preventing accidental overrides. `--covering`
 works with both plain and optimized GeoParquet.
 
+The writer preserves input Z and M ordinates by default. Pass `--strip-z` or `--strip-m` to
+remove either dimension independently from output WKB, point fields, multiscale PBF, and metadata.
+Both flags work with plain and optimized output and can be combined to produce XY geometry.
+
 ## Implementation layout
 
 The Rust workspace separates source integration, GeoParquet context resolution, and output

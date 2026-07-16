@@ -10,7 +10,7 @@ use datafusion::logical_expr::expr_fn::ident;
 
 use crate::geoparquet::{ResolvedGeoParquetSource, geometry_bbox_expr};
 use crate::optimized::COVERING_BBOX_COLUMN;
-use crate::output::{ReprojectionSpec, reproject_geometry_expr};
+use crate::output::{ReprojectionSpec, reproject_geometry_expr, strip_geometry_dimensions_expr};
 
 #[derive(Clone)]
 pub(crate) struct PreparedSpatialFrame {
@@ -24,11 +24,19 @@ impl PreparedSpatialFrame {
     source_schema: &Schema,
     source: &ResolvedGeoParquetSource,
     reprojection: &ReprojectionSpec,
+    strip_z: bool,
+    strip_m: bool,
   ) -> Result<Self> {
     if let Some(transform) = reprojection.transform() {
       dataframe = dataframe.with_column(
         &source.geometry_spec.column,
         reproject_geometry_expr(&source.geometry_spec.column, transform),
+      )?;
+    }
+    if strip_z || strip_m {
+      dataframe = dataframe.with_column(
+        &source.geometry_spec.column,
+        strip_geometry_dimensions_expr(&source.geometry_spec.column, strip_z, strip_m),
       )?;
     }
 

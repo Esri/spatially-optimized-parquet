@@ -2,6 +2,7 @@ use anyhow::{Result, bail};
 use arrow_array::{Array, BinaryArray, BinaryViewArray, LargeBinaryArray};
 use geo_traits::Dimensions;
 
+use crate::geometry::WkbCoordinate;
 use crate::geometry::{Extent2D, GeometryKind};
 use crate::optimized::{GeometryPartRole, GeometryPartSink, visit_wkb_geometry};
 
@@ -39,6 +40,8 @@ pub(crate) fn inspect_wkb_geometry(bytes: &[u8]) -> Result<GeometryInspection> {
 pub(crate) fn validate_geometry_inspection(
   inspection: &GeometryInspection,
   expected_geometry_type: &str,
+  expected_has_z: bool,
+  expected_has_m: bool,
   location: ValidationLocation,
   report: &mut ValidationReport,
 ) {
@@ -53,14 +56,20 @@ pub(crate) fn validate_geometry_inspection(
       ),
     );
   }
-  if inspection.dimensions != Dimensions::Xy {
+  let expected_dimensions = match (expected_has_z, expected_has_m) {
+    (false, false) => Dimensions::Xy,
+    (true, false) => Dimensions::Xyz,
+    (false, true) => Dimensions::Xym,
+    (true, true) => Dimensions::Xyzm,
+  };
+  if inspection.dimensions != expected_dimensions {
     report.push(
       ValidationRule::GeometryDimension,
       ValidationSeverity::Error,
       location.clone(),
       format!(
-        "sampled WKB geometry must be two-dimensional, found {:?}",
-        inspection.dimensions
+        "sampled WKB geometry dimensions {:?} do not match metadata dimensions {:?}",
+        inspection.dimensions, expected_dimensions
       ),
     );
   }
@@ -160,7 +169,9 @@ impl GeometryPartSink for InspectionSink {
     self.current_coordinates.clear();
   }
 
-  fn push_coord(&mut self, x: f64, y: f64) {
+  fn push_coord(&mut self, coordinate: WkbCoordinate) {
+    let x = coordinate.x;
+    let y = coordinate.y;
     self.has_coordinate = true;
     self.finite_coordinates &= x.is_finite() && y.is_finite();
     if x.is_finite() && y.is_finite() {

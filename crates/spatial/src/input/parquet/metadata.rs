@@ -243,7 +243,7 @@ pub(super) fn passthrough_metadata(metadata_items: &[ArrowReaderMetadata]) -> Ve
 mod tests {
   use serde_json::json;
 
-  use super::{bbox_to_extent, covering_column, sanitize_geo_metadata_json};
+  use super::{bbox_to_extent, covering_column, has_dimension_suffix, sanitize_geo_metadata_json};
 
   #[test]
   fn metadata_sanitization_removes_null_bbox_values() {
@@ -294,6 +294,27 @@ mod tests {
   fn bbox_normalization_rejects_incomplete_bounds() {
     assert!(bbox_to_extent(Some(&[-1.0, -2.0, 3.0])).is_none());
     assert!(bbox_to_extent(None).is_none());
+  }
+
+  #[test]
+  fn geoparquet_geometry_type_inference_preserves_z_and_m_flags() {
+    for (geometry_type, expected_z, expected_m) in [
+      ("Point Z", true, false),
+      ("Point M", false, true),
+      ("Point ZM", true, true),
+    ] {
+      let column: geoparquet::metadata::GeoParquetColumnMetadata = serde_json::from_value(json!({
+        "encoding": "WKB",
+        "geometry_types": [geometry_type],
+        "crs": null,
+        "orientation": "counterclockwise",
+        "edges": "planar"
+      }))
+      .unwrap();
+
+      assert_eq!(has_dimension_suffix(&column, "Z"), expected_z);
+      assert_eq!(has_dimension_suffix(&column, "M"), expected_m);
+    }
   }
 
   #[test]

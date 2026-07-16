@@ -9,17 +9,12 @@ use geo_traits::{
 };
 
 use crate::geometry::{
-  Extent2D, GeometryKind, PolygonRingOrder, read_wkb_point,
+  Extent2D, GeometryKind, PolygonRingOrder, WkbCoordinate,
   visit_wkb_geometry as decode_wkb_geometry,
 };
 use crate::optimized::OptimizedGeometryType;
 
 pub(crate) use crate::geometry::{WkbPartRole as GeometryPartRole, WkbSink as GeometryPartSink};
-
-/// Decode a WKB point and return its x/y coordinate.
-pub(crate) fn point_xy_from_wkb(bytes: &[u8]) -> Result<(f64, f64)> {
-  read_wkb_point(bytes)
-}
 
 /// Decode WKB and calculate its axis-aligned extent.
 pub(crate) fn geometry_extent_from_wkb(bytes: &[u8]) -> Result<Extent2D> {
@@ -39,11 +34,11 @@ pub(crate) fn visit_wkb_geometry<S: GeometryPartSink>(
   Ok((header.kind, header.dimensions))
 }
 
-pub(super) fn visit_wkb_geometry_for_display<S: GeometryPartSink>(
+pub(crate) fn visit_wkb_geometry_for_display<S: GeometryPartSink>(
   bytes: &[u8],
   geometry_type: OptimizedGeometryType,
   sink: &mut S,
-) -> Result<()> {
+) -> Result<Dimensions> {
   let header = decode_wkb_geometry(bytes, PolygonRingOrder::Reverse, sink)?;
   let kind_matches = match geometry_type {
     OptimizedGeometryType::Point => header.kind == GeometryKind::Point,
@@ -67,7 +62,7 @@ pub(super) fn visit_wkb_geometry_for_display<S: GeometryPartSink>(
       header.kind
     );
   }
-  Ok(())
+  Ok(header.dimensions)
 }
 
 #[cfg(test)]
@@ -103,7 +98,12 @@ fn visit_point<P: PointTrait<T = f64>, S: GeometryPartSink>(point: &P, sink: &mu
   sink.start_part(GeometryPartRole::Other);
   if let Some(coord) = point.coord() {
     let (x, y) = coord.x_y();
-    sink.push_coord(x, y);
+    sink.push_coord(WkbCoordinate {
+      x,
+      y,
+      z: None,
+      m: None,
+    });
   }
   sink.finish_part();
 }
@@ -114,7 +114,12 @@ fn visit_multipoint<MP: MultiPointTrait<T = f64>, S: GeometryPartSink>(points: &
   for point in points.points() {
     if let Some(coord) = point.coord() {
       let (x, y) = coord.x_y();
-      sink.push_coord(x, y);
+      sink.push_coord(WkbCoordinate {
+        x,
+        y,
+        z: None,
+        m: None,
+      });
     }
   }
   sink.finish_part();
@@ -165,7 +170,12 @@ fn visit_line_string<L: LineStringTrait<T = f64>, S: GeometryPartSink>(
   sink.start_part(role);
   for coord in line.coords() {
     let (x, y) = coord.x_y();
-    sink.push_coord(x, y);
+    sink.push_coord(WkbCoordinate {
+      x,
+      y,
+      z: None,
+      m: None,
+    });
   }
   sink.finish_part();
 }
@@ -179,7 +189,12 @@ fn visit_line_string_reversed<L: LineStringTrait<T = f64>, S: GeometryPartSink>(
   let coordinates: Vec<_> = line.coords().map(|coordinate| coordinate.x_y()).collect();
   sink.start_part(role);
   for (x, y) in coordinates.into_iter().rev() {
-    sink.push_coord(x, y);
+    sink.push_coord(WkbCoordinate {
+      x,
+      y,
+      z: None,
+      m: None,
+    });
   }
   sink.finish_part();
 }
@@ -228,8 +243,8 @@ impl BoundsCollector {
 impl GeometryPartSink for BoundsCollector {
   fn start_part(&mut self, _: GeometryPartRole) {}
 
-  fn push_coord(&mut self, x: f64, y: f64) {
-    self.bounds.push(x, y);
+  fn push_coord(&mut self, coordinate: WkbCoordinate) {
+    self.bounds.push(coordinate.x, coordinate.y);
   }
 
   fn finish_part(&mut self) {}

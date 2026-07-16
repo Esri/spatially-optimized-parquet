@@ -76,11 +76,11 @@ pub enum ValidationRule {
   XzCode,
   /// Enforces Esri PBF wire and payload structure.
   Pbf,
-  /// Enforces retained coordinates for degenerated PBF geometry.
+  /// Enforces retained coordinates for degenerated Esri PBF geometry.
   PbfDegenerate,
-  /// Reports unexpected multiscale PBF winding.
+  /// Reports unexpected Esri PBF winding.
   PbfWinding,
-  /// Reports unavailable non-empty bounded PBF samples.
+  /// Reports unavailable non-empty bounded Esri PBF samples.
   PbfSample,
   /// Enforces clustering partition containment.
   Partition,

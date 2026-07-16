@@ -1,7 +1,8 @@
 use arrow_array::{Array, Float64Array, UInt64Array};
 use arrow_schema::DataType;
 
-use crate::optimized::{point_xy_from_wkb, point_z_code};
+use crate::geometry::read_wkb_point_coordinate;
+use crate::optimized::point_z_code;
 use crate::output::ZClusteringIndex;
 use crate::parquet_dataset::PartitionFamily;
 
@@ -129,12 +130,24 @@ pub(crate) fn validate_z_file(
   let code_path = display_column_path(parent_column, &index.code);
   let x_path = display_column_path(parent_column, &index.x_column);
   let y_path = display_column_path(parent_column, &index.y_column);
-  let projected_columns = vec![
+  let z_path = index
+    .z_column
+    .as_deref()
+    .map(|column| display_column_path(parent_column, column));
+  let m_path = index
+    .m_column
+    .as_deref()
+    .map(|column| display_column_path(parent_column, column));
+  let projected_columns = [
     contract.geometry_column().to_string(),
     code_path.clone(),
     x_path.clone(),
     y_path.clone(),
-  ];
+  ]
+  .into_iter()
+  .chain(z_path.iter().cloned())
+  .chain(m_path.iter().cloned())
+  .collect::<Vec<_>>();
   let mut previous_code = None;
   let mut minimum = None::<u64>;
   let mut maximum = None::<u64>;
@@ -161,6 +174,18 @@ pub(crate) fn validate_z_file(
     let Some(code_values) = code_values.as_any().downcast_ref::<UInt64Array>() else {
       return;
     };
+    let z_values = z_path.as_ref().and_then(|path| {
+      array_at_path(batch, path)
+        .ok()?
+        .as_any()
+        .downcast_ref::<Float64Array>()
+    });
+    let m_values = m_path.as_ref().and_then(|path| {
+      array_at_path(batch, path)
+        .ok()?
+        .as_any()
+        .downcast_ref::<Float64Array>()
+    });
 
     for row_index in 0..batch.num_rows() {
       let row = row_offset + row_index as u64;
@@ -273,10 +298,19 @@ pub(crate) fn validate_z_file(
           continue;
         }
       };
-      validate_geometry_inspection(&inspection, "point", geometry_location, report);
-      let Ok((geometry_x, geometry_y)) = point_xy_from_wkb(&bytes) else {
+      validate_geometry_inspection(
+        &inspection,
+        "point",
+        index.has_z,
+        index.has_m,
+        geometry_location,
+        report,
+      );
+      let Ok(geometry_coordinate) = read_wkb_point_coordinate(&bytes) else {
         continue;
       };
+      let geometry_x = geometry_coordinate.x;
+      let geometry_y = geometry_coordinate.y;
       let Some((x, y)) = coordinates else {
         continue;
       };
@@ -294,6 +328,24 @@ pub(crate) fn validate_z_file(
           ),
         );
       }
+      validate_point_ordinate(
+        geometry_coordinate.z,
+        z_values.map(|values| values.value(row_index)),
+        z_path.as_deref(),
+        row_group,
+        row,
+        file,
+        report,
+      );
+      validate_point_ordinate(
+        geometry_coordinate.m,
+        m_values.map(|values| values.value(row_index)),
+        m_path.as_deref(),
+        row_group,
+        row,
+        file,
+        report,
+      );
       let expected_code = point_z_code(
         index.full_extent,
         geometry_x,
@@ -307,6 +359,38 @@ pub(crate) fn validate_z_file(
           ValidationSeverity::Error,
           code_location,
           format!("stored Z code {code} does not match recomputed code {expected_code}"),
+        );
+      }
+
+      fn validate_point_ordinate(
+        geometry_value: Option<f64>,
+        column_value: Option<f64>,
+        column_path: Option<&str>,
+        row_group: usize,
+        row: u64,
+        file: &LoadedDatasetFile,
+        report: &mut ValidationReport,
+      ) {
+        let (Some(geometry_value), Some(column_value), Some(column_path)) =
+          (geometry_value, column_value, column_path)
+        else {
+          return;
+        };
+        if (geometry_value.is_nan() && column_value.is_nan())
+          || float_matches(geometry_value, column_value)
+        {
+          return;
+        }
+        report.push(
+          ValidationRule::ZCoordinate,
+          ValidationSeverity::Error,
+          ValidationLocation::file(file.file.relative_path.clone())
+            .with_row_group(row_group)
+            .with_row(row)
+            .with_column(column_path.to_string()),
+          format!(
+            "stored ordinate {column_value} does not match sampled WKB ordinate {geometry_value}"
+          ),
         );
       }
     }

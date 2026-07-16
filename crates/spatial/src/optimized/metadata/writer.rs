@@ -6,13 +6,13 @@ use parquet::file::metadata::KeyValue;
 use crate::geometry::GeometryKind;
 use crate::optimized::clustering::{DEFAULT_COORDINATE_PRECISION, DEFAULT_XZ_MAX_LEVEL};
 use crate::optimized::multiscale::{
-  COVERING_BBOX_COLUMN, GEODISPLAY_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_CODE_COLUMN,
-  XZ_CODE_COLUMN,
+  COVERING_BBOX_COLUMN, GEODISPLAY_COLUMN, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN,
+  POINT_Z_CODE_COLUMN, POINT_Z_COLUMN, XZ_CODE_COLUMN,
 };
 use crate::optimized::{ClusteringFamily, ResolvedOptimization};
 use crate::output::{
-  GeoMetadataInput, MultiscaleLevelInput, XzClusteringIndexInput, ZClusteringIndexInput,
-  optimized_point_metadata, optimized_xz_metadata,
+  ESRI_PBF_ENCODING, GeoMetadataInput, MultiscaleLevelInput, XzClusteringIndexInput,
+  ZClusteringIndexInput, optimized_point_metadata, optimized_xz_metadata,
 };
 
 impl ResolvedOptimization {
@@ -47,12 +47,14 @@ impl ResolvedOptimization {
           code: POINT_Z_CODE_COLUMN.to_string(),
           x_column: POINT_X_COLUMN.to_string(),
           y_column: POINT_Y_COLUMN.to_string(),
+          z_column: self.geometry().has_z.then(|| POINT_Z_COLUMN.to_string()),
+          m_column: self.geometry().has_m.then(|| POINT_M_COLUMN.to_string()),
           coordinate_precision: DEFAULT_COORDINATE_PRECISION,
           full_extent: self.target_extent(),
           wkid: self.reprojection().target_spatial_reference().wkid,
-          wkt: self.reprojection().target_spatial_reference().wkt.clone(),
-          has_z: false,
-          has_m: false,
+          wkt: None,
+          has_z: self.geometry().has_z,
+          has_m: self.geometry().has_m,
         },
       ),
       ClusteringFamily::NonPoint => optimized_xz_metadata(
@@ -61,14 +63,14 @@ impl ResolvedOptimization {
         GEODISPLAY_COLUMN,
         XzClusteringIndexInput {
           code: XZ_CODE_COLUMN.to_string(),
-          encoding: "esriPBF".to_string(),
+          encoding: ESRI_PBF_ENCODING.to_string(),
           geometry_type: self.geometry().geometry_type.as_str().to_string(),
           full_extent: self.target_extent(),
           max_level: DEFAULT_XZ_MAX_LEVEL,
           wkid: self.reprojection().target_spatial_reference().wkid,
-          wkt: self.reprojection().target_spatial_reference().wkt.clone(),
-          has_z: false,
-          has_m: false,
+          wkt: None,
+          has_z: self.geometry().has_z,
+          has_m: self.geometry().has_m,
           levels: self
             .encodings()
             .iter()

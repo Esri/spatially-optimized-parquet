@@ -66,8 +66,8 @@ where:
 | `wkid` | Optional EPSG or Esri latest WKID for the spatial reference used by the clustering. Currently only `4326` or `3857` are supported. |
 | `wkt` | Optional spatial reference WKT. Used when `wkid` is undefined. |
 | `geometryType` | Geometry type for all geometries in the clustering. One of `"point"`, `"multipoint"`, `"polygon"`, or `"polyline"`. |
-| `hasZ` | Whether geometries in the clustering contain Z values. Currently this must be `false`. |
-| `hasM` | Whether geometries in the clustering contain M values. Currently this must be `false`. |
+| `hasZ` | Whether geometries and display columns contain Z values. |
+| `hasM` | Whether geometries and display columns contain M values. |
 
 #### Writer
 
@@ -172,7 +172,7 @@ where:
 
 #### Multiscale Transform
 
-The `QuantizationTransform` carries the scale and translation values required to unquantize the included multiscale geometries. Both scale and translate are 4-width tuples for x, y, z, and m respectively. Tuples must always contain 4 values. When Z or M values are not present, it is recommended to use 1 and 0 for the empty scale and translate values respectively.
+The `QuantizationTransform` carries the scale and translation values required to unquantize the included multiscale geometries. Both scale and translate are 4-width tuples ordered as x, y, z, and m. Tuples must always contain 4 values. Every present dimension must use a finite positive scale and a finite translation. When Z or M values are absent, writers should use `1` and `0` for the unused scale and translation values.
 
 ```ts
 interface QuantizationTransform {
@@ -263,12 +263,13 @@ For more information, look at the algorithm as defined in the [original paper](h
 
 ### Generating Multiscale Columns
 
-Multiscale columns store quantized, delta-encoded geometries at powers-of-two levels. Each column snaps features to one pixel at the target level, with writers removing collinear vertices:
+Multiscale columns store quantized geometries at powers-of-two levels. Two-dimensional geometries use grid snapping and collinear-vertex merging. Geometries containing Z or M use XY-only Douglas-Peucker generalization before quantization so every retained Z/M value still belongs to an original vertex:
 1. Project features into the target spatial reference of the index.
 2. Generate powers-of-two multiscale levels from a starting scale of `295829355.4545656`.
 3. Optionally reduce the number of generated multiscale levels to no fewer than one.
-4. Create `QuantizedGeometry` with the quantization and delta-encoding algorithm.
-5. PBF-encode `QuantizedGeometry` according to the Esri FeatureCollection PBF encoding. Only `lengths` and `coords` are required.
+4. Generalize dimensional geometry with Douglas-Peucker using the level resolution as the XY tolerance.
+5. Create `QuantizedGeometry` with the quantization and encoding algorithm.
+6. PBF-encode `QuantizedGeometry` according to the Esri FeatureCollection PBF encoding. Only `lengths` and `coords` are required.
 
 #### Select Multiscale Levels
 
@@ -351,14 +352,30 @@ fn quantize(vertex: &Vertex, transform: &QuantizationTransform) -> Vertex {
 
 
 
-#### 3D Quantization
+#### Dimensional Generalization and Quantization
 
-Not currently supported.
+When `hasZ` or `hasM` is true, writers must generalize each path or ring before quantization:
+
+1. Run Douglas-Peucker with the level `resolution` as its tolerance.
+2. Calculate every Douglas-Peucker distance from X and Y only.
+3. Retain complete original vertices at the selected indices.
+4. Do not interpolate Z or M.
+5. Preserve ring closure and the source Z/M values of the closing vertex.
+
+After generalization, quantize each present axis independently:
+
+```rust
+fn quantize(value: f64, scale: f64, translate: f64) -> i64 {
+  f64::round((value - translate) / scale) as i64
+}
+```
+
+X and Y use the level display transform. Z and M use their own scale and translation tuple entries. Missing, `NaN`, or infinite Z/M ordinates encode as `0`, matching the Esri Feature Service PBF null sentinel.
 
 
 #### Encoding
 
-Quantized, delta-encoded multiscale geometries are written to Parquet BYTE_ARRAY columns, after being encoded as a [ProtocolBuffers](https://protobuf.dev/) message with the following schema:
+Quantized multiscale geometries are written to Parquet BYTE_ARRAY columns after encoding as a [ProtocolBuffers](https://protobuf.dev/) message with the following schema:
 
 ```proto
 message Geometry {
@@ -367,7 +384,16 @@ message Geometry {
 }
 ```
 
-This is a flattened, delta-encoded geometry representation, where each length in the lengths array points to the start of a ring or path.
+This is a flattened geometry representation. Each `lengths` value stores the vertex count for one ring or path. The coordinate stride is `2 + hasZ + hasM`, with values interleaved per vertex as:
+
+```text
+[x, y]
+[x, y, z]
+[x, y, m]
+[x, y, z, m]
+```
+
+The first X and Y in each part are absolute quantized values. Later X and Y values are deltas from the preceding vertex. Z and M are absolute quantized values for every vertex and must never be delta encoded.
 
 For example, take the following polygon with a ring and a hole:
 
@@ -422,8 +448,8 @@ where:
 | `code` | Name of the column containing Z-codes for points within the clustering. |
 | `xColumn` | Name of the non-nullable column containing point x-values. A null or invalid geometry should include `NaN`. |
 | `yColumn` | Name of the column containing point y-values. A null or invalid geometry should include `NaN`. |
-| `zColumn` | Optional column containing point z-values. A null or invalid geometry should include `NaN`. |
-| `mColumn` | Optional column containing point m-values. A null or invalid geometry should include `NaN`. |
+| `zColumn` | Required when `hasZ` is true and absent otherwise. Contains the original point Z value from the full-resolution WKB. A null or invalid geometry uses `NaN`. |
+| `mColumn` | Required when `hasM` is true and absent otherwise. Contains the original point M value from the full-resolution WKB. A null or invalid geometry uses `NaN`. |
 | `coordinatePrecision` | Number of bits of precision used for each coordinate when generating the Z-code. |
 
 #### Example

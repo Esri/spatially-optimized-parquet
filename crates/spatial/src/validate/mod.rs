@@ -101,7 +101,7 @@ mod tests {
     for epsg in [4326, 3857] {
       let temp = TempDir::new().unwrap();
       let path = temp.path().join(format!("{epsg}.parquet"));
-      write_z_fixture(&path, epsg, epsg, false, None);
+      write_z_fixture(&path, epsg, Some(epsg), false, None);
 
       let report = validate(&path).unwrap();
 
@@ -116,7 +116,7 @@ mod tests {
   fn metadata_rejects_crs_mismatch_and_duplicate_reserved_entries() {
     let temp = TempDir::new().unwrap();
     let path = temp.path().join("invalid.parquet");
-    write_z_fixture(&path, 3857, 4326, true, None);
+    write_z_fixture(&path, 3857, Some(4326), true, None);
 
     let report = validate(&path).unwrap();
 
@@ -168,10 +168,33 @@ mod tests {
   }
 
   #[test]
-  fn metadata_rejects_unresolvable_wkt_even_with_supported_wkid() {
+  fn metadata_rejects_wkid_and_wkt_together() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("duplicate-crs.parquet");
+    write_z_fixture(
+      &path,
+      4326,
+      Some(4326),
+      false,
+      Some("GEOGCRS[\"WGS 84\",ID[\"EPSG\",4326]]"),
+    );
+
+    let report = validate(&path).unwrap();
+
+    assert!(
+      report
+        .findings()
+        .iter()
+        .any(|finding| finding.rule() == ValidationRule::Crs
+          && finding.message() == "geodisplay must define either wkid or wkt, not both")
+    );
+  }
+
+  #[test]
+  fn metadata_rejects_unresolvable_wkt() {
     let temp = TempDir::new().unwrap();
     let path = temp.path().join("invalid-wkt.parquet");
-    write_z_fixture(&path, 4326, 4326, false, Some("LOCAL_CS[\"unsupported\"]"));
+    write_z_fixture(&path, 4326, None, false, Some("LOCAL_CS[\"unsupported\"]"));
 
     let report = validate(&path).unwrap();
 
@@ -187,7 +210,7 @@ mod tests {
   fn write_z_fixture(
     path: &std::path::Path,
     geo_epsg: u32,
-    display_epsg: u32,
+    display_epsg: Option<u32>,
     duplicate_geo: bool,
     display_wkt: Option<&str>,
   ) {
@@ -238,7 +261,6 @@ mod tests {
         "type": "z",
         "version": "0.1",
         "code": "zCode",
-        "wkid": display_epsg,
         "xColumn": "x",
         "yColumn": "y",
         "coordinatePrecision": 20,
@@ -253,6 +275,9 @@ mod tests {
         "hasM": false
       }
     });
+    if let Some(display_epsg) = display_epsg {
+      geodisplay["index"]["wkid"] = serde_json::Value::from(display_epsg);
+    }
     if let Some(display_wkt) = display_wkt {
       geodisplay["index"]["wkt"] = serde_json::Value::String(display_wkt.to_string());
     }

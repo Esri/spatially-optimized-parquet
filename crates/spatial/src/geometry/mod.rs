@@ -25,6 +25,6 @@ pub(crate) use types::{
 #[cfg(test)]
 pub(crate) use wkb::write_test_geometry;
 pub(crate) use wkb::{
-  PolygonRingOrder, WkbPartRole, WkbSink, geometry_kind_from_wkb, read_wkb_point,
-  visit_wkb_geometry,
+  PolygonRingOrder, WkbCoordinate, WkbPartRole, WkbSink, geometry_kind_from_wkb,
+  read_wkb_point_coordinate, strip_wkb_dimensions, visit_wkb_geometry,
 };

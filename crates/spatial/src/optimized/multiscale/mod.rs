@@ -1,4 +1,4 @@
-//! Owns geodisplay columns, level planning, geometry traversal, and PBF encoding.
+//! Owns geodisplay columns, level planning, geometry traversal, and Esri PBF encoding.
 
 mod columns;
 mod datafusion;
@@ -10,15 +10,15 @@ mod wire;
 
 pub(crate) use columns::{COVERING_BBOX_COLUMN, validate_internal_projection_columns};
 pub(crate) use columns::{
-  GEODISPLAY_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_CODE_COLUMN, TEMP_XZ_CODE_COLUMN,
-  XZ_CODE_COLUMN,
+  GEODISPLAY_COLUMN, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_CODE_COLUMN,
+  POINT_Z_COLUMN, TEMP_XZ_CODE_COLUMN, XZ_CODE_COLUMN,
 };
 pub(in crate::optimized) use datafusion::{non_point_geodisplay_expr, point_geodisplay_expr};
 pub(in crate::optimized) use levels::{GeometryEncoding, create_geometry_encodings};
 use payload::flat_geometry_payload_from_wkb;
 pub(crate) use traversal::{
-  GeometryPartRole, GeometryPartSink, geometry_extent_from_wkb, point_xy_from_wkb,
-  visit_wkb_geometry,
+  GeometryPartRole, GeometryPartSink, geometry_extent_from_wkb, visit_wkb_geometry,
+  visit_wkb_geometry_for_display,
 };
 pub(crate) use wire::decode_pbf_geometry;
 use wire::{GeometryEncodeScratch, encode_flat_geometry_with_scratch};

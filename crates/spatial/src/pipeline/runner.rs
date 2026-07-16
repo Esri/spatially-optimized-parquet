@@ -54,8 +54,11 @@ impl Pipeline {
       input_wkid: options.input.input_wkid,
       output_wkid: options.output.output_wkid,
       covering: options.output.covering,
+      strip_z: options.output.strip_z,
+      strip_m: options.output.strip_m,
       compression: options.output.compression,
       write_reporter: options.write_reporter,
+      warning_store: Default::default(),
     };
 
     match PipelineKind::new(output_mode, state.output_layout.part_count())? {

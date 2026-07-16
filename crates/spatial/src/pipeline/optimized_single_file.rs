@@ -16,12 +16,15 @@ impl OptimizedSingleFilePipeline {
       state.total_input_rows,
       state.row_range,
       state.write_reporter.clone(),
+      state.warning_store.clone(),
     )
     .resolve(
       state.geometry_column.as_deref(),
       state.input_wkid,
       state.output_wkid,
       state.covering,
+      state.strip_z,
+      state.strip_m,
       state.compression.as_deref(),
     )
     .await?;

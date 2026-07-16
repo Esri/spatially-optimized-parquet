@@ -38,7 +38,7 @@ pub(in crate::optimized) struct GeometryEncoding {
   pub(in crate::optimized) resolution: f64,
   /// Stores the map scale denominator at this level.
   pub(in crate::optimized) scale: f64,
-  /// Stores the quantization transform applied before PBF encoding.
+  /// Stores the quantization transform applied before Esri PBF encoding.
   pub(in crate::optimized) transform: QuantizationTransform,
   /// Stores the minimum retained vertex count for the geometry family.
   pub(in crate::optimized) min_length: usize,

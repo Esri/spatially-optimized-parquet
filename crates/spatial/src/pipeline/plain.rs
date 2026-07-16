@@ -23,6 +23,8 @@ impl PlainPipeline {
     .write(
       state.output_wkid,
       state.covering,
+      state.strip_z,
+      state.strip_m,
       state.compression.as_deref(),
     )
     .await?;
