@@ -3,13 +3,15 @@ use std::collections::HashMap;
 use ::parquet::file::metadata::KeyValue;
 use serde_json::{Value, json};
 
-use crate::geometry::{Extent2D, GeometryKind};
+use crate::geometry::{Extent2D, GeometryKind, GeometryType};
 use crate::geoparquet::SpatialReference;
+use crate::optimized::GeodisplayIndex;
 
 use crate::geoparquet::{GeoMetadata, GeoMetadataInput};
 
 use super::{
-  ClusteringIndexXZInput, ClusteringIndexZInput, MultiscaleLevelInput, ResolvedOptimization,
+  ClusteringIndexXZInput, ClusteringIndexZInput, GeodisplayEncoding, GeodisplayMetadata,
+  MultiscaleLevelInput, OptimizedLayout,
 };
 
 fn spatial_reference() -> SpatialReference {
@@ -135,7 +137,7 @@ fn point_geometry_geodisplay_metadata_serializes_z_clustering() {
   let spatial_reference = spatial_reference();
   let geometry_types = [GeometryKind::Point];
   let values = metadata_values(
-    ResolvedOptimization::optimized_point_metadata(
+    OptimizedLayout::optimized_point_metadata(
       Vec::new(),
       geo_input(&geometry_types, &spatial_reference, false),
       "geodisplay",
@@ -189,6 +191,12 @@ fn point_geometry_geodisplay_metadata_serializes_z_clustering() {
       }
     })
   );
+  assert!(matches!(
+    serde_json::from_value::<GeodisplayMetadata>(values["geodisplay"].clone())
+      .unwrap()
+      .index,
+    GeodisplayIndex::Z { .. }
+  ));
 }
 
 #[test]
@@ -196,14 +204,14 @@ fn xz_geodisplay_metadata_serializes_multiscale_clustering() {
   let spatial_reference = spatial_reference();
   let geometry_types = [GeometryKind::Polygon];
   let values = metadata_values(
-    ResolvedOptimization::optimized_xz_metadata(
+    OptimizedLayout::optimized_xz_metadata(
       Vec::new(),
       geo_input(&geometry_types, &spatial_reference, false),
       "geodisplay",
       ClusteringIndexXZInput {
         code: "xzCode".to_string(),
-        encoding: "esriPBF".to_string(),
-        geometry_type: "polygon".to_string(),
+        encoding: GeodisplayEncoding::EsriPbf,
+        geometry_type: GeometryType::Polygon,
         full_extent: Extent2D {
           xmin: -10.0,
           ymin: -5.0,
@@ -265,4 +273,79 @@ fn xz_geodisplay_metadata_serializes_multiscale_clustering() {
       }
     })
   );
+  match serde_json::from_value::<GeodisplayMetadata>(values["geodisplay"].clone())
+    .unwrap()
+    .index
+  {
+    GeodisplayIndex::Xz { index } => {
+      assert_eq!(index.encoding, GeodisplayEncoding::EsriPbf);
+      assert_eq!(index.geometry_type, GeometryType::Polygon);
+    }
+    GeodisplayIndex::Z { .. } => panic!("XZ metadata decoded as Z metadata"),
+  }
+}
+
+#[test]
+fn geodisplay_metadata_serializes_closed_vocabulary_values() {
+  for (encoding, serialized) in [
+    (GeodisplayEncoding::EsriPbf, "esriPBF"),
+    (GeodisplayEncoding::QuantizedNative, "quantizedNative"),
+  ] {
+    assert_eq!(serde_json::to_value(encoding).unwrap(), json!(serialized));
+    assert_eq!(
+      serde_json::from_value::<GeodisplayEncoding>(json!(serialized)).unwrap(),
+      encoding
+    );
+  }
+
+  for (geometry_type, serialized) in [
+    (GeometryType::Point, "point"),
+    (GeometryType::MultiPoint, "multipoint"),
+    (GeometryType::Polyline, "polyline"),
+    (GeometryType::Polygon, "polygon"),
+  ] {
+    assert_eq!(
+      serde_json::to_value(geometry_type).unwrap(),
+      json!(serialized)
+    );
+    assert_eq!(
+      serde_json::from_value::<GeometryType>(json!(serialized)).unwrap(),
+      geometry_type
+    );
+  }
+}
+
+#[test]
+fn geodisplay_metadata_rejects_unsupported_closed_vocabulary_values() {
+  let metadata = json!({
+    "index": {
+      "type": "xz",
+      "version": "0.1",
+      "code": "xzCode",
+      "encoding": "esriPBF",
+      "geometryType": "polygon",
+      "fullExtent": {
+        "xmin": -10.0,
+        "ymin": -5.0,
+        "xmax": 10.0,
+        "ymax": 5.0
+      },
+      "maxLevel": 20,
+      "hasZ": false,
+      "hasM": false,
+      "levels": []
+    }
+  });
+
+  let mut unsupported_index = metadata.clone();
+  unsupported_index["index"]["type"] = json!("future");
+  assert!(serde_json::from_value::<GeodisplayMetadata>(unsupported_index).is_err());
+
+  let mut unsupported_encoding = metadata.clone();
+  unsupported_encoding["index"]["encoding"] = json!("futureEncoding");
+  assert!(serde_json::from_value::<GeodisplayMetadata>(unsupported_encoding).is_err());
+
+  let mut unsupported_geometry = metadata;
+  unsupported_geometry["index"]["geometryType"] = json!("futureGeometry");
+  assert!(serde_json::from_value::<GeodisplayMetadata>(unsupported_geometry).is_err());
 }

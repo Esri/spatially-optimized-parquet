@@ -6,10 +6,12 @@
 //! concrete WKB type when a codec must distinguish their binary framing.
 
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 
 use super::GeometryKind;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 /// Identifies the normalized geometry representation used by processing and codecs.
 pub(crate) enum GeometryType {
   /// Represents single-point features.

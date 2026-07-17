@@ -5,7 +5,6 @@ use arrow_schema::DataType;
 
 use super::MultiscaleEncoding;
 use crate::geometry::GeometryType;
-use crate::optimized::{ESRI_PBF_ENCODING, QUANTIZED_NATIVE_ENCODING};
 
 use super::{GEODISPLAY_COLUMN, MultiscaleLevel};
 use crate::geometry::{NativeGeometryArrayBuilder, PbfArrayBuilder, QuantizedGeometry};
@@ -26,13 +25,6 @@ impl MultiscaleEncoding {
     match self {
       Self::Pbf => DataType::Binary,
       Self::QuantizedNative => NativeGeometryArrayBuilder::data_type(geometry_type, has_z, has_m),
-    }
-  }
-
-  pub(crate) fn metadata_identifier(self) -> &'static str {
-    match self {
-      Self::Pbf => ESRI_PBF_ENCODING,
-      Self::QuantizedNative => QUANTIZED_NATIVE_ENCODING,
     }
   }
 

@@ -6,7 +6,7 @@ use crate::geometry::{
 };
 use crate::input::parquet::PartitionFamily;
 use crate::optimized::{ClusterKey, GeometryPartRole, GeometryPartSink};
-use crate::optimized::{ClusteringIndexXZ, QUANTIZED_NATIVE_ENCODING};
+use crate::optimized::{ClusteringIndexXZ, GeodisplayEncoding};
 
 use super::dataset_validator::ClusteringRange;
 use super::file_validator::FileValidator;
@@ -57,13 +57,13 @@ impl XzValidator {
         ValidationLocation::file(file.file.relative_path.clone()).with_column(level_path.clone());
       match FileValidator::field_at_path(file.metadata.schema().as_ref(), &level_path) {
         Some(field)
-          if index.encoding == QUANTIZED_NATIVE_ENCODING
+          if index.encoding == GeodisplayEncoding::QuantizedNative
             && native_geometry_type.is_some_and(|geometry_type| {
               field.data_type()
                 == &NativeGeometryArrayBuilder::data_type(geometry_type, index.has_z, index.has_m)
             }) => {}
         Some(field)
-          if index.encoding != QUANTIZED_NATIVE_ENCODING
+          if index.encoding != GeodisplayEncoding::QuantizedNative
             && matches!(
               field.data_type(),
               DataType::Binary | DataType::LargeBinary | DataType::BinaryView
@@ -74,7 +74,7 @@ impl XzValidator {
           location,
           format!(
             "multiscale column has invalid type for encoding {}, found {}",
-            index.encoding,
+            index.encoding.as_str(),
             field.data_type()
           ),
         ),
@@ -148,7 +148,7 @@ impl XzValidator {
       .geometry_types()
       .iter()
       .all(|geometry_type| MetadataValidator::geometry_base_type(geometry_type) == "Polygon");
-    let native_geometry = index.encoding == QUANTIZED_NATIVE_ENCODING;
+    let native_geometry = index.encoding == GeodisplayEncoding::QuantizedNative;
 
     let read_result = file.read_row_groups(&projected_columns, |row_group, row_offset, batch| {
       let geometry = FileValidator::array_at_path(batch, contract.geometry_column())?;
@@ -321,7 +321,7 @@ impl XzValidator {
         };
         GeometryValidator::validate(
           &inspection,
-          &index.geometry_type,
+          index.geometry_type,
           index.has_z,
           index.has_m,
           geometry_location.clone(),
@@ -453,11 +453,11 @@ impl XzValidator {
   }
 
   fn optimized_geometry_type(index: &ClusteringIndexXZ) -> Option<GeometryType> {
-    match index.geometry_type.as_str() {
-      "multipoint" => Some(GeometryType::MultiPoint),
-      "polyline" => Some(GeometryType::Polyline),
-      "polygon" => Some(GeometryType::Polygon),
-      _ => None,
+    match index.geometry_type {
+      GeometryType::MultiPoint | GeometryType::Polyline | GeometryType::Polygon => {
+        Some(index.geometry_type)
+      }
+      GeometryType::Point => None,
     }
   }
 

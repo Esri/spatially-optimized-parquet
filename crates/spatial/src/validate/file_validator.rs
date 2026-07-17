@@ -55,13 +55,13 @@ impl FileValidator {
       let metadata = &validated_file.metadata;
       Self::validate_geometry_schema(file, metadata, report);
       match &metadata.geodisplay.index {
-        GeodisplayIndex::Z(index) => ZValidator::validate_schema(
+        GeodisplayIndex::Z { index } => ZValidator::validate_schema(
           index,
           file,
           metadata.geodisplay.parent_column.as_deref(),
           report,
         ),
-        GeodisplayIndex::Xz(index) => XzValidator::validate_schema(
+        GeodisplayIndex::Xz { index } => XzValidator::validate_schema(
           index,
           file,
           metadata.geodisplay.parent_column.as_deref(),
@@ -82,14 +82,14 @@ impl FileValidator {
       let file = validated_file.file;
       let metadata = &validated_file.metadata;
       let range = match &metadata.geodisplay.index {
-        GeodisplayIndex::Z(index) => ZValidator::validate_file(
+        GeodisplayIndex::Z { index } => ZValidator::validate_file(
           index,
           file,
           metadata,
           metadata.geodisplay.parent_column.as_deref(),
           report,
         ),
-        GeodisplayIndex::Xz(index) => XzValidator::validate_file(
+        GeodisplayIndex::Xz { index } => XzValidator::validate_file(
           index,
           file,
           metadata,
@@ -229,8 +229,8 @@ impl FileValidator {
       return;
     };
     let expected = match &contract.geodisplay.index {
-      GeodisplayIndex::Z(_) => PartitionFamily::Z,
-      GeodisplayIndex::Xz(_) => PartitionFamily::Xz,
+      GeodisplayIndex::Z { .. } => PartitionFamily::Z,
+      GeodisplayIndex::Xz { .. } => PartitionFamily::Xz,
     };
     if partition.family != expected {
       report.push(
@@ -251,10 +251,10 @@ impl FileValidator {
     report: &mut ValidationReport,
   ) {
     let column_path = match &contract.geodisplay.index {
-      GeodisplayIndex::Z(index) => {
+      GeodisplayIndex::Z { index } => {
         Self::display_column_path(contract.geodisplay.parent_column.as_deref(), &index.code)
       }
-      GeodisplayIndex::Xz(index) => {
+      GeodisplayIndex::Xz { index } => {
         Self::display_column_path(contract.geodisplay.parent_column.as_deref(), &index.code)
       }
     };

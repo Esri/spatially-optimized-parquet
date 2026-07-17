@@ -282,7 +282,7 @@ impl ZValidator {
       };
       GeometryValidator::validate(
         &inspection,
-        "point",
+        index.geometry_type,
         index.has_z,
         index.has_m,
         geometry_location,

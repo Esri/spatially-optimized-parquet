@@ -3,16 +3,17 @@
 use datafusion::logical_expr::Expr;
 use datafusion::logical_expr::expr_fn::ident;
 
+use crate::geoparquet::COVERING_BBOX_COLUMN;
 use crate::optimized::multiscale::{
-  COVERING_BBOX_COLUMN, GEODISPLAY_COLUMN, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN,
-  POINT_Z_CODE_COLUMN, POINT_Z_COLUMN,
+  GEODISPLAY_COLUMN, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_CODE_COLUMN,
+  POINT_Z_COLUMN,
 };
 use crate::pipeline::PipelineWarnings;
 
 use super::multiscale::{ComplexGeometryGeodisplayUdf, PointGeometryGeodisplayUdf};
-use super::{ClusteringFamily, ResolvedOptimization};
+use super::{ClusteringFamily, OptimizedLayout};
 
-impl ResolvedOptimization {
+impl OptimizedLayout {
   /// Select source columns, optional covering data, and generated Geodisplay output.
   pub(super) fn output_expressions(
     &self,

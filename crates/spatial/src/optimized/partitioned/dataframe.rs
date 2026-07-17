@@ -4,35 +4,35 @@ use anyhow::Result;
 use datafusion::dataframe::DataFrame;
 use datafusion::logical_expr::expr_fn::ident;
 
-use crate::optimized::ResolvedOptimization;
+use crate::geoparquet::{COVERING_BBOX_COLUMN, GeoParquetWriteContext};
+use crate::optimized::OptimizedLayout;
 use crate::optimized::clustering::ClusterRangeBoundaries;
-use crate::optimized::multiscale::COVERING_BBOX_COLUMN;
 use crate::pipeline::PipelineWarnings;
 
 /// Build the narrow cluster-key dataframe consumed by partition-boundary analysis.
 pub(super) fn range_source(
-  input_dataframe: DataFrame,
-  optimization: &ResolvedOptimization,
+  context: &GeoParquetWriteContext,
+  layout: &OptimizedLayout,
 ) -> Result<DataFrame> {
-  let dataframe = input_dataframe.select(vec![
-    ident(&optimization.geometry().geometry.column),
+  let dataframe = context.frame().dataframe().select(vec![
+    ident(&layout.geometry().geometry.column),
     ident(COVERING_BBOX_COLUMN),
   ])?;
-  optimization
+  layout
     .geometry()
-    .clustering_dataframe(dataframe, optimization.target_extent())
+    .clustering_dataframe(dataframe, context.target_extent())
 }
 
 /// Build optimized output with one range partition value per row.
 pub(super) fn dataframe(
-  input_dataframe: DataFrame,
   source_schema: &arrow_schema::Schema,
-  optimization: &ResolvedOptimization,
+  context: &GeoParquetWriteContext,
+  layout: &OptimizedLayout,
   boundaries: &ClusterRangeBoundaries,
   covering: bool,
   warnings: PipelineWarnings,
 ) -> Result<DataFrame> {
-  let dataframe = input_dataframe.select(
+  let dataframe = context.frame().dataframe().select(
     source_schema
       .fields()
       .iter()
@@ -41,16 +41,16 @@ pub(super) fn dataframe(
       .chain(std::iter::once(ident(COVERING_BBOX_COLUMN)))
       .collect::<Vec<_>>(),
   )?;
-  let clustering_family = optimization.geometry().clustering_family;
+  let clustering_family = layout.geometry().clustering_family;
   let partition_column = clustering_family.cluster_partition_column();
-  let dataframe = optimization
+  let dataframe = layout
     .geometry()
-    .clustering_dataframe(dataframe, optimization.target_extent())?
+    .clustering_dataframe(dataframe, context.target_extent())?
     .with_column(
       partition_column,
       boundaries.partition_expr(clustering_family.cluster_key_column())?,
     )?;
-  let mut expressions = optimization.output_expressions(source_schema, covering, warnings);
+  let mut expressions = layout.output_expressions(source_schema, covering, warnings);
   expressions.push(ident(partition_column));
   expressions.push(ident(clustering_family.cluster_key_column()));
   dataframe.select(expressions).map_err(Into::into)

@@ -24,7 +24,7 @@ use crate::input::{
   SourceGeometryMetadata, open_input,
 };
 
-use super::resolve_source;
+use super::{GeoParquetWriteContext, resolve_source};
 
 fn runtime() -> Runtime {
   Runtime::new().unwrap()
@@ -344,6 +344,56 @@ fn resolved_source_uses_complete_metadata_without_creating_dataframe() {
   assert_eq!(context.geometry_types, vec![GeometryKind::Point]);
   assert_eq!(context.source_extent, expected_extent);
   assert_eq!(dataframe_calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn write_context_reuses_complete_source_metadata_for_normalized_output() {
+  let expected_extent = Extent2D {
+    xmin: -10.0,
+    ymin: 5.0,
+    xmax: 20.0,
+    ymax: 30.0,
+  };
+  let input = MetadataInputSource {
+    schema: sample_schema_with_geometry(),
+    metadata: SourceDatasetMetadata {
+      geometry: Some(SourceGeometryMetadata {
+        column: "geometry".into(),
+        encoding: GeometryEncoding::Wkb,
+        geometry_types: vec![GeometryKind::Point],
+        bbox: Some(expected_extent),
+        covering: None,
+        projjson: Some(epsg_projjson(4326)),
+        has_z: true,
+        has_m: true,
+      }),
+      passthrough_kv: Vec::new(),
+    },
+    dataframe_calls: Arc::new(AtomicUsize::new(0)),
+  };
+
+  let context = runtime()
+    .block_on(GeoParquetWriteContext::resolve(
+      &input,
+      empty_dataframe(input.schema().unwrap()),
+      input.schema().unwrap().as_ref(),
+      None,
+      None,
+      RowRange::default(),
+      4326,
+      true,
+      false,
+    ))
+    .unwrap();
+
+  assert_eq!(context.frame().geometry_column(), "geometry");
+  assert_eq!(context.target_extent(), expected_extent);
+  assert_eq!(
+    context.reprojection().target_spatial_reference().wkid,
+    Some(4326)
+  );
+  assert!(!context.source().has_z);
+  assert!(context.source().has_m);
 }
 
 #[test]

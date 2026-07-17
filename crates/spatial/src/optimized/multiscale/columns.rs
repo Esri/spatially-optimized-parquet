@@ -17,8 +17,6 @@ pub(crate) const POINT_M_COLUMN: &str = "m";
 pub(crate) const GEODISPLAY_COLUMN: &str = "geodisplay";
 /// Defines the XZ-order field within the Geodisplay struct.
 pub(crate) const XZ_CODE_COLUMN: &str = "xzCode";
-/// Defines the optional GeoParquet 1.1 covering bbox column.
-pub(crate) const COVERING_BBOX_COLUMN: &str = "bbox";
 /// Defines the temporary XZ-order scalar column.
 pub(crate) const TEMP_XZ_CODE_COLUMN: &str = "__clustering_xzcode";
 

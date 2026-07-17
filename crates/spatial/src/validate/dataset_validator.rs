@@ -313,7 +313,15 @@ mod tests {
   fn data_validation_reports_malformed_z_batch_views() {
     let temp = TempDir::new().unwrap();
     let path = temp.path().join("wrong-z-code-type.parquet");
-    write_z_fixture_with_code_type(&path, 4326, Some(4326), false, None, DataType::Float64);
+    write_z_fixture_with_code_type(
+      &path,
+      4326,
+      Some(4326),
+      false,
+      None,
+      DataType::Float64,
+      None,
+    );
 
     let report = DatasetValidator::validate(&path).unwrap();
 
@@ -321,6 +329,30 @@ mod tests {
       finding.rule() == ValidationRule::RowGroup
         && finding.message() == "Arrow column 'zCode' is not UInt64"
     }));
+  }
+
+  #[test]
+  fn metadata_rejects_unknown_geodisplay_vocabulary() {
+    for (field, value) in [("type", "future"), ("geometryType", "futureGeometry")] {
+      let temp = TempDir::new().unwrap();
+      let path = temp.path().join(format!("unknown-{field}.parquet"));
+      write_z_fixture_with_code_type(
+        &path,
+        4326,
+        Some(4326),
+        false,
+        None,
+        DataType::UInt64,
+        Some((field, value)),
+      );
+
+      let report = DatasetValidator::validate(&path).unwrap();
+
+      assert!(report.findings().iter().any(|finding| {
+        finding.rule() == ValidationRule::MetadataMalformed
+          && finding.location().column() == Some("geodisplay")
+      }));
+    }
   }
 
   fn write_z_fixture(
@@ -337,6 +369,7 @@ mod tests {
       duplicate_geo,
       display_wkt,
       DataType::UInt64,
+      None,
     );
   }
 
@@ -347,6 +380,7 @@ mod tests {
     duplicate_geo: bool,
     display_wkt: Option<&str>,
     code_type: DataType,
+    index_override: Option<(&str, &str)>,
   ) {
     let extent = Extent2D {
       xmin: 0.0,
@@ -414,6 +448,9 @@ mod tests {
         "hasM": false
       }
     });
+    if let Some((field, value)) = index_override {
+      geodisplay["index"][field] = serde_json::Value::String(value.to_string());
+    }
     if let Some(display_epsg) = display_epsg {
       geodisplay["index"]["wkid"] = serde_json::Value::from(display_epsg);
     }

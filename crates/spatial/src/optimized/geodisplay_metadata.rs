@@ -4,11 +4,11 @@ use ::parquet::file::metadata::KeyValue;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::geometry::{Extent2D, QuantizationTransform};
+use crate::geometry::{Extent2D, GeometryType, QuantizationTransform};
+
+use super::multiscale::MultiscaleEncoding;
 
 pub(crate) const GEODISPLAY_VERSION: &str = "0.1";
-pub(crate) const ESRI_PBF_ENCODING: &str = "esriPBF";
-pub(crate) const QUANTIZED_NATIVE_ENCODING: &str = "quantizedNative";
 const SOP_WRITER_NAME: &str = "sop";
 const SOP_WRITER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -20,16 +20,48 @@ pub(crate) struct GeodisplayMetadata {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(tag = "type")]
 pub(crate) enum GeodisplayIndex {
-  Z(ClusteringIndexZ),
-  Xz(ClusteringIndexXZ),
+  #[serde(rename = "z")]
+  Z {
+    #[serde(flatten)]
+    index: ClusteringIndexZ,
+  },
+  #[serde(rename = "xz")]
+  Xz {
+    #[serde(flatten)]
+    index: ClusteringIndexXZ,
+  },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum GeodisplayEncoding {
+  #[serde(rename = "esriPBF")]
+  EsriPbf,
+  #[serde(rename = "quantizedNative")]
+  QuantizedNative,
+}
+
+impl GeodisplayEncoding {
+  pub(crate) const fn as_str(self) -> &'static str {
+    match self {
+      Self::EsriPbf => "esriPBF",
+      Self::QuantizedNative => "quantizedNative",
+    }
+  }
+}
+
+impl From<MultiscaleEncoding> for GeodisplayEncoding {
+  fn from(encoding: MultiscaleEncoding) -> Self {
+    match encoding {
+      MultiscaleEncoding::Pbf => Self::EsriPbf,
+      MultiscaleEncoding::QuantizedNative => Self::QuantizedNative,
+    }
+  }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ClusteringIndexZ {
-  #[serde(rename = "type")]
-  pub(crate) index_type: String,
   pub(crate) version: String,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub(crate) writer: Option<WriterMetadata>,
@@ -51,7 +83,7 @@ pub(crate) struct ClusteringIndexZ {
   #[serde(rename = "fullExtent")]
   pub(crate) full_extent: Extent2D,
   #[serde(rename = "geometryType")]
-  pub(crate) geometry_type: String,
+  pub(crate) geometry_type: GeometryType,
   #[serde(rename = "hasZ")]
   pub(crate) has_z: bool,
   #[serde(rename = "hasM")]
@@ -60,8 +92,6 @@ pub(crate) struct ClusteringIndexZ {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ClusteringIndexXZ {
-  #[serde(rename = "type")]
-  pub(crate) index_type: String,
   pub(crate) version: String,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub(crate) writer: Option<WriterMetadata>,
@@ -70,9 +100,9 @@ pub(crate) struct ClusteringIndexXZ {
   pub(crate) wkid: Option<u32>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub(crate) wkt: Option<String>,
-  pub(crate) encoding: String,
+  pub(crate) encoding: GeodisplayEncoding,
   #[serde(rename = "geometryType")]
-  pub(crate) geometry_type: String,
+  pub(crate) geometry_type: GeometryType,
   #[serde(rename = "fullExtent")]
   pub(crate) full_extent: Extent2D,
   #[serde(rename = "maxLevel")]
@@ -121,9 +151,9 @@ pub(crate) struct ClusteringIndexXZInput {
   /// Identifies the field containing XZ-order codes.
   pub(crate) code: String,
   /// Defines the geometry payload encoding.
-  pub(crate) encoding: String,
+  pub(crate) encoding: GeodisplayEncoding,
   /// Defines the Geodisplay geometry category.
-  pub(crate) geometry_type: String,
+  pub(crate) geometry_type: GeometryType,
   /// Defines the indexed dataset extent.
   pub(crate) full_extent: Extent2D,
   /// Limits the XZ hierarchy depth.
@@ -169,14 +199,14 @@ impl GeodisplayMetadata {
   pub(super) fn point(parent_column: &str, index: ClusteringIndexZ) -> Self {
     Self {
       parent_column: Some(parent_column.to_string()),
-      index: GeodisplayIndex::Z(index),
+      index: GeodisplayIndex::Z { index },
     }
   }
 
   pub(super) fn xz(parent_column: &str, index: ClusteringIndexXZ) -> Self {
     Self {
       parent_column: Some(parent_column.to_string()),
-      index: GeodisplayIndex::Xz(index),
+      index: GeodisplayIndex::Xz { index },
     }
   }
 }
@@ -194,7 +224,6 @@ impl GeodisplayMetadata {
 impl ClusteringIndexZ {
   pub(super) fn new(input: ClusteringIndexZInput) -> Self {
     Self {
-      index_type: "z".to_string(),
       version: GEODISPLAY_VERSION.to_string(),
       writer: Some(sop_writer_metadata()),
       code: input.code,
@@ -206,7 +235,7 @@ impl ClusteringIndexZ {
       m_column: input.m_column,
       coordinate_precision: input.coordinate_precision,
       full_extent: input.full_extent,
-      geometry_type: "point".to_string(),
+      geometry_type: GeometryType::Point,
       has_z: input.has_z,
       has_m: input.has_m,
     }
@@ -216,7 +245,6 @@ impl ClusteringIndexZ {
 impl ClusteringIndexXZ {
   pub(super) fn new(input: ClusteringIndexXZInput) -> Self {
     Self {
-      index_type: "xz".to_string(),
       version: GEODISPLAY_VERSION.to_string(),
       writer: Some(sop_writer_metadata()),
       code: input.code,

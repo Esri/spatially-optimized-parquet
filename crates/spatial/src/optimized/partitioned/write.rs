@@ -1,32 +1,31 @@
 //! Persists range-partitioned optimized output through custom physical sink planning.
 
-use anyhow::Result;
-use datafusion::dataframe::DataFrame;
-
-use crate::optimized::ResolvedOptimization;
+use crate::geoparquet::GeoParquetWriteContext;
+use crate::optimized::OptimizedLayout;
 use crate::optimized::clustering::ClusterRangeBoundaries;
 use crate::output::{OutputPath, Writer, WriterOptions};
 use crate::pipeline::{PipelineWarnings, SharedWriteReporter};
+use anyhow::Result;
 
 use super::dataframe;
 use super::sort::PartitionedSortConfig;
 
 /// Write range-partitioned optimized GeoParquet files.
 pub(crate) async fn write(
-  input_dataframe: DataFrame,
   output_path: &OutputPath,
   source_schema: &arrow_schema::Schema,
-  optimization: &ResolvedOptimization,
+  context: &GeoParquetWriteContext,
+  layout: &OptimizedLayout,
   covering: bool,
   compression: Option<&str>,
   total_input_rows: u64,
   write_reporter: Option<SharedWriteReporter>,
   warnings: PipelineWarnings,
 ) -> Result<u64> {
-  let clustering_family = optimization.geometry().clustering_family;
+  let clustering_family = layout.geometry().clustering_family;
   let partition_column = clustering_family.cluster_partition_column();
   clustering_family.validate_partition_column(source_schema)?;
-  let range_source = dataframe::range_source(input_dataframe.clone(), optimization)?;
+  let range_source = dataframe::range_source(context, layout)?;
   let boundaries = ClusterRangeBoundaries::compute(
     range_source,
     clustering_family.cluster_key_column(),
@@ -34,16 +33,16 @@ pub(crate) async fn write(
   )
   .await?;
   let dataframe = dataframe::dataframe(
-    input_dataframe,
     source_schema,
-    optimization,
+    context,
+    layout,
     &boundaries,
     covering,
     warnings,
   )?;
-  let metadata = optimization.parquet_metadata(covering)?;
+  let metadata = layout.parquet_metadata(context, covering)?;
   let writer_options = WriterOptions::new(compression.unwrap_or("snappy"), &metadata)?
-    .with_delta_binary_packed_columns(optimization.delta_binary_packed_column_paths());
+    .with_delta_binary_packed_columns(layout.delta_binary_packed_column_paths());
   let partitioned_sort = PartitionedSortConfig::new(
     partition_column,
     clustering_family.cluster_key_column(),

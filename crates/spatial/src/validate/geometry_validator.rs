@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 use arrow_array::{Array, BinaryArray, BinaryViewArray, LargeBinaryArray};
 use geo_traits::Dimensions;
 
-use crate::geometry::{Extent2D, GeometryKind};
+use crate::geometry::{Extent2D, GeometryKind, GeometryType};
 use crate::geometry::{WkbCoordinate, WkbHeader};
 use crate::optimized::{GeometryPartRole, GeometryPartSink};
 
@@ -42,7 +42,7 @@ impl GeometryValidator {
 
   pub(crate) fn validate(
     inspection: &GeometryValidationInfo,
-    expected_geometry_type: &str,
+    expected_geometry_type: GeometryType,
     expected_has_z: bool,
     expected_has_m: bool,
     location: ValidationLocation,
@@ -54,8 +54,9 @@ impl GeometryValidator {
         ValidationSeverity::Error,
         location.clone(),
         format!(
-          "sampled WKB geometry {:?} does not match geometryType '{expected_geometry_type}'",
-          inspection.kind
+          "sampled WKB geometry {:?} does not match geometryType '{}'",
+          inspection.kind,
+          expected_geometry_type.as_str()
         ),
       );
     }
@@ -131,19 +132,18 @@ impl GeometryValidator {
     bail!("expected Arrow binary array, found {}", array.data_type())
   }
 
-  fn matches_geometry_type(inspection: &GeometryValidationInfo, expected: &str) -> bool {
+  fn matches_geometry_type(inspection: &GeometryValidationInfo, expected: GeometryType) -> bool {
     match expected {
-      "point" => inspection.kind == GeometryKind::Point,
-      "multipoint" => inspection.kind == GeometryKind::MultiPoint,
-      "polyline" => matches!(
+      GeometryType::Point => inspection.kind == GeometryKind::Point,
+      GeometryType::MultiPoint => inspection.kind == GeometryKind::MultiPoint,
+      GeometryType::Polyline => matches!(
         inspection.kind,
         GeometryKind::LineString | GeometryKind::MultiLineString
       ),
-      "polygon" => matches!(
+      GeometryType::Polygon => matches!(
         inspection.kind,
         GeometryKind::Polygon | GeometryKind::MultiPolygon
       ),
-      _ => false,
     }
   }
 }

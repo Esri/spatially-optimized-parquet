@@ -60,11 +60,10 @@ use arrow_schema::SchemaRef;
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
 
-use crate::geoparquet::{GeoParquetWriter, SpatialReference};
+use crate::geoparquet::{GeoParquetWriteContext, GeoParquetWriter, SpatialReference};
 use crate::input::{InputOpenOptions, InputSource, RowRange, SourceFormat, open_input};
 use crate::optimized::{
-  MultiscaleEncoding, partitioned, resolve_optimized_geoparquet, single,
-  validate_internal_projection_columns,
+  MultiscaleEncoding, OptimizedLayout, partitioned, single, validate_internal_projection_columns,
 };
 use crate::output::{OutputMode, OutputPath};
 use crate::session::DataFusionSession;
@@ -304,43 +303,27 @@ impl Pipeline {
 
   async fn write_geoparquet(state: SpatialPipelineState) -> Result<SpatialPipelineResult> {
     let options = &state.output_options;
+    let context = Self::resolve_geoparquet_context(&state).await?;
     let rows_written = GeoParquetWriter::new(
-      state.input_source.as_ref(),
-      state.input_dataframe.clone(),
+      &context,
       &state.output_path,
       state.source_schema.as_ref(),
-      state.input_options.geometry_column.as_deref(),
-      state.input_options.input_wkid,
-      state.input_options.row_range,
       state.total_input_rows,
       state.write_reporter.clone(),
     )
-    .write(
-      options.output_wkid,
-      options.covering,
-      options.strip_z,
-      options.strip_m,
-      options.compression.as_deref(),
-    )
+    .write(options.covering, options.compression.as_deref())
     .await?;
     Ok(state.finish(rows_written))
   }
 
   async fn write_optimized_single(state: SpatialPipelineState) -> Result<SpatialPipelineResult> {
-    let (dataframe, optimization) = resolve_optimized_geoparquet(
-      state.input_source.as_ref(),
-      state.input_dataframe.clone(),
-      state.source_schema.as_ref(),
-      state.input_options.row_range,
-      &state.input_options,
-      &state.output_options,
-    )
-    .await?;
+    let context = Self::resolve_geoparquet_context(&state).await?;
+    let layout = OptimizedLayout::new(&context, &state.output_options)?;
     let rows_written = single::write(
-      dataframe,
       &state.output_path,
       state.source_schema.as_ref(),
-      &optimization,
+      &context,
+      &layout,
       state.output_options.covering,
       state.output_options.compression.as_deref(),
       state.total_input_rows,
@@ -354,20 +337,13 @@ impl Pipeline {
   async fn write_optimized_partitioned(
     state: SpatialPipelineState,
   ) -> Result<SpatialPipelineResult> {
-    let (dataframe, optimization) = resolve_optimized_geoparquet(
-      state.input_source.as_ref(),
-      state.input_dataframe.clone(),
-      state.source_schema.as_ref(),
-      state.input_options.row_range,
-      &state.input_options,
-      &state.output_options,
-    )
-    .await?;
+    let context = Self::resolve_geoparquet_context(&state).await?;
+    let layout = OptimizedLayout::new(&context, &state.output_options)?;
     let rows_written = partitioned::write(
-      dataframe,
       &state.output_path,
       state.source_schema.as_ref(),
-      &optimization,
+      &context,
+      &layout,
       state.output_options.covering,
       state.output_options.compression.as_deref(),
       state.total_input_rows,
@@ -376,6 +352,23 @@ impl Pipeline {
     )
     .await?;
     Ok(state.finish(rows_written))
+  }
+
+  async fn resolve_geoparquet_context(
+    state: &SpatialPipelineState,
+  ) -> Result<GeoParquetWriteContext> {
+    GeoParquetWriteContext::resolve(
+      state.input_source.as_ref(),
+      state.input_dataframe.clone(),
+      state.source_schema.as_ref(),
+      state.input_options.geometry_column.as_deref(),
+      state.input_options.input_wkid,
+      state.input_options.row_range,
+      state.output_options.output_wkid,
+      state.output_options.strip_z,
+      state.output_options.strip_m,
+    )
+    .await
   }
 
   async fn prepare_input_dataframe(

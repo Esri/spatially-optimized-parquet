@@ -16,7 +16,10 @@ use datafusion::prelude::col;
 
 use crate::geometry::GeometryType;
 use crate::geometry::to_datafusion_error;
-use crate::optimized::{BoundsUdf, COVERING_BBOX_COLUMN, PointGeometryUdf};
+use crate::optimized::{BoundsUdf, PointGeometryUdf};
+
+/// Identifies the canonical GeoParquet bounding-box covering column.
+pub(crate) const COVERING_BBOX_COLUMN: &str = "bbox";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct FeatureBboxUdf;
