@@ -541,14 +541,14 @@ fn validate_pbf_vertex_provenance(
           level.transform.translate[1],
         )?,
         has_z.then(|| {
-          quantized_ordinate(
+          quantized_component(
             coordinate.z,
             level.transform.scale[2],
             level.transform.translate[2],
           )
         }),
         has_m.then(|| {
-          quantized_ordinate(
+          quantized_component(
             coordinate.m,
             level.transform.scale[3],
             level.transform.translate[3],
@@ -598,7 +598,7 @@ fn validate_pbf_vertex_provenance(
   }
 }
 
-fn quantized_ordinate(value: Option<f64>, scale: f64, translate: f64) -> i64 {
+fn quantized_component(value: Option<f64>, scale: f64, translate: f64) -> i64 {
   value
     .filter(|value| value.is_finite())
     .and_then(|value| quantized_value(value, scale, translate))
@@ -903,7 +903,7 @@ mod tests {
   }
 
   #[test]
-  fn rejects_dimensional_pbf_ordinate_not_present_in_wkb() {
+  fn rejects_dimensional_pbf_component_not_present_in_wkb() {
     let mut wkb = vec![1];
     wkb.extend_from_slice(&1002_u32.to_le_bytes());
     wkb.extend_from_slice(&2_u32.to_le_bytes());

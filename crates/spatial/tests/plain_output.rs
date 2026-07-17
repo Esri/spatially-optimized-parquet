@@ -16,7 +16,7 @@ use common::assertion::{
   assert_close, assert_covering_metadata, binary_value, string_value, struct_f64_value,
 };
 use common::fixture::{wkb_dimensional_point, wkb_point};
-use common::geometry::{point_xy_from_wkb, transform_point_between_epsg};
+use common::geometry::{point_from_wkb_xy, transform_point_between_epsg};
 use common::parquet::{
   geoparquet_kv, geoparquet_kv_with_epsg, kv_map, scan_parquet, write_parquet,
 };
@@ -247,10 +247,10 @@ fn plain_output_reprojects_selected_rows_and_covering_extent() {
     Field::new("name", DataType::Utf8, false),
     Field::new("geometry", DataType::Binary, true),
   ]));
-  let ignored_xy = transform_point_between_epsg(40.0, 30.0, 4326, 3857);
-  let selected_xy = transform_point_between_epsg(1.0, 1.0, 4326, 3857);
-  let ignored_point = wkb_point(ignored_xy.0, ignored_xy.1);
-  let selected_point = wkb_point(selected_xy.0, selected_xy.1);
+  let ignored_point_xy = transform_point_between_epsg(40.0, 30.0, 4326, 3857);
+  let selected_point_xy = transform_point_between_epsg(1.0, 1.0, 4326, 3857);
+  let ignored_point = wkb_point(ignored_point_xy.0, ignored_point_xy.1);
+  let selected_point = wkb_point(selected_point_xy.0, selected_point_xy.1);
   let batch = arrow_array::RecordBatch::try_new(
     schema.clone(),
     vec![
@@ -296,7 +296,7 @@ fn plain_output_reprojects_selected_rows_and_covering_extent() {
     "selected"
   );
   let geometry = binary_value(batch.column_by_name("geometry").unwrap().as_ref(), 0);
-  let (output_x, output_y) = point_xy_from_wkb(&geometry).unwrap();
+  let (output_x, output_y) = point_from_wkb_xy(&geometry).unwrap();
   assert_close(output_x, 1.0);
   assert_close(output_y, 1.0);
 
@@ -325,7 +325,7 @@ fn plain_output_reprojects_selected_rows_and_covering_extent() {
     !metadata
       .get("geo")
       .unwrap()
-      .contains(&ignored_xy.0.to_string())
+      .contains(&ignored_point_xy.0.to_string())
   );
 }
 

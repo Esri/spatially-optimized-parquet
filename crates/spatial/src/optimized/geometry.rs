@@ -78,9 +78,9 @@ pub(super) struct OptimizedGeometry {
   pub(super) geometry_type: OptimizedGeometryType,
   /// Stores the clustering strategy family.
   pub(super) clustering_family: ClusteringFamily,
-  /// Indicates whether source metadata declares Z ordinates.
+  /// Indicates whether source metadata declares Z values.
   pub(super) has_z: bool,
-  /// Indicates whether source metadata declares M ordinates.
+  /// Indicates whether source metadata declares M values.
   pub(super) has_m: bool,
 }
 

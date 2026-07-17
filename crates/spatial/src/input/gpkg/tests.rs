@@ -681,7 +681,7 @@ fn open_input_infers_z_and_m_from_generic_geopackage_wkb() {
 fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
   struct DimensionCase {
     suffix: &'static str,
-    ordinates: &'static str,
+    dimension_values: &'static str,
     has_z: bool,
     has_m: bool,
     dimensions: Dimensions,
@@ -697,21 +697,21 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
   let dimension_cases = [
     DimensionCase {
       suffix: "Z",
-      ordinates: "3",
+      dimension_values: "3",
       has_z: true,
       has_m: false,
       dimensions: Dimensions::Xyz,
     },
     DimensionCase {
       suffix: "M",
-      ordinates: "4",
+      dimension_values: "4",
       has_z: false,
       has_m: true,
       dimensions: Dimensions::Xym,
     },
     DimensionCase {
       suffix: "ZM",
-      ordinates: "3 4",
+      dimension_values: "3 4",
       has_z: true,
       has_m: true,
       dimensions: Dimensions::Xyzm,
@@ -801,7 +801,7 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
       let wkt = dimensional_geometry_wkt(
         geometry_case.name,
         dimension_case.suffix,
-        dimension_case.ordinates,
+        dimension_case.dimension_values,
       );
       let features = [GpkgFeature {
         id: 1,
@@ -886,10 +886,10 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
   }
 }
 
-fn dimensional_geometry_wkt(name: &str, suffix: &str, ordinates: &str) -> String {
-  let first = format!("1 2 {ordinates}");
-  let second = format!("5 2 {ordinates}");
-  let third = format!("5 6 {ordinates}");
+fn dimensional_geometry_wkt(name: &str, suffix: &str, dimension_values: &str) -> String {
+  let first = format!("1 2 {dimension_values}");
+  let second = format!("5 2 {dimension_values}");
+  let third = format!("5 6 {dimension_values}");
   match name {
     "point" => format!("POINT {suffix} ({first})"),
     "line_string" => format!("LINESTRING {suffix} ({first}, {second})"),

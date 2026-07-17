@@ -22,7 +22,7 @@ use common::assertion::{
   struct_f64_value,
 };
 use common::fixture::{wkb_dimensional_point, wkb_dimensional_polygon, wkb_point, wkb_polygon};
-use common::geometry::{point_xy_from_wkb, polygon_extent_from_wkb, transform_point_between_epsg};
+use common::geometry::{point_from_wkb_xy, polygon_extent_from_wkb, transform_point_between_epsg};
 use common::gpkg::{GpkgFeature, GpkgLayerSpec, write_gpkg};
 use common::parquet::{
   geoparquet_kv, geoparquet_kv_with_epsg, kv_map, reader_metadata, scan_parquet, write_parquet,
@@ -355,7 +355,7 @@ fn optimized_output_keeps_point_z_and_m_in_wkb_columns_and_metadata() {
 }
 
 #[test]
-fn optimized_output_supports_xyz_and_xym_points() {
+fn optimized_output_supports_point_xyz_and_point_xym() {
   let temp = TempDir::new().unwrap();
   for (suffix, geometry_type, z, m) in [
     ("xyz", "Point Z", Some(30.0), None),
@@ -569,7 +569,7 @@ fn optimized_non_point_output_zero_fills_dimensions_that_disagree_with_metadata(
 
   assert_eq!(result.rows_written(), 1);
   assert_eq!(result.warnings().len(), 1);
-  assert!(result.warnings()[0].contains("encoding missing ordinates as 0"));
+  assert!(result.warnings()[0].contains("encoding missing Z/M values as 0"));
 }
 
 #[test]
@@ -700,7 +700,7 @@ fn optimized_output_strips_polygon_pbf_dimensions() {
     &[geoparquet_kv("geometry", &["Polygon ZM"])],
   );
 
-  for (name, strip_z, strip_m, expected_ordinates) in [
+  for (name, strip_z, strip_m, expected_components) in [
     ("strip-z", true, false, vec![100_i64, 300, 200, 100]),
     ("strip-m", false, true, vec![10_i64, 30, 20, 10]),
   ] {
@@ -738,7 +738,7 @@ fn optimized_output_strips_polygon_pbf_dimensions() {
         .chunks_exact(3)
         .map(|coordinate| coordinate[2])
         .collect::<Vec<_>>(),
-      expected_ordinates
+      expected_components
     );
   }
 }
@@ -796,7 +796,7 @@ fn optimized_output_writes_covering_bbox_for_reprojected_points() {
 }
 
 #[test]
-fn optimized_output_reprojects_xy_and_preserves_point_z_and_m() {
+fn optimized_output_reprojects_point_xy_and_preserves_point_z_and_m() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("point-zm-3857.parquet");
   let output = temp.path().join("point-zm-4326.parquet");
@@ -857,10 +857,10 @@ fn optimized_output_reprojects_selected_geoparquet_rows() {
     Field::new("name", DataType::Utf8, false),
     Field::new("geometry", DataType::Binary, true),
   ]));
-  let ignored_xy = transform_point_between_epsg(40.0, 30.0, 4326, 3857);
-  let selected_xy = transform_point_between_epsg(1.0, 1.0, 4326, 3857);
-  let ignored_point = wkb_point(ignored_xy.0, ignored_xy.1);
-  let selected_point = wkb_point(selected_xy.0, selected_xy.1);
+  let ignored_point_xy = transform_point_between_epsg(40.0, 30.0, 4326, 3857);
+  let selected_point_xy = transform_point_between_epsg(1.0, 1.0, 4326, 3857);
+  let ignored_point = wkb_point(ignored_point_xy.0, ignored_point_xy.1);
+  let selected_point = wkb_point(selected_point_xy.0, selected_point_xy.1);
   let batch = RecordBatch::try_new(
     schema.clone(),
     vec![
@@ -921,7 +921,7 @@ fn optimized_output_reprojects_selected_geoparquet_rows() {
   assert_close(x.value(0), 1.0);
   assert_close(y.value(0), 1.0);
   let geometry = binary_value(batch.column_by_name("geometry").unwrap().as_ref(), 0);
-  let (output_x, output_y) = point_xy_from_wkb(&geometry).unwrap();
+  let (output_x, output_y) = point_from_wkb_xy(&geometry).unwrap();
   assert_close(output_x, 1.0);
   assert_close(output_y, 1.0);
 
@@ -1123,7 +1123,7 @@ fn optimized_output_writes_native_quantized_multiscale_geometry() {
 }
 
 #[test]
-fn optimized_native_output_writes_missing_zm_as_nullable_ordinates() {
+fn optimized_native_output_writes_missing_values_as_nullable_components_zm() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("polygon-missing-zm.parquet");
   let output = temp.path().join("polygon-missing-zm-native.parquet");

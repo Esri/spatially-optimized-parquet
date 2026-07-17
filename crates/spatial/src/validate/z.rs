@@ -328,7 +328,7 @@ pub(crate) fn validate_z_file(
           ),
         );
       }
-      validate_point_ordinate(
+      validate_point_component(
         geometry_coordinate.z,
         z_values.map(|values| values.value(row_index)),
         z_path.as_deref(),
@@ -337,7 +337,7 @@ pub(crate) fn validate_z_file(
         file,
         report,
       );
-      validate_point_ordinate(
+      validate_point_component(
         geometry_coordinate.m,
         m_values.map(|values| values.value(row_index)),
         m_path.as_deref(),
@@ -362,7 +362,7 @@ pub(crate) fn validate_z_file(
         );
       }
 
-      fn validate_point_ordinate(
+      fn validate_point_component(
         geometry_value: Option<f64>,
         column_value: Option<f64>,
         column_path: Option<&str>,
@@ -389,7 +389,7 @@ pub(crate) fn validate_z_file(
             .with_row(row)
             .with_column(column_path.to_string()),
           format!(
-            "stored ordinate {column_value} does not match sampled WKB ordinate {geometry_value}"
+            "stored coordinate value {column_value} does not match sampled WKB coordinate value {geometry_value}"
           ),
         );
       }

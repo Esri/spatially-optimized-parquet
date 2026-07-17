@@ -130,9 +130,9 @@ pub(crate) struct XzClusteringIndexInput {
   pub(crate) wkid: Option<u32>,
   /// Stores the coordinate reference WKT.
   pub(crate) wkt: Option<String>,
-  /// Indicates whether coordinates contain Z ordinates.
+  /// Indicates whether coordinates contain Z values.
   pub(crate) has_z: bool,
-  /// Indicates whether coordinates contain M ordinates.
+  /// Indicates whether coordinates contain M values.
   pub(crate) has_m: bool,
   /// Lists generated multiscale geometry columns.
   pub(crate) levels: Vec<MultiscaleLevelInput>,

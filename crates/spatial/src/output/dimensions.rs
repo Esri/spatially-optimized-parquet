@@ -1,4 +1,4 @@
-//! Removes selected dimensional ordinates from WKB output geometry.
+//! Removes selected Z/M values from WKB output geometry.
 
 use std::any::Any;
 

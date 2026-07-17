@@ -276,13 +276,13 @@ fn inspect_multiscale_geometry(
       assert_eq!(decoded.coords.len(), vertex_count * layout.stride());
       if geometry == FixtureGeometry::Polygon {
         assert_eq!(decoded.lengths, vec![5, 5]);
-        assert_representative_polygon_ordinates(&decoded, layout);
+        assert_representative_polygon_components(&decoded, layout);
       }
     }
   }
 }
 
-fn assert_representative_polygon_ordinates(decoded: &PbfGeometry, layout: CoordinateLayout) {
+fn assert_representative_polygon_components(decoded: &PbfGeometry, layout: CoordinateLayout) {
   let coordinates = decoded
     .coords
     .chunks_exact(layout.stride())
@@ -372,50 +372,50 @@ fn polygon_fixture(
   layout: CoordinateLayout,
   x: f64,
   y: f64,
-  ordinate_start: f64,
+  component_start: f64,
   measure_start: f64,
 ) -> Vec<u8> {
   let exterior = [
-    layout.coordinate(x, y, ordinate_start, measure_start),
-    layout.coordinate(x + 1.0, y, ordinate_start + 10.0, measure_start + 10.0),
+    layout.coordinate(x, y, component_start, measure_start),
+    layout.coordinate(x + 1.0, y, component_start + 10.0, measure_start + 10.0),
     layout.coordinate(
       x + 1.0,
       y + 1.0,
-      ordinate_start + 20.0,
+      component_start + 20.0,
       measure_start + 20.0,
     ),
-    layout.coordinate(x, y + 1.0, ordinate_start + 30.0, measure_start + 30.0),
-    layout.coordinate(x, y, ordinate_start, measure_start),
+    layout.coordinate(x, y + 1.0, component_start + 30.0, measure_start + 30.0),
+    layout.coordinate(x, y, component_start, measure_start),
   ];
   let hole = [
     layout.coordinate(
       x + 0.25,
       y + 0.25,
-      ordinate_start + 40.0,
+      component_start + 40.0,
       measure_start + 40.0,
     ),
     layout.coordinate(
       x + 0.25,
       y + 0.75,
-      ordinate_start + 50.0,
+      component_start + 50.0,
       measure_start + 50.0,
     ),
     layout.coordinate(
       x + 0.75,
       y + 0.75,
-      ordinate_start + 60.0,
+      component_start + 60.0,
       measure_start + 60.0,
     ),
     layout.coordinate(
       x + 0.75,
       y + 0.25,
-      ordinate_start + 70.0,
+      component_start + 70.0,
       measure_start + 70.0,
     ),
     layout.coordinate(
       x + 0.25,
       y + 0.25,
-      ordinate_start + 40.0,
+      component_start + 40.0,
       measure_start + 40.0,
     ),
   ];

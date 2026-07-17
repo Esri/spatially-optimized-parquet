@@ -21,9 +21,9 @@ pub(crate) struct GeoMetadataInput<'a> {
   pub(crate) output_extent: Extent2D,
   /// Stores the output coordinate reference system.
   pub(crate) output_spatial_reference: &'a SpatialReferenceInfo,
-  /// Indicates whether geometry values contain Z ordinates.
+  /// Indicates whether geometry values contain Z components.
   pub(crate) has_z: bool,
-  /// Indicates whether geometry values contain M ordinates.
+  /// Indicates whether geometry values contain M components.
   pub(crate) has_m: bool,
   /// Enables GeoParquet covering metadata.
   pub(crate) covering: bool,

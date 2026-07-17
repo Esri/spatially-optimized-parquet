@@ -80,7 +80,7 @@ impl OutputOptions {
     }
   }
 
-  /// Remove selected dimensional ordinates from output geometry.
+  /// Remove selected Z/M values from output geometry.
   pub fn with_stripped_dimensions(mut self, strip_z: bool, strip_m: bool) -> Self {
     self.strip_z = strip_z;
     self.strip_m = strip_m;

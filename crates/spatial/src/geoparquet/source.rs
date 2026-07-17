@@ -22,9 +22,9 @@ pub(crate) struct ResolvedGeoParquetSource {
   pub(crate) source_spatial_reference: SpatialReferenceInfo,
   /// Stores the normalized geometry shape used by plain output mechanics.
   pub(crate) geometry_shape: GeometryShape,
-  /// Indicates whether source metadata declares Z ordinates.
+  /// Indicates whether source metadata declares Z values.
   pub(crate) has_z: bool,
-  /// Indicates whether source metadata declares M ordinates.
+  /// Indicates whether source metadata declares M values.
   pub(crate) has_m: bool,
   /// Stores normalized metadata with completed geometry facts.
   pub(crate) source_metadata: SourceDatasetMetadata,

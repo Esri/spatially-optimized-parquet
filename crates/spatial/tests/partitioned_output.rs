@@ -19,7 +19,7 @@ use common::assertion::{
   assert_close, assert_covering_metadata, assert_json_extent, binary_value, string_value,
 };
 use common::fixture::{wkb_point, wkb_polygon};
-use common::geometry::{point_xy_from_wkb, transform_point_between_epsg};
+use common::geometry::{point_from_wkb_xy, transform_point_between_epsg};
 use common::parquet::{
   geoparquet_kv, geoparquet_kv_with_epsg, kv_map, parquet_files, raw_parquet_schema,
   reader_metadata, scan_parquet, write_parquet,
@@ -148,7 +148,7 @@ fn partitioned_output_writes_sorted_range_partitions() {
         batch.column_by_name("geometry").unwrap().as_ref(),
         row_index,
       );
-      let (geometry_x, geometry_y) = point_xy_from_wkb(&geometry).unwrap();
+      let (geometry_x, geometry_y) = point_from_wkb_xy(&geometry).unwrap();
       assert_close(geometry_x, x.value(row_index));
       assert_close(geometry_y, y.value(row_index));
       assert!((1.0 - 1.0e-5..=8.0 + 1.0e-5).contains(&geometry_x));
