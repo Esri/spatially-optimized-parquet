@@ -3,15 +3,14 @@
 //! Product contracts and pipelines live in [`crate::geoparquet`] and [`crate::pipeline`].
 
 mod mode;
-mod parquet;
-mod parquet_partition_exec;
-mod parquet_sink;
-mod parquet_writer;
+mod partition_plan;
 mod path;
+mod reporter;
+mod tracking_sink;
+mod writer;
 
 #[cfg(test)]
 pub(crate) use crate::geometry::QuantizationTransform;
 pub use mode::OutputMode;
-pub(crate) use parquet::ParquetWriterOptions;
-pub(crate) use parquet_writer::ParquetOutputWriter;
 pub(crate) use path::OutputPath;
+pub(crate) use writer::{Writer, WriterOptions};

@@ -7,7 +7,7 @@ use datafusion::logical_expr::expr_fn::ident;
 use crate::optimized::ResolvedOptimization;
 use crate::optimized::clustering::ClusterRangeBoundaries;
 use crate::optimized::multiscale::COVERING_BBOX_COLUMN;
-use crate::pipeline::PipelineWarningStore;
+use crate::pipeline::PipelineWarnings;
 
 /// Build the narrow cluster-key dataframe consumed by partition-boundary analysis.
 pub(super) fn range_source(
@@ -30,7 +30,7 @@ pub(super) fn dataframe(
   optimization: &ResolvedOptimization,
   boundaries: &ClusterRangeBoundaries,
   covering: bool,
-  warning_store: PipelineWarningStore,
+  warnings: PipelineWarnings,
 ) -> Result<DataFrame> {
   let dataframe = input_dataframe.select(
     source_schema
@@ -50,7 +50,7 @@ pub(super) fn dataframe(
       partition_column,
       boundaries.partition_expr(clustering_family.cluster_key_column())?,
     )?;
-  let mut expressions = optimization.output_expressions(source_schema, covering, warning_store);
+  let mut expressions = optimization.output_expressions(source_schema, covering, warnings);
   expressions.push(ident(partition_column));
   expressions.push(ident(clustering_family.cluster_key_column()));
   dataframe.select(expressions).map_err(Into::into)

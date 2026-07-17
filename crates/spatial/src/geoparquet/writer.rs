@@ -9,7 +9,7 @@ use datafusion::logical_expr::expr_fn::ident;
 use crate::input::{InputSource, RowRange};
 use crate::optimized::COVERING_BBOX_COLUMN;
 use crate::optimized::ExtentResolver;
-use crate::output::{OutputPath, ParquetOutputWriter, ParquetWriterOptions};
+use crate::output::{OutputPath, Writer, WriterOptions};
 use crate::pipeline::SharedWriteReporter;
 
 use super::{
@@ -116,8 +116,7 @@ impl<'a> GeoParquetWriter<'a> {
     };
     let metadata =
       GeoMetadata::parquet_entries(source.source_metadata.passthrough_kv, geo_metadata)?;
-    let writer_options =
-      ParquetWriterOptions::new(compression.unwrap_or("snappy"), &metadata)?.into_datafusion();
+    let writer_options = WriterOptions::new(compression.unwrap_or("snappy"), &metadata)?;
     let output_path = self
       .output_path
       .paths()?
@@ -126,7 +125,7 @@ impl<'a> GeoParquetWriter<'a> {
       .context("missing output path")?
       .to_string_lossy()
       .into_owned();
-    ParquetOutputWriter::new(self.total_rows, self.write_reporter)
+    Writer::new(self.total_rows, self.write_reporter)
       .write_single(dataframe, output_path, writer_options, Vec::new())
       .await
   }

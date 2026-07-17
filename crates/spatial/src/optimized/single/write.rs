@@ -4,8 +4,8 @@ use anyhow::{Context, Result};
 use datafusion::dataframe::DataFrame;
 
 use crate::optimized::ResolvedOptimization;
-use crate::output::{OutputPath, ParquetOutputWriter, ParquetWriterOptions};
-use crate::pipeline::{PipelineWarningStore, SharedWriteReporter};
+use crate::output::{OutputPath, Writer, WriterOptions};
+use crate::pipeline::{PipelineWarnings, SharedWriteReporter};
 
 use super::dataframe;
 
@@ -19,19 +19,18 @@ pub(crate) async fn write(
   compression: Option<&str>,
   total_input_rows: u64,
   write_reporter: Option<SharedWriteReporter>,
-  warning_store: PipelineWarningStore,
+  warnings: PipelineWarnings,
 ) -> Result<u64> {
   let dataframe = dataframe::dataframe(
     input_dataframe,
     source_schema,
     optimization,
     covering,
-    warning_store,
+    warnings,
   )?;
   let metadata = optimization.parquet_metadata(covering)?;
-  let writer_options = ParquetWriterOptions::new(compression.unwrap_or("snappy"), &metadata)?
-    .with_delta_binary_packed_columns(optimization.delta_binary_packed_column_paths())
-    .into_datafusion();
+  let writer_options = WriterOptions::new(compression.unwrap_or("snappy"), &metadata)?
+    .with_delta_binary_packed_columns(optimization.delta_binary_packed_column_paths());
   let output_path = output_path
     .paths()?
     .into_iter()
@@ -39,7 +38,7 @@ pub(crate) async fn write(
     .context("missing output path")?
     .to_string_lossy()
     .into_owned();
-  ParquetOutputWriter::new(total_input_rows, write_reporter)
+  Writer::new(total_input_rows, write_reporter)
     .write_single(
       dataframe,
       output_path,

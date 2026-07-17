@@ -20,7 +20,7 @@ use crate::geometry::{
   Geometry, GeometryArray, GeometryType, QuantizationOptions, QuantizedGeometry,
   to_datafusion_error,
 };
-use crate::pipeline::PipelineWarningStore;
+use crate::pipeline::PipelineWarnings;
 
 use super::{
   GEODISPLAY_COLUMN, MultiscaleLevel, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN,
@@ -40,7 +40,7 @@ pub(crate) struct ComplexGeometryGeodisplayUdf {
   multiscale_encoding: MultiscaleEncoding,
   geodisplay_fields: Fields,
   dimension_warning_emitted: Arc<AtomicBool>,
-  warning_store: PipelineWarningStore,
+  warnings: PipelineWarnings,
 }
 
 impl ComplexGeometryGeodisplayUdf {
@@ -52,7 +52,7 @@ impl ComplexGeometryGeodisplayUdf {
     has_m: bool,
     levels: &[MultiscaleLevel],
     multiscale_encoding: MultiscaleEncoding,
-    warning_store: PipelineWarningStore,
+    warnings: PipelineWarnings,
   ) -> Expr {
     Self::udf(
       geometry_type,
@@ -60,7 +60,7 @@ impl ComplexGeometryGeodisplayUdf {
       has_m,
       levels.to_vec(),
       multiscale_encoding,
-      warning_store,
+      warnings,
     )
     .call(vec![col(geometry_column), col(TEMP_XZ_CODE_COLUMN)])
     .alias(GEODISPLAY_COLUMN)
@@ -69,23 +69,23 @@ impl ComplexGeometryGeodisplayUdf {
   /// Construct stable output fields for the selected geometry type and multiscale levels.
   #[cfg(test)]
   fn new(ty: GeometryType, has_z: bool, has_m: bool, levels: Vec<MultiscaleLevel>) -> Self {
-    Self::new_with_warning_store(
+    Self::new_with_warnings(
       ty,
       has_z,
       has_m,
       levels,
       MultiscaleEncoding::Pbf,
-      PipelineWarningStore::default(),
+      PipelineWarnings::default(),
     )
   }
 
-  fn new_with_warning_store(
+  fn new_with_warnings(
     ty: GeometryType,
     has_z: bool,
     has_m: bool,
     levels: Vec<MultiscaleLevel>,
     multiscale_encoding: MultiscaleEncoding,
-    warning_store: PipelineWarningStore,
+    warnings: PipelineWarnings,
   ) -> Self {
     let mut geodisplay_fields = vec![Arc::new(Field::new(
       XZ_CODE_COLUMN,
@@ -108,7 +108,7 @@ impl ComplexGeometryGeodisplayUdf {
       multiscale_encoding,
       geodisplay_fields: Fields::from(geodisplay_fields),
       dimension_warning_emitted: Arc::new(AtomicBool::new(false)),
-      warning_store,
+      warnings,
     }
   }
 
@@ -118,15 +118,15 @@ impl ComplexGeometryGeodisplayUdf {
     has_m: bool,
     levels: Vec<MultiscaleLevel>,
     multiscale_encoding: MultiscaleEncoding,
-    warning_store: PipelineWarningStore,
+    warnings: PipelineWarnings,
   ) -> ScalarUDF {
-    ScalarUDF::new_from_impl(Self::new_with_warning_store(
+    ScalarUDF::new_from_impl(Self::new_with_warnings(
       geometry_type,
       has_z,
       has_m,
       levels,
       multiscale_encoding,
-      warning_store,
+      warnings,
     ))
   }
 
@@ -195,7 +195,7 @@ impl ComplexGeometryGeodisplayUdf {
             .any(|coordinate| coordinate.m.is_some());
           if source_has_z != self.has_z || source_has_m != self.has_m {
             if !self.dimension_warning_emitted.swap(true, Ordering::Relaxed) {
-              self.warning_store.record(format!(
+              self.warnings.record(format!(
                 "Warning: WKB dimensions do not match source metadata; \
                  normalizing multiscale geometry from hasZ={}, hasM={} to hasZ={}, hasM={} and \
                  encoding missing Z/M values as {}",
@@ -601,14 +601,14 @@ mod tests {
       GeometryType::Polyline,
     )
     .expect("levels");
-    let warning_store = PipelineWarningStore::default();
-    let udf = ComplexGeometryGeodisplayUdf::new_with_warning_store(
+    let warnings = PipelineWarnings::default();
+    let udf = ComplexGeometryGeodisplayUdf::new_with_warnings(
       GeometryType::Polyline,
       true,
       true,
       levels,
       MultiscaleEncoding::Pbf,
-      warning_store.clone(),
+      warnings.clone(),
     );
     let wkb = multiline_z_wkb();
     let geometry = BinaryArray::from(vec![Some(wkb.as_slice())]);
@@ -628,7 +628,7 @@ mod tests {
     assert_eq!(decoded.coords.len(), 8);
     assert_eq!(decoded.coords[3], 0);
     assert_eq!(decoded.coords[7], 0);
-    assert_eq!(warning_store.messages().len(), 1);
+    assert_eq!(warnings.messages().len(), 1);
   }
 
   #[test]
@@ -638,14 +638,14 @@ mod tests {
       GeometryType::Polyline,
     )
     .expect("levels");
-    let warning_store = PipelineWarningStore::default();
-    let udf = ComplexGeometryGeodisplayUdf::new_with_warning_store(
+    let warnings = PipelineWarnings::default();
+    let udf = ComplexGeometryGeodisplayUdf::new_with_warnings(
       GeometryType::Polyline,
       true,
       true,
       levels,
       MultiscaleEncoding::QuantizedNative,
-      warning_store.clone(),
+      warnings.clone(),
     );
     let wkb = multiline_z_wkb();
     let geometry = BinaryArray::from(vec![Some(wkb.as_slice())]);
@@ -683,6 +683,6 @@ mod tests {
 
     assert_eq!(z.null_count(), 0);
     assert_eq!(m.null_count(), 2);
-    assert!(warning_store.messages()[0].contains("encoding missing Z/M values as null"));
+    assert!(warnings.messages()[0].contains("encoding missing Z/M values as null"));
   }
 }

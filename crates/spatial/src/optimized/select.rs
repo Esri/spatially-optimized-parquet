@@ -7,7 +7,7 @@ use crate::optimized::multiscale::{
   COVERING_BBOX_COLUMN, GEODISPLAY_COLUMN, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN,
   POINT_Z_CODE_COLUMN, POINT_Z_COLUMN,
 };
-use crate::pipeline::PipelineWarningStore;
+use crate::pipeline::PipelineWarnings;
 
 use super::multiscale::{ComplexGeometryGeodisplayUdf, PointGeometryGeodisplayUdf};
 use super::{ClusteringFamily, ResolvedOptimization};
@@ -18,7 +18,7 @@ impl ResolvedOptimization {
     &self,
     source_schema: &arrow_schema::Schema,
     covering: bool,
-    warning_store: PipelineWarningStore,
+    warnings: PipelineWarnings,
   ) -> Vec<Expr> {
     let mut expressions = source_schema
       .fields()
@@ -48,7 +48,7 @@ impl ResolvedOptimization {
           self.geometry().has_m,
           self.levels(),
           self.multiscale_encoding(),
-          warning_store,
+          warnings,
         ))
       }
     }

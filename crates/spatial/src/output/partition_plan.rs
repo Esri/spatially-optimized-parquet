@@ -18,18 +18,18 @@ use datafusion::physical_plan::{
 };
 use tokio::task::JoinSet;
 
-use super::parquet_sink::TrackingParquetSink;
+use super::tracking_sink::TrackingSink;
 
 #[derive(Clone, Debug)]
-pub(super) struct ConcurrentPartitionSinkExec {
+pub(super) struct PartitionPlan {
   input: Arc<dyn ExecutionPlan>,
-  sink: Arc<TrackingParquetSink>,
+  sink: Arc<TrackingSink>,
   count_schema: SchemaRef,
   cache: PlanProperties,
 }
 
-impl ConcurrentPartitionSinkExec {
-  pub(super) fn new(input: Arc<dyn ExecutionPlan>, sink: Arc<TrackingParquetSink>) -> Self {
+impl PartitionPlan {
+  pub(super) fn new(input: Arc<dyn ExecutionPlan>, sink: Arc<TrackingSink>) -> Self {
     let count_schema = Self::count_schema();
     let cache = PlanProperties::new(
       EquivalenceProperties::new(Arc::clone(&count_schema)),
@@ -49,7 +49,7 @@ impl ConcurrentPartitionSinkExec {
 
   async fn run_concurrent_partition_writes(
     input: Arc<dyn ExecutionPlan>,
-    sink: Arc<TrackingParquetSink>,
+    sink: Arc<TrackingSink>,
     context: &Arc<TaskContext>,
   ) -> DataFusionResult<u64> {
     let mut write_tasks = JoinSet::new();
@@ -104,7 +104,7 @@ impl ConcurrentPartitionSinkExec {
   }
 }
 
-impl DisplayAs for ConcurrentPartitionSinkExec {
+impl DisplayAs for PartitionPlan {
   fn fmt_as(
     &self,
     format_type: DisplayFormatType,
@@ -114,9 +114,9 @@ impl DisplayAs for ConcurrentPartitionSinkExec {
   }
 }
 
-impl ExecutionPlan for ConcurrentPartitionSinkExec {
+impl ExecutionPlan for PartitionPlan {
   fn name(&self) -> &'static str {
-    "ConcurrentPartitionSinkExec"
+    "PartitionPlan"
   }
 
   fn as_any(&self) -> &dyn Any {
