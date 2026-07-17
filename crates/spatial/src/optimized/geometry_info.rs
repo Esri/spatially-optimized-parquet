@@ -7,7 +7,7 @@ use crate::geoparquet::ResolvedGeoParquetSource;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Groups optimized geometry types by their clustering strategy.
-pub(super) enum ClusteringFamily {
+pub(crate) enum ClusteringFamily {
   /// Uses scalar x/y columns and Morton Z-order indexing.
   PointGeometry,
   /// Uses bounds, XZ-order indexing, and multiscale geometry payloads.
@@ -26,22 +26,22 @@ pub(super) fn clustering_family(ty: GeometryType) -> ClusteringFamily {
 
 #[derive(Debug, Clone, PartialEq)]
 /// Stores geometry facts required by optimized clustering and encoding.
-pub(super) struct GeometryInfo {
+pub(crate) struct GeometryInfo {
   /// Stores the selected source geometry column.
-  pub(super) geometry_spec: GeometrySpec,
+  pub(crate) geometry_spec: GeometrySpec,
   /// Stores the geometry type used by metadata and encoders.
-  pub(super) ty: GeometryType,
+  pub(crate) ty: GeometryType,
   /// Stores the clustering strategy family.
-  pub(super) clustering_family: ClusteringFamily,
+  pub(crate) clustering_family: ClusteringFamily,
   /// Indicates whether source metadata declares Z values.
-  pub(super) has_z: bool,
+  pub(crate) has_z: bool,
   /// Indicates whether source metadata declares M values.
-  pub(super) has_m: bool,
+  pub(crate) has_m: bool,
 }
 
 impl GeometryInfo {
   /// Resolve optimized geometry from normalized source geometry facts.
-  pub(super) fn resolve(source: &ResolvedGeoParquetSource) -> Result<Self> {
+  pub(crate) fn resolve(source: &ResolvedGeoParquetSource) -> Result<Self> {
     let ty = source.geometry_type;
     Ok(Self {
       geometry_spec: source.geometry_spec.clone(),

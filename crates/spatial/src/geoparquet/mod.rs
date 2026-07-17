@@ -10,9 +10,9 @@ mod writer;
 
 pub(crate) use covering::{bbox_field_expr, geometry_bbox_expr};
 pub(crate) use normalized_spatial_frame::NormalizedSpatialFrame;
-pub(crate) use writer::GeoParquetWriter;
 use projection::plain_output_dataframe;
 pub(crate) use source::{ResolvedGeoParquetSource, resolve_source};
+pub(crate) use writer::GeoParquetWriter;
 
 #[cfg(test)]
 mod tests;

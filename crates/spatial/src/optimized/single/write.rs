@@ -1,0 +1,54 @@
+//! Persists globally ordered optimized output into one Parquet file.
+
+use anyhow::{Context, Result};
+use datafusion::dataframe::DataFrame;
+
+use crate::optimized::ResolvedOptimization;
+use crate::optimized::clustering::cluster_key_column;
+use crate::optimized::metadata::parquet_metadata;
+use crate::output::{OutputLayout, ParquetOutputWriter, ParquetWriterOptions};
+use crate::pipeline::{PipelineWarningStore, SharedWriteReporter};
+
+use super::dataframe;
+
+/// Write one globally ordered optimized GeoParquet file.
+pub(crate) async fn write(
+  input_dataframe: DataFrame,
+  output_layout: &OutputLayout,
+  source_schema: &arrow_schema::Schema,
+  optimization: &ResolvedOptimization,
+  covering: bool,
+  compression: Option<&str>,
+  total_input_rows: u64,
+  write_reporter: Option<SharedWriteReporter>,
+  warning_store: PipelineWarningStore,
+) -> Result<u64> {
+  let dataframe = dataframe::dataframe(
+    input_dataframe,
+    source_schema,
+    optimization,
+    covering,
+    warning_store,
+  )?;
+  let metadata = parquet_metadata(optimization, covering)?;
+  let writer_options = ParquetWriterOptions::new(compression.unwrap_or("snappy"), &metadata)?
+    .with_delta_binary_packed_columns(optimization.delta_binary_packed_column_paths())
+    .into_datafusion();
+  let output_path = output_layout
+    .paths()?
+    .into_iter()
+    .next()
+    .context("missing output path")?
+    .to_string_lossy()
+    .into_owned();
+  ParquetOutputWriter::new(total_input_rows, write_reporter)
+    .write_single(
+      dataframe,
+      output_path,
+      writer_options,
+      vec![cluster_key_column(
+        optimization.geometry().clustering_family,
+      )],
+    )
+    .await
+}

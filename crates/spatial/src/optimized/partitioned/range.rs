@@ -10,7 +10,7 @@ use datafusion::prelude::lit;
 
 use crate::plan_diagnostics::collect_dataframe;
 
-use super::clustering::ClusterRangeBoundaries;
+use crate::optimized::clustering::ClusterRangeBoundaries;
 
 /// Estimate balanced cluster-key ranges with one minimum and approximate percentiles.
 pub(super) async fn compute_cluster_range_boundaries(

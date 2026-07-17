@@ -1,10 +1,12 @@
 //! Defines spatial cluster keys and range partitioning for optimized output.
 
+mod dataframe;
 mod key;
 mod partition;
 mod xz;
 mod z;
 
+pub(crate) use dataframe::clustering_dataframe;
 use key::ClusterKey;
 pub(crate) use partition::{
   ClusterRangeBoundaries, cluster_key_column, cluster_partition_column, cluster_sort_expr,
