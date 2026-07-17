@@ -20,7 +20,7 @@ const MAX_MULTISCALE_LEVEL: u16 = 16;
 
 /// Stores the quantization and simplification settings for one output geometry column.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct MultiscaleLevelSpec {
+pub(crate) struct MultiscaleLevel {
   /// Stores the multiscale level represented by the column.
   pub(crate) level: u16,
   /// Stores the generated Parquet column name.
@@ -36,10 +36,10 @@ pub(crate) struct MultiscaleLevelSpec {
 }
 
 /// Create supported even-numbered multiscale level specifications for the target spatial reference.
-pub(crate) fn create_multiscale_level_specs(
+pub(crate) fn create_multiscale_levels(
   output_wkid: u32,
   geometry_type: GeometryType,
-) -> Result<Vec<MultiscaleLevelSpec>> {
+) -> Result<Vec<MultiscaleLevel>> {
   let min_length = min_vertex_count(geometry_type);
   let mut resolution = match output_wkid {
     DEFAULT_OUTPUT_WKID => FIRST_LEVEL_RESOLUTION,
@@ -51,7 +51,7 @@ pub(crate) fn create_multiscale_level_specs(
 
   for level in 0..=MAX_MULTISCALE_LEVEL {
     if level % 2 == 0 {
-      levels.push(MultiscaleLevelSpec {
+      levels.push(MultiscaleLevel {
         level,
         column: format!("level_{level}"),
         resolution,
@@ -84,7 +84,7 @@ mod tests {
 
   #[test]
   fn creates_even_wgs84_levels() {
-    let levels = create_multiscale_level_specs(DEFAULT_OUTPUT_WKID, GeometryType::Polygon).unwrap();
+    let levels = create_multiscale_levels(DEFAULT_OUTPUT_WKID, GeometryType::Polygon).unwrap();
     assert_eq!(levels.first().unwrap().level, 0);
     assert_eq!(levels.last().unwrap().level, 16);
     assert_eq!(levels[0].min_length, 3);
@@ -101,8 +101,7 @@ mod tests {
 
   #[test]
   fn creates_web_mercator_levels() {
-    let levels =
-      create_multiscale_level_specs(WEB_MERCATOR_OUTPUT_WKID, GeometryType::Polygon).unwrap();
+    let levels = create_multiscale_levels(WEB_MERCATOR_OUTPUT_WKID, GeometryType::Polygon).unwrap();
     assert_eq!(levels[0].resolution, FIRST_PROJECTED_LEVEL_RESOLUTION);
     assert_eq!(
       levels[0].transform.scale,

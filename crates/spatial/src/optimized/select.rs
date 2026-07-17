@@ -42,7 +42,7 @@ pub(crate) fn output_expressions(
       optimization.geometry().has_m,
     )),
     ClusteringFamily::ComplexGeometry => expressions.push(complex_geometry_geodisplay_expr(
-      &optimization.geometry().geometry_spec.column,
+      &optimization.geometry().geometry.column,
       optimization.geometry().ty,
       optimization.geometry().has_z,
       optimization.geometry().has_m,

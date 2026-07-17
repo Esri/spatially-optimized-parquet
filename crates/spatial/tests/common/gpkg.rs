@@ -11,14 +11,14 @@ pub struct GpkgFeature<'a> {
   pub geometry_wkt: &'a str,
 }
 
-pub struct GpkgLayerSpec<'a> {
+pub struct GpkgLayer<'a> {
   pub name: &'a str,
   pub geometry_type: OGRwkbGeometryType::Type,
   pub epsg: Option<u32>,
   pub features: &'a [GpkgFeature<'a>],
 }
 
-pub fn write_gpkg(path: &Path, layers: &[GpkgLayerSpec<'_>]) {
+pub fn write_gpkg(path: &Path, layers: &[GpkgLayer<'_>]) {
   if path.exists() {
     std::fs::remove_file(path).unwrap();
   }

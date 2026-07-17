@@ -18,7 +18,7 @@ use parquet::file::properties::WriterProperties;
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
-use crate::geometry::{Extent2D, GeometryEncoding, GeometryKind, GeometrySpec};
+use crate::geometry::{Extent2D, GeometryColumn, GeometryEncoding, GeometryKind};
 use crate::input::{
   InputOpenOptions, InputSource, RowRange, SourceDatasetMetadata, SourceFormat,
   SourceGeometryMetadata, open_input,
@@ -125,8 +125,8 @@ impl InputSource for MetadataInputSource {
     Ok(3)
   }
 
-  fn inferred_geometry_spec(&self) -> Result<Option<GeometrySpec>> {
-    Ok(Some(GeometrySpec {
+  fn inferred_geometry_column(&self) -> Result<Option<GeometryColumn>> {
+    Ok(Some(GeometryColumn {
       column: "geometry".into(),
       encoding: GeometryEncoding::Wkb,
       geometry_kind: Some(GeometryKind::Point),
@@ -169,7 +169,7 @@ fn empty_dataframe(schema: SchemaRef) -> DataFrame {
 }
 
 #[test]
-fn inferred_geometry_spec_reads_geoparquet_primary_column() {
+fn inferred_geometry_column_reads_geoparquet_primary_column() {
   let temp = TempDir::new().unwrap();
   let path = temp.path().join("data.parquet");
   let schema = sample_schema_with_geometry();
@@ -184,9 +184,9 @@ fn inferred_geometry_spec_reads_geoparquet_primary_column() {
   );
 
   let input = open_parquet_input(&path);
-  let spec = input.inferred_geometry_spec().unwrap().unwrap();
-  assert_eq!(spec.column, "geometry");
-  assert_eq!(spec.geometry_kind, Some(GeometryKind::Point));
+  let geometry_column = input.inferred_geometry_column().unwrap().unwrap();
+  assert_eq!(geometry_column.column, "geometry");
+  assert_eq!(geometry_column.geometry_kind, Some(GeometryKind::Point));
 }
 
 #[test]
@@ -233,7 +233,7 @@ fn source_metadata_returns_none_when_geo_metadata_missing() {
   );
 
   let input = open_parquet_input(&path);
-  assert!(input.inferred_geometry_spec().unwrap().is_none());
+  assert!(input.inferred_geometry_column().unwrap().is_none());
   assert!(input.source_metadata().unwrap().geometry.is_none());
 }
 

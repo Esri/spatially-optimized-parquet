@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use crate::geometry::{GeometrySpec, GeometryType};
+use crate::geometry::{GeometryColumn, GeometryType};
 use crate::geoparquet::ResolvedGeoParquetSource;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,7 +28,7 @@ pub(super) fn clustering_family(ty: GeometryType) -> ClusteringFamily {
 /// Stores geometry facts required by optimized clustering and encoding.
 pub(crate) struct GeometryInfo {
   /// Stores the selected source geometry column.
-  pub(crate) geometry_spec: GeometrySpec,
+  pub(crate) geometry: GeometryColumn,
   /// Stores the geometry type used by metadata and encoders.
   pub(crate) ty: GeometryType,
   /// Stores the clustering strategy family.
@@ -44,7 +44,7 @@ impl GeometryInfo {
   pub(crate) fn resolve(source: &ResolvedGeoParquetSource) -> Result<Self> {
     let ty = source.geometry_type;
     Ok(Self {
-      geometry_spec: source.geometry_spec.clone(),
+      geometry: source.geometry.clone(),
       ty,
       clustering_family: clustering_family(ty),
       has_z: source.has_z,

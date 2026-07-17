@@ -18,7 +18,7 @@ pub(super) fn range_source(
   optimization: &ResolvedOptimization,
 ) -> Result<DataFrame> {
   let dataframe = input_dataframe.select(vec![
-    ident(&optimization.geometry().geometry_spec.column),
+    ident(&optimization.geometry().geometry.column),
     ident(COVERING_BBOX_COLUMN),
   ])?;
   clustering_dataframe(

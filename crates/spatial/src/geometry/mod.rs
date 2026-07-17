@@ -28,7 +28,7 @@ pub(crate) use quantization::{
   ComponentValidity, QuantizationOptions, QuantizationTransform, QuantizedGeometry,
   encode_deltas_xy, quantize_geometry_into,
 };
-pub(crate) use types::{GeometryEncoding, GeometryKind, GeometrySpec};
+pub(crate) use types::{GeometryColumn, GeometryEncoding, GeometryKind};
 #[cfg(test)]
 pub(crate) use wkb::write_test_geometry;
 pub(crate) use wkb::{

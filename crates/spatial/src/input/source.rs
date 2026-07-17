@@ -14,7 +14,7 @@ use datafusion::execution::context::SessionContext;
 use futures_util::future::BoxFuture;
 
 use super::{SourceDatasetMetadata, SourceFormat, gpkg, parquet};
-use crate::geometry::GeometrySpec;
+use crate::geometry::GeometryColumn;
 
 /// Selects a zero-based contiguous range of source rows.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -126,7 +126,7 @@ pub(crate) trait InputSource: Send + Sync {
   /// Return the row count discovered from source metadata.
   fn total_rows(&self) -> Result<u64>;
   /// Infer the geometry column and encoding when metadata permits it.
-  fn inferred_geometry_spec(&self) -> Result<Option<GeometrySpec>>;
+  fn inferred_geometry_column(&self) -> Result<Option<GeometryColumn>>;
   /// Return normalized geometry and pass-through file metadata.
   fn source_metadata(&self) -> Result<SourceDatasetMetadata>;
   /// Create a lazy DataFusion DataFrame for a selected row range.

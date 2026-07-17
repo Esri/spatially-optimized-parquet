@@ -31,11 +31,8 @@ fn add_point_columns(mut dataframe: DataFrame, geometry: &GeometryInfo) -> Resul
   if geometry.clustering_family != ClusteringFamily::PointGeometry {
     return Ok(dataframe);
   }
-  let point = point_geometry_expr_with_dimensions(
-    &geometry.geometry_spec.column,
-    geometry.has_z,
-    geometry.has_m,
-  );
+  let point =
+    point_geometry_expr_with_dimensions(&geometry.geometry.column, geometry.has_z, geometry.has_m);
   dataframe = dataframe.with_column(POINT_X_COLUMN, point.clone().field("x"))?;
   dataframe = dataframe.with_column(POINT_Y_COLUMN, point.clone().field("y"))?;
   if geometry.has_z {

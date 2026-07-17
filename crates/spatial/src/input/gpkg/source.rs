@@ -18,7 +18,7 @@ use super::batch_reader::load_schema;
 use super::metadata::{collect_layer_summaries, select_layer_name};
 use super::open::{is_gpkg_path, open_gpkg_dataset};
 use super::partition::{GpkgPartitionStream, plan_gpkg_scan_partitions};
-use crate::geometry::{GeometryEncoding, GeometrySpec};
+use crate::geometry::{GeometryColumn, GeometryEncoding};
 use crate::input::{
   InputOpenOptions, InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata,
 };
@@ -30,7 +30,7 @@ struct GpkgInputSource {
   layer_name: String,
   schema: arrow_schema::SchemaRef,
   total_rows: u64,
-  geometry_spec: Option<GeometrySpec>,
+  geometry: Option<GeometryColumn>,
   source_metadata: SourceDatasetMetadata,
 }
 
@@ -55,7 +55,7 @@ pub(crate) async fn open_source(options: &InputOpenOptions) -> Result<Arc<dyn In
     .try_feature_count()
     .unwrap_or_else(|| layer.feature_count());
   let geometry_kind = geometry_metadata.geometry_types.first().copied();
-  let geometry_spec = Some(GeometrySpec {
+  let geometry = Some(GeometryColumn {
     column: geometry_metadata.column.clone(),
     encoding: GeometryEncoding::Wkb,
     geometry_kind,
@@ -70,7 +70,7 @@ pub(crate) async fn open_source(options: &InputOpenOptions) -> Result<Arc<dyn In
     layer_name,
     schema,
     total_rows,
-    geometry_spec,
+    geometry,
     source_metadata,
   }))
 }
@@ -84,8 +84,8 @@ impl InputSource for GpkgInputSource {
     Ok(self.total_rows)
   }
 
-  fn inferred_geometry_spec(&self) -> Result<Option<GeometrySpec>> {
-    Ok(self.geometry_spec.clone())
+  fn inferred_geometry_column(&self) -> Result<Option<GeometryColumn>> {
+    Ok(self.geometry.clone())
   }
 
   fn source_metadata(&self) -> Result<SourceDatasetMetadata> {

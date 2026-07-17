@@ -7,7 +7,7 @@ use crate::geometry::GeometryType;
 use crate::optimized::{ESRI_PBF_ENCODING, QUANTIZED_NATIVE_ENCODING};
 use crate::output::MultiscaleEncoding;
 
-use super::{GEODISPLAY_COLUMN, MultiscaleLevelSpec};
+use super::{GEODISPLAY_COLUMN, MultiscaleLevel};
 use crate::geometry::{
   NativeGeometryArrayBuilder, PbfArrayBuilder, QuantizedGeometry, native_coordinate_column_paths,
   native_geometry_data_type,
@@ -48,7 +48,7 @@ impl MultiscaleEncoding {
 
   pub(crate) fn delta_binary_packed_column_paths(
     self,
-    levels: &[MultiscaleLevelSpec],
+    levels: &[MultiscaleLevel],
     geometry_type: GeometryType,
     has_z: bool,
     has_m: bool,

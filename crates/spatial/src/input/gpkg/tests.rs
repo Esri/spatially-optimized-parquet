@@ -32,14 +32,14 @@ struct GpkgFeature<'a> {
   geometry_wkt: &'a str,
 }
 
-struct GpkgLayerSpec<'a> {
+struct GpkgLayer<'a> {
   name: &'a str,
   geometry_type: OGRwkbGeometryType::Type,
   epsg: Option<u32>,
   features: &'a [GpkgFeature<'a>],
 }
 
-fn write_gpkg(path: &Path, layers: &[GpkgLayerSpec<'_>]) {
+fn write_gpkg(path: &Path, layers: &[GpkgLayer<'_>]) {
   if path.exists() {
     std::fs::remove_file(path).unwrap();
   }
@@ -151,7 +151,7 @@ fn open_input_accepts_single_layer_geopackage_and_reads_metadata() {
   ];
   write_gpkg(
     &path,
-    &[GpkgLayerSpec {
+    &[GpkgLayer {
       name: "cities",
       geometry_type: OGRwkbGeometryType::wkbPoint,
       epsg: Some(4326),
@@ -174,9 +174,9 @@ fn open_input_accepts_single_layer_geopackage_and_reads_metadata() {
   assert!(schema.field_with_name("id").is_ok());
   assert!(schema.field_with_name("geometry").is_ok());
 
-  let geometry_spec = input.inferred_geometry_spec().unwrap().unwrap();
-  assert_eq!(geometry_spec.column, "geometry");
-  assert_eq!(geometry_spec.geometry_kind, Some(GeometryKind::Point));
+  let geometry_column = input.inferred_geometry_column().unwrap().unwrap();
+  assert_eq!(geometry_column.column, "geometry");
+  assert_eq!(geometry_column.geometry_kind, Some(GeometryKind::Point));
 
   let geometry_meta = input.source_metadata().unwrap().geometry.unwrap();
   assert_eq!(geometry_meta.geometry_types, vec![GeometryKind::Point]);
@@ -243,13 +243,13 @@ fn open_input_requires_layer_for_multi_layer_geopackage() {
   write_gpkg(
     &path,
     &[
-      GpkgLayerSpec {
+      GpkgLayer {
         name: "points",
         geometry_type: OGRwkbGeometryType::wkbPoint,
         epsg: Some(4326),
         features: &point_features,
       },
-      GpkgLayerSpec {
+      GpkgLayer {
         name: "polygons",
         geometry_type: OGRwkbGeometryType::wkbPolygon,
         epsg: Some(4326),
@@ -288,13 +288,13 @@ fn open_input_selects_requested_geopackage_layer() {
   write_gpkg(
     &path,
     &[
-      GpkgLayerSpec {
+      GpkgLayer {
         name: "points",
         geometry_type: OGRwkbGeometryType::wkbPoint,
         epsg: Some(4326),
         features: &point_features,
       },
-      GpkgLayerSpec {
+      GpkgLayer {
         name: "polygons",
         geometry_type: OGRwkbGeometryType::wkbPolygon,
         epsg: Some(4326),
@@ -305,9 +305,9 @@ fn open_input_selects_requested_geopackage_layer() {
 
   let input = open_gpkg_input(&path, Some("polygons"));
   assert_eq!(input.total_rows().unwrap(), 1);
-  let geometry_spec = input.inferred_geometry_spec().unwrap().unwrap();
-  assert_eq!(geometry_spec.column, "geometry");
-  assert_eq!(geometry_spec.geometry_kind, Some(GeometryKind::Polygon));
+  let geometry_column = input.inferred_geometry_column().unwrap().unwrap();
+  assert_eq!(geometry_column.column, "geometry");
+  assert_eq!(geometry_column.geometry_kind, Some(GeometryKind::Polygon));
 }
 
 #[test]
@@ -328,7 +328,7 @@ fn geopackage_input_can_produce_dataframe_for_execution() {
   ];
   write_gpkg(
     &path,
-    &[GpkgLayerSpec {
+    &[GpkgLayer {
       name: "cities",
       geometry_type: OGRwkbGeometryType::wkbPoint,
       epsg: Some(4326),
@@ -377,7 +377,7 @@ fn geopackage_dataframe_uses_partitioned_scan_for_full_reads() {
   ];
   write_gpkg(
     &path,
-    &[GpkgLayerSpec {
+    &[GpkgLayer {
       name: "points",
       geometry_type: OGRwkbGeometryType::wkbPoint,
       epsg: Some(4326),
@@ -466,7 +466,7 @@ fn geopackage_dataframe_limit_uses_partitioned_scan_path() {
   ];
   write_gpkg(
     &path,
-    &[GpkgLayerSpec {
+    &[GpkgLayer {
       name: "points",
       geometry_type: OGRwkbGeometryType::wkbPoint,
       epsg: Some(4326),
@@ -534,7 +534,7 @@ fn open_input_uses_sampled_geometry_type_for_generic_layer_metadata() {
   }];
   write_gpkg(
     &path,
-    &[GpkgLayerSpec {
+    &[GpkgLayer {
       name: "generic_spatial",
       geometry_type: OGRwkbGeometryType::wkbUnknown,
       epsg: Some(4326),
@@ -543,9 +543,9 @@ fn open_input_uses_sampled_geometry_type_for_generic_layer_metadata() {
   );
 
   let input = open_gpkg_input(&path, None);
-  let geometry_spec = input.inferred_geometry_spec().unwrap().unwrap();
+  let geometry_column = input.inferred_geometry_column().unwrap().unwrap();
   assert_eq!(
-    geometry_spec.geometry_kind,
+    geometry_column.geometry_kind,
     Some(GeometryKind::MultiPolygon)
   );
 
@@ -576,7 +576,7 @@ fn open_input_infers_z_and_m_from_generic_geopackage_wkb() {
   }];
   write_gpkg(
     &path,
-    &[GpkgLayerSpec {
+    &[GpkgLayer {
       name: "generic_spatial",
       geometry_type: OGRwkbGeometryType::wkbUnknown,
       epsg: Some(4326),
@@ -725,7 +725,7 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
       }];
       write_gpkg(
         &path,
-        &[GpkgLayerSpec {
+        &[GpkgLayer {
           name: "dimensional",
           geometry_type: geometry_case.geometry_types[dimension_index],
           epsg: Some(4326),
@@ -851,7 +851,7 @@ fn gpkg_input_respects_batch_limit() {
   ];
   write_gpkg(
     &path,
-    &[GpkgLayerSpec {
+    &[GpkgLayer {
       name: "points",
       geometry_type: OGRwkbGeometryType::wkbPoint,
       epsg: Some(4326),

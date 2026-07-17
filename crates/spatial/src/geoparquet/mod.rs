@@ -4,7 +4,7 @@ mod covering;
 mod geo_metadata;
 mod geometry_scan;
 mod normalized_spatial_frame;
-mod projection;
+mod reprojection;
 mod source;
 mod source_crs;
 mod writer;
@@ -14,7 +14,7 @@ pub(crate) use geo_metadata::{
   GeoMetadata, GeoMetadataInput, geo_metadata_entry, geoparquet_metadata,
 };
 pub(crate) use normalized_spatial_frame::NormalizedSpatialFrame;
-use projection::plain_output_dataframe;
+pub(crate) use reprojection::{ResolvedReprojection, reproject_geometry_expr};
 pub(crate) use source::{ResolvedGeoParquetSource, resolve_source};
 pub(crate) use writer::GeoParquetWriter;
 

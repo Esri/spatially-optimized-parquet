@@ -5,14 +5,14 @@ use arrow_schema::Schema;
 use datafusion::dataframe::DataFrame;
 
 use crate::geometry::Extent2D;
-use crate::geoparquet::{NormalizedSpatialFrame, resolve_source};
+use crate::geoparquet::{NormalizedSpatialFrame, ResolvedReprojection, resolve_source};
 use crate::input::{InputSource, RowRange, SourceDatasetMetadata};
 use crate::optimized::extent_resolve::ExtentResolver;
-use crate::optimized::multiscale::MultiscaleLevelSpec;
-use crate::output::{MultiscaleEncoding, ReprojectionSpec};
+use crate::optimized::multiscale::MultiscaleLevel;
+use crate::output::MultiscaleEncoding;
 use crate::pipeline::OutputExecutionOptions;
 
-use super::multiscale::create_multiscale_level_specs;
+use super::multiscale::create_multiscale_levels;
 use super::{ClusteringFamily, GeometryInfo};
 
 /// Stores resolved source, geometry, projection, extent, and encoding state for optimized output.
@@ -20,9 +20,9 @@ use super::{ClusteringFamily, GeometryInfo};
 pub(crate) struct ResolvedOptimization {
   source_metadata: SourceDatasetMetadata,
   geometry: GeometryInfo,
-  reprojection: ReprojectionSpec,
+  reprojection: ResolvedReprojection,
   target_extent: Extent2D,
-  levels: Vec<MultiscaleLevelSpec>,
+  levels: Vec<MultiscaleLevel>,
   multiscale_encoding: MultiscaleEncoding,
 }
 
@@ -30,9 +30,9 @@ impl ResolvedOptimization {
   fn new(
     source_metadata: SourceDatasetMetadata,
     geometry: GeometryInfo,
-    reprojection: ReprojectionSpec,
+    reprojection: ResolvedReprojection,
     target_extent: Extent2D,
-    levels: Vec<MultiscaleLevelSpec>,
+    levels: Vec<MultiscaleLevel>,
     multiscale_encoding: MultiscaleEncoding,
   ) -> Self {
     Self {
@@ -53,7 +53,7 @@ impl ResolvedOptimization {
     &self.geometry
   }
 
-  pub(crate) fn reprojection(&self) -> &ReprojectionSpec {
+  pub(crate) fn reprojection(&self) -> &ResolvedReprojection {
     &self.reprojection
   }
 
@@ -61,7 +61,7 @@ impl ResolvedOptimization {
     self.target_extent
   }
 
-  pub(crate) fn levels(&self) -> &[MultiscaleLevelSpec] {
+  pub(crate) fn levels(&self) -> &[MultiscaleLevel] {
     &self.levels
   }
 
@@ -103,7 +103,8 @@ pub(crate) async fn resolve_optimized_geoparquet(
     .projjson
     .as_ref()
     .context("missing resolved source CRS PROJJSON")?;
-  let reprojection = ReprojectionSpec::from_source_projjson(source_projjson, options.output_wkid)?;
+  let reprojection =
+    ResolvedReprojection::from_source_projjson(source_projjson, options.output_wkid)?;
   let normalized = NormalizedSpatialFrame::new(
     input_dataframe,
     source_schema,
@@ -118,7 +119,7 @@ pub(crate) async fn resolve_optimized_geoparquet(
   let levels = match geometry.clustering_family {
     ClusteringFamily::PointGeometry => Vec::new(),
     ClusteringFamily::ComplexGeometry => {
-      create_multiscale_level_specs(options.output_wkid, geometry.ty)?
+      create_multiscale_levels(options.output_wkid, geometry.ty)?
     }
   };
   let optimization = ResolvedOptimization::new(

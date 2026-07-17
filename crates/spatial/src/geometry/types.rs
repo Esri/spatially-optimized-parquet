@@ -21,7 +21,7 @@ pub(crate) enum GeometryKind {
 
 #[derive(Debug, Clone, PartialEq)]
 /// Describes the selected geometry column and its source encoding.
-pub(crate) struct GeometrySpec {
+pub(crate) struct GeometryColumn {
   /// Stores the Arrow column containing geometry values.
   pub(crate) column: String,
   /// Stores the physical encoding used by that column.

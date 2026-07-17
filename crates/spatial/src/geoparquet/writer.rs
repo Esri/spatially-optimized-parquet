@@ -1,17 +1,19 @@
-//! Coordinates GeoParquet resolution, projection, metadata, and writing.
+//! Coordinates GeoParquet resolution, selection, metadata, and writing.
 
 use anyhow::{Context, Result};
 use arrow_schema::Schema;
 use datafusion::dataframe::DataFrame;
+use datafusion::logical_expr::Expr;
+use datafusion::logical_expr::expr_fn::ident;
 
 use crate::input::{InputSource, RowRange};
 use crate::optimized::COVERING_BBOX_COLUMN;
 use crate::optimized::ExtentResolver;
-use crate::output::{OutputLayout, ParquetOutputWriter, ParquetWriterOptions, ReprojectionSpec};
+use crate::output::{OutputLayout, ParquetOutputWriter, ParquetWriterOptions};
 use crate::pipeline::SharedWriteReporter;
 
 use super::{
-  GeoMetadataInput, NormalizedSpatialFrame, geoparquet_metadata, plain_output_dataframe,
+  GeoMetadataInput, NormalizedSpatialFrame, ResolvedReprojection, geoparquet_metadata,
   resolve_source,
 };
 
@@ -77,7 +79,7 @@ impl<'a> GeoParquetWriter<'a> {
       .projjson
       .as_ref()
       .context("missing resolved source CRS PROJJSON")?;
-    let reprojection = ReprojectionSpec::from_source_projjson(source_projjson, output_wkid)?;
+    let reprojection = ResolvedReprojection::from_source_projjson(source_projjson, output_wkid)?;
     let normalized = NormalizedSpatialFrame::new(
       self.input_dataframe.clone(),
       self.source_schema,
@@ -89,14 +91,22 @@ impl<'a> GeoParquetWriter<'a> {
     let target_extent = ExtentResolver::new(self.input, self.row_range)
       .resolve(&source, &normalized, &reprojection)
       .await?;
-    let dataframe = plain_output_dataframe(
-      normalized.dataframe(),
-      self.source_schema,
-      &source.geometry_spec.column,
-      covering,
-    )?;
+    let mut expressions: Vec<Expr> = self
+      .source_schema
+      .fields()
+      .iter()
+      .filter(|field| field.name() != COVERING_BBOX_COLUMN)
+      .map(|field| ident(field.name()))
+      .collect();
+    if covering {
+      expressions.push(ident(COVERING_BBOX_COLUMN));
+    }
+    debug_assert!(expressions.iter().any(|expression| {
+      matches!(expression, Expr::Column(column) if column.name == source.geometry.column)
+    }));
+    let dataframe = normalized.dataframe().select(expressions)?;
     let geo_metadata = GeoMetadataInput {
-      geometry_column: &source.geometry_spec.column,
+      geometry_column: &source.geometry.column,
       geometry_types: &source.geometry_types,
       output_extent: target_extent,
       output_spatial_reference: reprojection.target_spatial_reference(),

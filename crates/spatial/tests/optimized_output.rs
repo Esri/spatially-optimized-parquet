@@ -23,7 +23,7 @@ use common::assertion::{
 };
 use common::fixture::{wkb_dimensional_point, wkb_dimensional_polygon, wkb_point, wkb_polygon};
 use common::geometry::{point_from_wkb_xy, polygon_extent_from_wkb, transform_point_between_epsg};
-use common::gpkg::{GpkgFeature, GpkgLayerSpec, write_gpkg};
+use common::gpkg::{GpkgFeature, GpkgLayer, write_gpkg};
 use common::parquet::{
   geoparquet_kv, geoparquet_kv_with_epsg, kv_map, reader_metadata, scan_parquet, write_parquet,
 };
@@ -1565,7 +1565,7 @@ fn optimized_output_accepts_single_layer_geopackage() {
   ];
   write_gpkg(
     &input,
-    &[GpkgLayerSpec {
+    &[GpkgLayer {
       name: "points",
       geometry_type: OGRwkbGeometryType::wkbPoint,
       epsg: Some(4326),
@@ -1622,7 +1622,7 @@ fn optimized_output_reprojects_geopackage_polygon() {
   }];
   write_gpkg(
     &input,
-    &[GpkgLayerSpec {
+    &[GpkgLayer {
       name: "polygons",
       geometry_type: OGRwkbGeometryType::wkbPolygon,
       epsg: Some(3857),
@@ -1708,13 +1708,13 @@ fn optimized_output_selects_requested_geopackage_layer() {
   write_gpkg(
     &input,
     &[
-      GpkgLayerSpec {
+      GpkgLayer {
         name: "points",
         geometry_type: OGRwkbGeometryType::wkbPoint,
         epsg: Some(4326),
         features: &point_features,
       },
-      GpkgLayerSpec {
+      GpkgLayer {
         name: "polygons",
         geometry_type: OGRwkbGeometryType::wkbPolygon,
         epsg: Some(4326),

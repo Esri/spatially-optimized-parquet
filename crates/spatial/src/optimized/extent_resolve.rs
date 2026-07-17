@@ -6,9 +6,10 @@ use datafusion::dataframe::DataFrame;
 use datafusion::functions_aggregate::expr_fn::{max, min};
 
 use crate::geometry::Extent2D;
-use crate::geoparquet::{NormalizedSpatialFrame, ResolvedGeoParquetSource, bbox_field_expr};
+use crate::geoparquet::{
+  NormalizedSpatialFrame, ResolvedGeoParquetSource, ResolvedReprojection, bbox_field_expr,
+};
 use crate::input::{InputSource, RowRange};
-use crate::output::ReprojectionSpec;
 use crate::plan_diagnostics::collect_dataframe;
 
 const EXTENT_XMIN_COLUMN: &str = "__extent_xmin";
@@ -33,7 +34,7 @@ impl<'a> ExtentResolver<'a> {
     self,
     source: &ResolvedGeoParquetSource,
     normalized: &NormalizedSpatialFrame,
-    reprojection: &ReprojectionSpec,
+    reprojection: &ResolvedReprojection,
   ) -> Result<Extent2D> {
     let source_metadata = self.input.source_metadata()?;
     let metadata_fast_path = self.row_range.is_full()

@@ -15,7 +15,7 @@ use object_store::ObjectStore;
 use parquet::arrow::arrow_reader::ArrowReaderMetadata;
 use url::Url;
 
-use crate::geometry::{GeometryEncoding, GeometrySpec};
+use crate::geometry::{GeometryColumn, GeometryEncoding};
 use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata};
 
 use super::metadata::{
@@ -72,7 +72,7 @@ impl InputSource for ParquetInputSource {
     )
   }
 
-  fn inferred_geometry_spec(&self) -> Result<Option<GeometrySpec>> {
+  fn inferred_geometry_column(&self) -> Result<Option<GeometryColumn>> {
     let Some(geo_meta) = load_geo_metadata(&self.metadata)? else {
       return Ok(None);
     };
@@ -90,7 +90,7 @@ impl InputSource for ParquetInputSource {
       None
     };
 
-    Ok(Some(GeometrySpec {
+    Ok(Some(GeometryColumn {
       column: geo_meta.primary_column.clone(),
       encoding: GeometryEncoding::Wkb,
       geometry_kind,

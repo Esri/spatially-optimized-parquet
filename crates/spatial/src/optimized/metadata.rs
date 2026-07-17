@@ -31,13 +31,13 @@ impl ResolvedOptimization {
       .source_metadata()
       .geometry
       .as_ref()
-      .filter(|geometry| geometry.column == self.geometry().geometry_spec.column);
+      .filter(|geometry| geometry.column == self.geometry().geometry.column);
     let geometry_types = source_geometry
       .filter(|geometry| !geometry.geometry_types.is_empty())
       .map(|geometry| geometry.geometry_types.clone())
       .unwrap_or_else(|| vec![self.fallback_geometry_kind()]);
     let geo_metadata = GeoMetadataInput {
-      geometry_column: &self.geometry().geometry_spec.column,
+      geometry_column: &self.geometry().geometry.column,
       geometry_types: &geometry_types,
       output_extent: self.target_extent(),
       output_spatial_reference: self.reprojection().target_spatial_reference(),
