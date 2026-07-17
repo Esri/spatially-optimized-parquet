@@ -15,13 +15,13 @@ use super::report::{ValidationLocation, ValidationReport, ValidationRule, Valida
 const GEO_VERSION: &str = "1.1.0";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ValidatedCrs {
+enum ValidatedCrs {
   Wgs84,
   WebMercator,
 }
 
 impl ValidatedCrs {
-  pub(crate) const fn epsg(self) -> u32 {
+  const fn epsg(self) -> u32 {
     match self {
       Self::Wgs84 => 4326,
       Self::WebMercator => 3857,
@@ -33,7 +33,7 @@ impl ValidatedCrs {
 pub(crate) struct ValidatedMetadata {
   pub(crate) geo: GeoMetadata,
   pub(crate) geodisplay: GeodisplayMetadata,
-  pub(crate) crs: ValidatedCrs,
+  crs: ValidatedCrs,
 }
 
 pub(crate) struct ValidatedDatasetFile<'file> {

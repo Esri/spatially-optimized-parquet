@@ -9,20 +9,20 @@ use crate::optimized::{GeometryPartRole, GeometryPartSink};
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct RingValidationInfo {
-  pub(crate) role: GeometryPartRole,
-  pub(crate) closed: bool,
-  pub(crate) signed_area: f64,
-  pub(crate) degenerated: bool,
+struct RingValidationInfo {
+  role: GeometryPartRole,
+  closed: bool,
+  signed_area: f64,
+  degenerated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GeometryValidationInfo {
-  pub(crate) kind: GeometryKind,
-  pub(crate) dimensions: Dimensions,
+  kind: GeometryKind,
+  dimensions: Dimensions,
   pub(crate) extent: Option<Extent2D>,
-  pub(crate) finite_coordinates: bool,
-  pub(crate) rings: Vec<RingValidationInfo>,
+  finite_coordinates: bool,
+  rings: Vec<RingValidationInfo>,
 }
 
 pub(crate) struct GeometryValidator;

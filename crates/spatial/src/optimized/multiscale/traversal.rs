@@ -68,7 +68,7 @@ impl GeometryType {
 }
 
 #[cfg(test)]
-pub(super) fn visit_geometry_for_display<G: GeometryTrait<T = f64>, S: GeometryPartSink>(
+fn visit_geometry_for_display<G: GeometryTrait<T = f64>, S: GeometryPartSink>(
   geometry: &G,
   geometry_type: GeometryType,
   sink: &mut S,
@@ -202,12 +202,12 @@ fn visit_line_string_reversed<L: LineStringTrait<T = f64>, S: GeometryPartSink>(
 }
 
 #[derive(Default)]
-pub(super) struct ExtentAccumulator {
+struct ExtentAccumulator {
   extent: Option<Extent2D>,
 }
 
 impl ExtentAccumulator {
-  pub(super) fn push(&mut self, x: f64, y: f64) {
+  fn push(&mut self, x: f64, y: f64) {
     match self.extent.as_mut() {
       Some(extent) => {
         extent.xmin = extent.xmin.min(x);
@@ -226,7 +226,7 @@ impl ExtentAccumulator {
     }
   }
 
-  pub(super) fn finish(self) -> Option<Extent2D> {
+  fn finish(self) -> Option<Extent2D> {
     self.extent
   }
 }

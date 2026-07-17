@@ -45,7 +45,7 @@ impl GeometryInfo {
 
 impl ClusteringFamily {
   /// Resolve the clustering strategy from one canonical geometry type.
-  pub(crate) fn from_geometry_type(geometry_type: GeometryType) -> Self {
+  fn from_geometry_type(geometry_type: GeometryType) -> Self {
     match geometry_type {
       GeometryType::Point => Self::PointGeometry,
       GeometryType::MultiPoint | GeometryType::Polyline | GeometryType::Polygon => {

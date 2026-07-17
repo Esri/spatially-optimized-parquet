@@ -19,7 +19,7 @@ pub(crate) struct QuantizationTransform {
 
 impl QuantizationTransform {
   /// Quantize one finite axis value using this transform.
-  pub(crate) fn quantize(&self, value: f64, axis: usize) -> Result<i64> {
+  fn quantize(&self, value: f64, axis: usize) -> Result<i64> {
     let scale = self.scale[axis];
     if !scale.is_finite() || scale == 0.0 {
       bail!("quantization scale must be finite and non-zero");

@@ -90,7 +90,7 @@ impl NativeGeometryArrayBuilder {
     }
   }
 
-  pub(super) fn append_geometry(
+  fn append_geometry(
     &mut self,
     coordinates: &[i64],
     lengths: &[u32],

@@ -1,3 +1,75 @@
+//! Coordinates one spatial conversion from caller-owned options to completed GeoParquet output.
+//!
+//! [`SpatialPipelineOptions`] owns the request-wide execution policy and the two domain-specific
+//! sections: [`InputOptions`] describes how to open and interpret the source, while
+//! [`OutputOptions`] describes the output product and filesystem policy. [`Pipeline::run`]
+//! consumes that complete request. Its private [`PipelineExecution`] then selects one writer, and
+//! [`SpatialPipelineState`] keeps the input provider, DataFusion session, normalized selection,
+//! output destination, reporting callback, and warnings alive through that writer's lifetime.
+//!
+//! The lifecycle follows these phases:
+//!
+//! 1. Resolve or infer the input format, open the source, validate reserved column names, and
+//!    resolve the output path. Existing output is removed at this point when overwrite is enabled.
+//! 2. Create a [`DataFusionSession`] with the requested memory and partition policy, then ask the
+//!    input provider for the selected [`RowRange`]. Bounded selections are cached because geometry
+//!    discovery, extent analysis, optimization, and writing may consume the same rows.
+//! 3. Resolve the geometry column and source coordinate reference system from metadata or explicit
+//!    overrides. The selected geometry is reprojected to the output reference, requested Z/M
+//!    dimensions are stripped, and a canonical bounding-box column is reused or computed.
+//! 4. Route a one-part plain request to the GeoParquet writer. Route optimized output to the
+//!    globally ordered single-file writer when the resolved part count is one, or to the
+//!    range-partitioned writer when it exceeds one.
+//! 5. Wait for the Parquet sink to complete, then return [`SpatialPipelineResult`] with the
+//!    expected row count, authoritative written row count, and deduplicated warnings.
+//!
+//! Output writes target the resolved destination directly rather than using a transactional
+//! replacement. A failed sink attempts to delete files it created, and reports cleanup failure
+//! alongside the write failure. Optimized execution validates source geometry, coordinate
+//! reference, clustering, and reserved-column invariants while planning. It does not run the
+//! public [`crate::validate()`] dataset validator after writing. Call that function when a durable
+//! conformance report is required.
+//!
+//! Progress and warnings use separate channels. A [`WriteReporter`] receives monotonic cumulative
+//! counts while batches reach the Parquet sink and receives a final authoritative count. Warnings
+//! describe recoverable normalization decisions, remain deduplicated across parallel execution,
+//! and appear only in a successful [`SpatialPipelineResult`]. Invalid configuration, unresolved
+//! geometry or spatial reference, unsupported geometry, DataFusion planning, and write failures
+//! return errors instead.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use spatial::{
+//!   DEFAULT_OUTPUT_WKID, InputOptions, OutputMode, OutputOptions, Pipeline, RowRange,
+//!   SpatialPipelineOptions,
+//! };
+//!
+//! # async fn convert() -> anyhow::Result<()> {
+//! let input = InputOptions::new(
+//!   "roads.parquet",
+//!   None,
+//!   RowRange::default(),
+//!   None,
+//!   None,
+//!   None,
+//! );
+//! let output = OutputOptions::new(
+//!   "roads.optimized.parquet",
+//!   OutputMode::OptimizedGeoParquet,
+//!   None,
+//!   Some("zstd".to_string()),
+//!   DEFAULT_OUTPUT_WKID,
+//!   true,
+//!   false,
+//! );
+//! let result = Pipeline::run(SpatialPipelineOptions::new(input, output)).await?;
+//!
+//! assert_eq!(result.rows_written(), result.rows_expected());
+//! # Ok(())
+//! # }
+//! ```
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -17,18 +89,26 @@ use crate::session::DataFusionSession;
 
 use super::{PipelineWarnings, SharedWriteReporter, SpatialPipelineResult, WriteReporter};
 
-/// Configures one complete spatial pipeline.
+/// Owns the input, output, resource, and reporting policy for one pipeline execution.
+///
+/// The value owns [`InputOptions`] and [`OutputOptions`] until [`Pipeline::run`] consumes it.
+/// Cloning the request also clones the optional reporter's shared handle, so cloned requests may
+/// report to the same callback.
 #[derive(Clone)]
 pub struct SpatialPipelineOptions {
-  pub(super) input: InputOptions,
-  pub(super) output: OutputOptions,
-  pub(super) memory_limit_bytes: Option<usize>,
-  pub(super) target_partitions: Option<usize>,
-  pub(super) write_reporter: Option<SharedWriteReporter>,
+  input: InputOptions,
+  output: OutputOptions,
+  memory_limit_bytes: Option<usize>,
+  target_partitions: Option<usize>,
+  write_reporter: Option<SharedWriteReporter>,
 }
 
 impl SpatialPipelineOptions {
-  /// Construct one spatial request from typed input and output sections.
+  /// Build one spatial request from independently configured input and output sections.
+  ///
+  /// DataFusion uses its default target partition count and a memory limit equal to half of
+  /// physical memory unless the corresponding builder methods override them. Reporting remains
+  /// disabled until [`Self::with_write_reporter`] attaches a callback.
   pub fn new(input: InputOptions, output: OutputOptions) -> Self {
     Self {
       input,
@@ -39,38 +119,62 @@ impl SpatialPipelineOptions {
     }
   }
 
-  /// Override the DataFusion memory-pool limit in bytes.
+  /// Configure the DataFusion memory-pool limit in bytes for analysis, sorting, and writing.
+  ///
+  /// The runtime spills eligible work to a session-owned temporary directory when the bounded
+  /// pool cannot retain it. Passing zero causes [`Pipeline::run`] to return an error.
   pub fn with_memory_limit_bytes(mut self, memory_limit_bytes: usize) -> Self {
     self.memory_limit_bytes = Some(memory_limit_bytes);
     self
   }
 
-  /// Override the DataFusion execution partition count.
+  /// Configure the target DataFusion execution partition count.
+  ///
+  /// This controls execution parallelism, not the number of output files. Use
+  /// [`OutputOptions::new`]'s `file_count` argument for output topology. Passing zero causes
+  /// [`Pipeline::run`] to return an error.
   pub fn with_target_partitions(mut self, target_partitions: usize) -> Self {
     self.target_partitions = Some(target_partitions);
     self
   }
 
-  /// Attach an optional callback for cumulative output row counts.
+  /// Attach a thread-safe callback for cumulative rows accepted by the Parquet sink.
+  ///
+  /// Parallel writers may produce updates from worker threads. Delivered counts never decrease,
+  /// and successful execution forces one final update with the authoritative written count.
+  /// Reporting observes writes only and does not receive planning phases, warnings, or errors.
   pub fn with_write_reporter(mut self, reporter: impl WriteReporter + 'static) -> Self {
     self.write_reporter = Some(Arc::new(reporter));
     self
   }
 }
 
-/// Configures one input source and selected row range.
+/// Owns source location, row selection, layer selection, and geometry interpretation policy.
+///
+/// Format inference recognizes local directories as Parquet datasets and otherwise uses the final
+/// path extension of a local path or URL. An explicit [`SourceFormat`] bypasses inference.
+/// `layer` selects a GeoPackage layer. `geometry_column` overrides source metadata when the
+/// intended WKB column cannot be inferred.
 #[derive(Debug, Clone)]
 pub struct InputOptions {
-  pub(super) location: String,
-  pub(super) format: Option<SourceFormat>,
-  pub(super) row_range: RowRange,
-  pub(super) layer: Option<String>,
-  pub(super) geometry_column: Option<String>,
-  pub(super) input_wkid: Option<u32>,
+  location: String,
+  format: Option<SourceFormat>,
+  row_range: RowRange,
+  layer: Option<String>,
+  geometry_column: Option<String>,
+  input_wkid: Option<u32>,
 }
 
 impl InputOptions {
-  /// Construct input options from source, selection, and geometry overrides.
+  /// Build input policy from source, selection, and optional geometry overrides.
+  ///
+  /// `row_range` selects a zero-based contiguous range before geometry analysis and output.
+  /// `input_wkid` supplies an EPSG identifier only when the selected geometry lacks coordinate
+  /// reference metadata. Supplying it when metadata already defines a reference returns an error,
+  /// preventing two competing source references.
+  ///
+  /// A missing or ambiguous geometry column, an unknown format without `format`, an unavailable
+  /// layer, or an unresolvable coordinate reference causes [`Pipeline::run`] to return an error.
   pub fn new(
     location: impl Into<String>,
     format: Option<SourceFormat>,
@@ -98,23 +202,40 @@ impl InputOptions {
   }
 }
 
-/// Configures one durable GeoParquet output.
+/// Owns output topology, encoding, coordinate reference, and replacement policy.
+///
+/// A path with an extension denotes one file. A path without an extension denotes a directory and
+/// requires `file_count`. A resolved count of one selects single-output execution. Counts greater
+/// than one select partitioned optimized execution and are rejected for plain GeoParquet.
+///
+/// `covering` includes the canonical GeoParquet bounding-box covering column in durable output.
+/// `overwrite` authorizes removal of an existing compatible destination during pipeline setup,
+/// before geometry planning and writing complete.
 #[derive(Debug, Clone)]
 pub struct OutputOptions {
-  pub(super) path: PathBuf,
-  pub(super) mode: OutputMode,
-  pub(super) file_count: Option<usize>,
-  pub(super) compression: Option<String>,
-  pub(super) output_wkid: u32,
-  pub(super) covering: bool,
-  pub(super) overwrite: bool,
-  pub(super) strip_z: bool,
-  pub(super) strip_m: bool,
-  pub(super) multiscale_encoding: MultiscaleEncoding,
+  path: PathBuf,
+  mode: OutputMode,
+  file_count: Option<usize>,
+  compression: Option<String>,
+  output_wkid: u32,
+  covering: bool,
+  overwrite: bool,
+  strip_z: bool,
+  strip_m: bool,
+  multiscale_encoding: MultiscaleEncoding,
 }
 
 impl OutputOptions {
-  /// Construct output options from path, product, storage, and CRS policy.
+  /// Build output policy from destination, product, storage, and coordinate-reference choices.
+  ///
+  /// `compression` accepts `snappy`, `gzip`, `brotli`, `lz4`, `lz4_raw`, `zstd`, or
+  /// `uncompressed`. Omitting it selects Snappy. `output_wkid` identifies the EPSG reference used
+  /// for geometry, extents, and GeoParquet metadata. The pipeline currently implements only
+  /// [`crate::DEFAULT_OUTPUT_WKID`].
+  ///
+  /// `file_count` must be at least one. File destinations accept only one part, while directory
+  /// destinations require an explicit count. Existing destinations return an error unless
+  /// `overwrite` authorizes replacement.
   pub fn new(
     path: impl Into<PathBuf>,
     mode: OutputMode,
@@ -138,14 +259,21 @@ impl OutputOptions {
     }
   }
 
-  /// Remove selected Z/M values from output geometry.
+  /// Configure removal of Z and M ordinates from geometry and output metadata.
+  ///
+  /// Stripping occurs after source geometry resolution and reprojection is planned, before
+  /// bounding boxes, clustering columns, and multiscale payloads are derived. Each flag operates
+  /// independently, and absent dimensions remain absent.
   pub fn with_stripped_dimensions(mut self, strip_z: bool, strip_m: bool) -> Self {
     self.strip_z = strip_z;
     self.strip_m = strip_m;
     self
   }
 
-  /// Select the physical representation for optimized multiscale geometry.
+  /// Select the physical representation for optimized complex-geometry multiscale levels.
+  ///
+  /// This setting affects optimized multipoint, polyline, and polygon payloads. Point geometry
+  /// uses scalar coordinate columns and Z-order clustering instead.
   pub fn with_multiscale_encoding(mut self, encoding: MultiscaleEncoding) -> Self {
     self.multiscale_encoding = encoding;
     self
@@ -168,9 +296,14 @@ impl OutputOptions {
   }
 }
 
-/// Executes one configured spatial pipeline.
+/// Owns one prepared execution route and its phase-spanning spatial state.
+///
+/// Callers normally use [`Pipeline::run`], which constructs this private route after validating
+/// request-level invariants. The value cannot be reused because execution consumes its DataFusion
+/// plan, output destination, and warning collector.
 pub struct Pipeline(PipelineExecution);
 
+/// Selects the writer that exclusively owns the execution phase after common setup.
 enum PipelineExecution {
   /// Runs plain GeoParquet output.
   GeoParquet(SpatialPipelineState),
@@ -180,21 +313,44 @@ enum PipelineExecution {
   OptimizedPartitioned(SpatialPipelineState),
 }
 
-pub(crate) struct SpatialPipelineState {
-  pub(super) _session: DataFusionSession,
-  pub(super) input_source: Arc<dyn InputSource>,
-  pub(super) input_dataframe: DataFrame,
-  pub(super) output_path: OutputPath,
-  pub(super) source_schema: SchemaRef,
-  pub(super) total_input_rows: u64,
-  pub(super) input_options: InputOptions,
-  pub(super) output_options: OutputOptions,
-  pub(super) write_reporter: Option<SharedWriteReporter>,
-  pub(super) warnings: PipelineWarnings,
+/// Owns resources and resolved request state shared by exactly one selected writer.
+///
+/// Retaining `_session` keeps DataFusion spill storage alive until all lazy plans finish.
+struct SpatialPipelineState {
+  _session: DataFusionSession,
+  input_source: Arc<dyn InputSource>,
+  input_dataframe: DataFrame,
+  output_path: OutputPath,
+  source_schema: SchemaRef,
+  total_input_rows: u64,
+  input_options: InputOptions,
+  output_options: OutputOptions,
+  write_reporter: Option<SharedWriteReporter>,
+  warnings: PipelineWarnings,
 }
 
 impl Pipeline {
-  /// Execute one spatial request through durable GeoParquet output.
+  /// Execute one spatial request through completed GeoParquet output.
+  ///
+  /// Setup normalizes the source into a DataFusion frame, resolves geometry and coordinate
+  /// reference policy, and chooses plain, optimized single-part, or optimized partitioned
+  /// execution. The returned result confirms the sink completed and carries recoverable warnings.
+  /// Call [`crate::validate()`] separately when the caller requires a post-write optimized dataset
+  /// validation report.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error when input format or source metadata cannot be resolved, geometry or its
+  /// coordinate reference is missing or unsupported, a reserved internal column exists, output
+  /// path topology conflicts with the selected mode, compression is invalid, DataFusion resource
+  /// settings are zero, planning or reprojection fails, or the Parquet sink cannot complete.
+  /// Failed writes attempt to remove files created by the sink. A cleanup failure is preserved in
+  /// the returned error.
+  ///
+  /// # Panics
+  ///
+  /// Panics when `OutputOptions` requests an output WKID other than
+  /// [`crate::DEFAULT_OUTPUT_WKID`], because additional output references are not implemented.
   pub async fn run(options: SpatialPipelineOptions) -> Result<SpatialPipelineResult> {
     Self::new(options).await?.execute().await
   }
@@ -257,7 +413,7 @@ impl Pipeline {
     }
   }
 
-  pub(super) async fn execute(self) -> Result<SpatialPipelineResult> {
+  async fn execute(self) -> Result<SpatialPipelineResult> {
     match self.0 {
       PipelineExecution::GeoParquet(state) => Self::write_geoparquet(state).await,
       PipelineExecution::OptimizedSingle(state) => Self::write_optimized_single(state).await,
@@ -358,7 +514,7 @@ impl Pipeline {
 }
 
 impl SpatialPipelineState {
-  pub(super) fn finish(&self, rows_written: u64) -> SpatialPipelineResult {
+  fn finish(&self, rows_written: u64) -> SpatialPipelineResult {
     SpatialPipelineResult::new(self.total_input_rows, rows_written, &self.warnings)
   }
 }
