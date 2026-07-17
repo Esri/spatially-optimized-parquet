@@ -7,7 +7,7 @@
 mod format;
 mod gpkg;
 mod metadata;
-mod parquet;
+pub(crate) mod parquet;
 mod source;
 
 pub use format::SourceFormat;

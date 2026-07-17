@@ -6,8 +6,8 @@ use arrow_schema::{DataType, Field, Schema};
 use parquet::arrow::ProjectionMask;
 use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ParquetRecordBatchReaderBuilder};
 
+use crate::input::parquet::{ParquetDatasetFile, PartitionFamily};
 use crate::optimized::GeodisplayIndex;
-use crate::parquet_dataset::{ParquetDatasetFile, PartitionFamily};
 
 use super::metadata_validator::{ValidatedDatasetFile, ValidatedMetadata};
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
@@ -26,7 +26,7 @@ impl FileValidator {
   ) -> Vec<FileValidator> {
     files
       .iter()
-      .filter_map(|file| match ParquetDatasetFile::load_metadata(&file.path) {
+      .filter_map(|file| match file.load_metadata() {
         Ok(metadata) => Some(FileValidator {
           file: file.clone(),
           metadata,

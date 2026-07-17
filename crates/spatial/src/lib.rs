@@ -13,14 +13,13 @@
 
 #![warn(missing_docs)]
 
+mod diagnostics;
 mod geometry;
 mod geoparquet;
 mod input;
 mod optimized;
 mod output;
-mod parquet_dataset;
 mod pipeline;
-mod plan_diagnostics;
 mod session;
 pub mod validate;
 

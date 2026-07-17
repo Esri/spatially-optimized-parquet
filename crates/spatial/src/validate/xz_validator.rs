@@ -4,9 +4,9 @@ use arrow_schema::DataType;
 use crate::geometry::{
   Extent2D, GeometryType, NativeGeometryArrayBuilder, PbfGeometry, WkbCoordinate,
 };
+use crate::input::parquet::PartitionFamily;
 use crate::optimized::{ClusterKey, GeometryPartRole, GeometryPartSink};
 use crate::optimized::{ClusteringIndexXZ, QUANTIZED_NATIVE_ENCODING};
-use crate::parquet_dataset::PartitionFamily;
 
 use super::dataset_validator::ClusteringRange;
 use super::file_validator::FileValidator;

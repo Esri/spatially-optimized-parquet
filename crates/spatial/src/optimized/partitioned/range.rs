@@ -8,7 +8,7 @@ use datafusion::functions_aggregate::expr_fn::min;
 use datafusion::logical_expr::expr_fn::ident;
 use datafusion::prelude::lit;
 
-use crate::plan_diagnostics::collect_dataframe;
+use crate::diagnostics::Diagnostics;
 
 use crate::optimized::clustering::ClusterRangeBoundaries;
 
@@ -33,7 +33,9 @@ impl ClusterRangeBoundaries {
       .alias(format!("range_boundary_{index}"))
     }));
     let aggregate_dataframe = dataframe.aggregate(vec![], aggregate_expressions)?;
-    let batches = collect_dataframe(aggregate_dataframe, "cluster boundary aggregate").await?;
+    let batches = Diagnostics::with("cluster boundary aggregate")
+      .collect(aggregate_dataframe)
+      .await?;
     let Some(batch) = batches.first() else {
       return Ok(Self::new(0, Vec::new()));
     };

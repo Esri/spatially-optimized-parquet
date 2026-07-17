@@ -13,10 +13,14 @@
 //! after provider discovery. The source stores loaded footer metadata so schema, row count, and
 //! spatial metadata queries do not reopen local files.
 
+mod dataset;
 mod metadata;
 mod open;
 mod source;
 
+pub(crate) use dataset::{
+  DiscoveryMode, ParquetDataset, ParquetDatasetFile, PartitionDescriptor, PartitionFamily,
+};
 pub(super) use source::ParquetInputSource;
 
 #[cfg(test)]

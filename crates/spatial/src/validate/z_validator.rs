@@ -2,9 +2,9 @@ use arrow_array::Array;
 use arrow_schema::DataType;
 
 use crate::geometry::WkbCoordinate;
+use crate::input::parquet::PartitionFamily;
 use crate::optimized::ClusterKey;
 use crate::optimized::ClusteringIndexZ;
-use crate::parquet_dataset::PartitionFamily;
 
 use super::dataset_validator::ClusteringRange;
 use super::file_validator::FileValidator;

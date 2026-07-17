@@ -7,9 +7,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
-use crate::parquet_dataset::{
-  DiscoveryMode, ParquetDatasetFile, PartitionDescriptor, PartitionFamily,
-};
+use crate::input::parquet::{DiscoveryMode, ParquetDataset, PartitionDescriptor, PartitionFamily};
 
 use super::file_validator::FileValidator;
 use super::metadata_validator::MetadataValidator;
@@ -22,21 +20,20 @@ impl DatasetValidator {
   /// Validate one Parquet file or recursive partitioned directory as one SOP dataset.
   pub fn validate(path: impl AsRef<Path>) -> Result<ValidationReport> {
     let path = path.as_ref();
-    let dataset_path = path.to_path_buf();
-    let files = DiscoveryMode::Recursive.discover(path)?.with_context(|| {
+    let dataset = ParquetDataset::discover(path, DiscoveryMode::Recursive)?.with_context(|| {
       format!(
         "validation path must be a .parquet file or directory: {}",
         path.display()
       )
     })?;
-    let mut report = ValidationReport::new(dataset_path);
-    Self::validate_dataset(&files, &mut report);
+    let mut report = ValidationReport::new(dataset.root().to_path_buf());
+    Self::validate_dataset(&dataset, &mut report);
     report.sort_findings();
     Ok(report)
   }
 
-  fn validate_dataset(files: &[ParquetDatasetFile], report: &mut ValidationReport) {
-    let validated_files = FileValidator::load_all(files, report);
+  fn validate_dataset(dataset: &ParquetDataset, report: &mut ValidationReport) {
+    let validated_files = FileValidator::load_all(dataset.files(), report);
     let validated_dataset_files = MetadataValidator::validate_dataset(&validated_files, report);
     FileValidator::validate_dataset_structure(&validated_files, &validated_dataset_files, report);
     let ranges = FileValidator::validate_file_data(&validated_dataset_files, report);

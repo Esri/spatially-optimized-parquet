@@ -3,7 +3,6 @@
 //! Discovers local files or loads remote footer metadata so later scans can share one
 //! footer-backed source description.
 
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -15,9 +14,9 @@ use parquet::arrow::async_reader::ParquetObjectReader;
 use url::Url;
 
 use crate::input::{InputOpenOptions, InputSource};
-use crate::parquet_dataset::{DiscoveryMode, ParquetDatasetFile};
 
 use super::source::{ParquetInputLocation, ParquetInputSource};
+use super::{DiscoveryMode, ParquetDataset, ParquetDatasetFile};
 
 impl ParquetInputSource {
   /// Open a local Parquet file set or one direct HTTP Parquet object.
@@ -34,13 +33,14 @@ impl ParquetInputSource {
     let path = options
       .local_path()
       .context("parquet input requires a local path or HTTP URL")?;
-    let files = Self::discover_files(path)?.with_context(|| {
+    let dataset = ParquetDataset::discover(path, DiscoveryMode::Flat)?.with_context(|| {
       format!(
         "parquet input must be a .parquet file or directory containing .parquet files: {}",
         path.display()
       )
     })?;
-    let metadata = files
+    let metadata = dataset
+      .files()
       .iter()
       .map(|file| Self::load_arrow_metadata(file))
       .collect::<Result<Vec<_>>>()?;
@@ -95,21 +95,11 @@ impl ParquetInputSource {
     )))
   }
 
-  /// Discover a single Parquet file or a sorted directory of Parquet files.
-  ///
-  /// Returns `None` for unsupported paths so another input provider can attempt them.
-  fn discover_files(input: &Path) -> Result<Option<Vec<PathBuf>>> {
-    Ok(
-      DiscoveryMode::Flat
-        .discover(input)?
-        .map(|files| files.into_iter().map(|file| file.path).collect()),
-    )
-  }
-
   /// Load Arrow and Parquet metadata from one local file footer.
-  fn load_arrow_metadata(file: &Path) -> Result<ArrowReaderMetadata> {
-    ParquetDatasetFile::load_metadata(file)
-      .with_context(|| format!("read arrow metadata: {}", file.display()))
+  fn load_arrow_metadata(file: &ParquetDatasetFile) -> Result<ArrowReaderMetadata> {
+    file
+      .load_metadata()
+      .with_context(|| format!("read arrow metadata: {}", file.path.display()))
   }
 }
 
@@ -119,7 +109,7 @@ mod tests {
 
   use tempfile::TempDir;
 
-  use super::ParquetInputSource;
+  use super::{DiscoveryMode, ParquetDataset, ParquetInputSource};
 
   #[test]
   fn parquet_discovery_sorts_files_and_ignores_other_extensions() {
@@ -128,12 +118,16 @@ mod tests {
     fs::write(temp.path().join("a.parquet"), []).unwrap();
     fs::write(temp.path().join("notes.txt"), []).unwrap();
 
-    let files = ParquetInputSource::discover_files(temp.path())
+    let dataset = ParquetDataset::discover(temp.path(), DiscoveryMode::Flat)
       .unwrap()
       .unwrap();
 
     assert_eq!(
-      files,
+      dataset
+        .files()
+        .iter()
+        .map(|file| file.path.clone())
+        .collect::<Vec<_>>(),
       vec![temp.path().join("a.parquet"), temp.path().join("b.parquet")]
     );
   }
@@ -144,7 +138,10 @@ mod tests {
     let path = temp.path().join("broken.parquet");
     fs::write(&path, b"not parquet").unwrap();
 
-    let error = ParquetInputSource::load_arrow_metadata(&path).unwrap_err();
+    let dataset = ParquetDataset::discover(&path, DiscoveryMode::Flat)
+      .unwrap()
+      .unwrap();
+    let error = ParquetInputSource::load_arrow_metadata(&dataset.files()[0]).unwrap_err();
 
     assert!(error.to_string().contains("read arrow metadata"));
   }

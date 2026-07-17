@@ -23,8 +23,8 @@ use datafusion::physical_plan::{
 use parquet::basic::{BrotliLevel, Compression, GzipLevel, ZstdLevel};
 use parquet::file::metadata::KeyValue;
 
+use crate::diagnostics::Diagnostics;
 use crate::pipeline::SharedWriteReporter;
-use crate::plan_diagnostics::print_physical_plan;
 
 use super::partition_plan::PartitionPlan;
 use super::reporter::WriteReporter;
@@ -242,7 +242,7 @@ impl Writer {
     sink: Arc<TrackingSink>,
     context: Arc<TaskContext>,
   ) -> Result<u64> {
-    print_physical_plan(label, plan.as_ref());
+    Diagnostics::with(label).print_physical_plan(plan.as_ref());
     let batches = match collect(plan, Arc::clone(&context)).await {
       Ok(batches) => batches,
       Err(error) => {

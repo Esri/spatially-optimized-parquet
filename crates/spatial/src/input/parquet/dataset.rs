@@ -1,4 +1,4 @@
-//! Discovers local Parquet files and loads file-qualified footer metadata.
+//! Discovers local Parquet datasets and loads file-qualified footer metadata.
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -6,14 +6,17 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DiscoveryMode {
-  Flat,
-  Recursive,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ParquetDataset {
+  root: PathBuf,
+  files: Vec<ParquetDatasetFile>,
 }
 
-impl DiscoveryMode {
-  pub(crate) fn discover(self, input: &Path) -> Result<Option<Vec<ParquetDatasetFile>>> {
+impl ParquetDataset {
+  /// Discover one local Parquet file or a sorted local Parquet dataset.
+  ///
+  /// Returns `None` for unsupported paths so another input provider can attempt them.
+  pub(crate) fn discover(input: &Path, mode: DiscoveryMode) -> Result<Option<Self>> {
     if input.is_file() {
       if !Self::has_parquet_extension(input) {
         return Ok(None);
@@ -23,23 +26,27 @@ impl DiscoveryMode {
         .file_name()
         .map(PathBuf::from)
         .context("parquet file path is missing a file name")?;
-      return Ok(Some(vec![ParquetDatasetFile {
-        path,
-        relative_path,
-        partition: None,
-      }]));
+      return Ok(Some(Self {
+        root: input.to_path_buf(),
+        files: vec![ParquetDatasetFile {
+          path,
+          relative_path,
+          partition: None,
+        }],
+      }));
     }
     if !input.is_dir() {
       return Ok(None);
     }
+
     let root = Self::to_absolute_path(input)?;
     let mut paths = Vec::new();
-    self.discover_directory_files(&root, &mut paths)?;
+    Self::discover_directory_files(&root, mode, &mut paths)?;
     if paths.is_empty() {
       bail!("no parquet files found at: {}", input.display());
     }
     paths.sort();
-    paths
+    let files = paths
       .into_iter()
       .map(|path| {
         let relative_path = path
@@ -53,11 +60,29 @@ impl DiscoveryMode {
           partition,
         })
       })
-      .collect::<Result<Vec<_>>>()
-      .map(Some)
+      .collect::<Result<Vec<_>>>()?;
+
+    Ok(Some(Self {
+      root: input.to_path_buf(),
+      files,
+    }))
   }
 
-  fn discover_directory_files(self, directory: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+  /// Return the input path that established this dataset boundary.
+  pub(crate) fn root(&self) -> &Path {
+    &self.root
+  }
+
+  /// Return the discovered Parquet files in deterministic path order.
+  pub(crate) fn files(&self) -> &[ParquetDatasetFile] {
+    &self.files
+  }
+
+  fn discover_directory_files(
+    directory: &Path,
+    mode: DiscoveryMode,
+    files: &mut Vec<PathBuf>,
+  ) -> Result<()> {
     for entry in
       fs::read_dir(directory).with_context(|| format!("read directory: {}", directory.display()))?
     {
@@ -69,8 +94,8 @@ impl DiscoveryMode {
       let path = entry.path();
       if file_type.is_file() && Self::has_parquet_extension(&path) {
         files.push(path);
-      } else if file_type.is_dir() && self == Self::Recursive {
-        self.discover_directory_files(&path, files)?;
+      } else if file_type.is_dir() && mode == DiscoveryMode::Recursive {
+        Self::discover_directory_files(&path, mode, files)?;
       }
     }
     Ok(())
@@ -93,6 +118,12 @@ impl DiscoveryMode {
       )
     }
   }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DiscoveryMode {
+  Flat,
+  Recursive,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -162,13 +193,14 @@ pub(crate) struct ParquetDatasetFile {
   pub(crate) partition: Option<PartitionDescriptor>,
 }
 
-/// Load Arrow and Parquet metadata from one local file footer.
 impl ParquetDatasetFile {
-  pub(crate) fn load_metadata(file: &Path) -> Result<ArrowReaderMetadata> {
+  /// Load Arrow and Parquet metadata from this local file footer.
+  pub(crate) fn load_metadata(&self) -> Result<ArrowReaderMetadata> {
     ArrowReaderMetadata::load(
-      &fs::File::open(file).with_context(|| format!("open parquet file: {}", file.display()))?,
+      &fs::File::open(&self.path)
+        .with_context(|| format!("open parquet file: {}", self.path.display()))?,
       ArrowReaderOptions::new(),
     )
-    .with_context(|| format!("read parquet footer: {}", file.display()))
+    .with_context(|| format!("read parquet footer: {}", self.path.display()))
   }
 }
