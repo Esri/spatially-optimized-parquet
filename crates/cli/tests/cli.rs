@@ -51,7 +51,6 @@ fn validation_runs_only_through_validate_subcommand() {
   let result = Command::new(env!("CARGO_BIN_EXE_sop"))
     .args([
       "write",
-      "--input",
       input.to_str().unwrap(),
       "--output",
       output.to_str().unwrap(),
@@ -95,7 +94,6 @@ fn write_subcommand_renders_live_and_final_written_count() {
   let result = Command::new(env!("CARGO_BIN_EXE_sop"))
     .args([
       "write",
-      "--input",
       input.to_str().unwrap(),
       "--output",
       output.to_str().unwrap(),
@@ -128,7 +126,6 @@ fn no_progress_suppresses_live_updates_but_keeps_final_count() {
   let result = Command::new(env!("CARGO_BIN_EXE_sop"))
     .args([
       "write",
-      "--input",
       input.to_str().unwrap(),
       "--output",
       output.to_str().unwrap(),
@@ -154,7 +151,6 @@ fn write_subcommand_rejects_removed_explain() {
   let result = Command::new(env!("CARGO_BIN_EXE_sop"))
     .args([
       "write",
-      "--input",
       "input.parquet",
       "--output",
       "output.parquet",
@@ -176,7 +172,6 @@ fn validate_subcommand_exits_zero_for_conforming_optimized_output() {
   let write = Command::new(env!("CARGO_BIN_EXE_sop"))
     .args([
       "write",
-      "--input",
       input.to_str().unwrap(),
       "--output",
       output.to_str().unwrap(),
@@ -210,7 +205,6 @@ fn validate_subcommand_exits_nonzero_for_errors_and_preserves_output() {
   let write = Command::new(env!("CARGO_BIN_EXE_sop"))
     .args([
       "write",
-      "--input",
       input.to_str().unwrap(),
       "--output",
       output.to_str().unwrap(),

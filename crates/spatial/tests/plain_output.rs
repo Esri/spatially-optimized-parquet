@@ -412,6 +412,6 @@ fn plain_output_rejects_partition_count() {
   assert!(
     error
       .to_string()
-      .contains("plain GeoParquet output does not support --output-files")
+      .contains("plain GeoParquet output does not support --partitions")
   );
 }

@@ -282,7 +282,7 @@ impl Pipeline {
     match (output_mode, state.output_path.part_count()) {
       (OutputMode::GeoParquet, 1) => Ok(Self(PipelineExecution::GeoParquet(state))),
       (OutputMode::GeoParquet, _) => {
-        bail!("plain GeoParquet output does not support --output-files")
+        bail!("plain GeoParquet output does not support --partitions")
       }
       (OutputMode::OptimizedGeoParquet, 1) => Ok(Self(PipelineExecution::OptimizedSingle(state))),
       (OutputMode::OptimizedGeoParquet, _) => {

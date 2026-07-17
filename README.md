@@ -35,10 +35,10 @@ cargo install
 You can then run on a `geopackage` with:
 ```sh
 sop write \
-  --input france/gpkg/bdnb.gpkg \
+  france/bdnb.gpkg \
   --layer batiment_groupe_compile \
   --output out.parquet \
-  --output-files 1 \
+  --partitions 1 \
   --overwrite
 ```
 
@@ -47,55 +47,3 @@ Validate an existing optimized file or recursive partitioned dataset with:
 ```sh
 sop validate out.parquet
 ```
-
-Run `sop validate` separately when output validation is required.
-`--no-optimization` writes plain GeoParquet and skips SOP validation. Warnings return exit status
-`0`. Validation errors return non-zero without deleting output.
-
-During every write, the CLI updates one stdout line with `Wrote X/Y features` at most every 500
-milliseconds and prints the final count immediately before validation output. Pass `--no-progress`
-to suppress live updates while retaining the final `Wrote X/Y features` line.
-
-GeoParquet is also supported. Parquet without geospatial metadata can also be used provided the geometry column is tagged with `--geometry-column`. Add `--covering` to write a GeoParquet 1.1 root `bbox` covering column with `xmin`, `ymin`, `xmax`, and `ymax` fields.
-
-Input format is inferred from `.gpkg` or `.parquet`. Local directories are treated as Parquet
-datasets. Use `--input-format gpkg|parquet` for extensionless or unconventional locations.
-
-Both output modes write GeoParquet:
-
-- The default writes Spatially Optimized GeoParquet with spatial ordering and display columns.
-- `--no-optimization` writes plain GeoParquet without SOP display columns or spatial sorting.
-
-Both modes default to `--out-sr 4326`. When the source uses another CRS, the writer reprojects the
-selected WKB rows and derives every output coordinate, extent, covering bbox, GeoParquet CRS/bbox,
-and optimized geodisplay field from the WGS84 result. The current command intentionally panics
-before opening input or mutating output for any `--out-sr` other than `4326`.
-
-When Parquet geometry lacks CRS metadata, pass `--geometry-column <NAME> --in-sr <LATEST_WKID>`.
-The writer scans WKB to infer geometry types and the selected-row extent. `--in-sr` fails when
-the selected geometry already declares a CRS, preventing accidental overrides. `--covering`
-works with both plain and optimized GeoParquet.
-
-The writer preserves input Z and M ordinates by default. Pass `--strip-z` or `--strip-m` to
-remove either dimension independently from output WKB, point fields, multiscale PBF, and metadata.
-Both flags work with plain and optimized output and can be combined to produce XY geometry.
-
-## Implementation layout
-
-The Rust workspace separates source integration, GeoParquet context resolution, and output
-execution:
-
-- `spatial::input::{gpkg, parquet}` owns format-specific discovery and scanning. Each source splits
-  metadata, opening, and streaming concerns into focused modules.
-- `spatial::pipeline` stays thin. It validates resources and routes plain or optimized output.
-- `spatial::geoparquet` resolves geometry kinds, source extent, dimensions, and CRS after both
-  sources converge on `InputSource`. It also owns GeoParquet JSON, covering behavior, and plain
-  output.
-- `spatial::optimized` owns optimized geometry classification, target extent, geodisplay
-  metadata, spatial ordering, and multiscale geometry encoding.
-- `spatial::output::reprojection` owns the shared CRS comparison, WKB transformation, point,
-  bounds, and target-extent expressions used by both output modes.
-- `spatial::output` retains shared layout, Parquet writer policy, metadata, output-mode,
-  spatial-reference, reprojection, and callback-aware write mechanics.
-
-See [architecture.md](architecture.md) for the complete execution flow and module map.

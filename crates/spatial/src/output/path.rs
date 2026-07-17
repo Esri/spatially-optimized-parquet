@@ -28,13 +28,13 @@ enum OutputPathError {
   #[error("output path already exists: {0} (pass --overwrite to replace it)")]
   Exists(PathBuf),
   /// Indicates that directory output omitted its required file count.
-  #[error("output path requires --output-files when output is a directory")]
+  #[error("output path requires --partitions when output is a directory")]
   FilesRequired,
   /// Indicates that a file output requested more than one part.
-  #[error("output path is a file so --output-files must be 1")]
+  #[error("output path is a file so --partitions must be 1")]
   FilesMustBeOne,
   /// Indicates that the requested output file count was zero.
-  #[error("--output-files must be >= 1")]
+  #[error("--partitions must be >= 1")]
   FilesInvalid,
 }
 

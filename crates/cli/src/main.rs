@@ -59,14 +59,14 @@ impl From<MultiscaleEncodingValue> for MultiscaleEncoding {
 
 #[derive(Args, Debug)]
 struct WriteCommand {
-  #[arg(long, value_name = "PATH")]
+  #[arg(value_name = "INPUT")]
   input: String,
   #[arg(long, value_name = "FORMAT")]
   input_format: Option<SourceFormat>,
-  #[arg(long, value_name = "PATH")]
+  #[arg(short = 'o', long, value_name = "OUTPUT")]
   output: PathBuf,
-  #[arg(long, value_name = "N")]
-  output_files: Option<usize>,
+  #[arg(short = 'p', long, value_name = "N")]
+  partitions: Option<usize>,
   #[arg(
     long = "memory",
     value_name = "GB",
@@ -95,6 +95,7 @@ struct WriteCommand {
   #[arg(long, value_name = "N", value_parser = parse_num, help = "Process at most N input rows")]
   num: Option<usize>,
   #[arg(
+    short = 'l',
     long,
     value_name = "NAME",
     help = "Select a layer from a multi-layer input such as a GeoPackage"
@@ -125,6 +126,7 @@ struct WriteCommand {
   #[arg(long, help = "Remove M values from output geometry and metadata")]
   strip_m: bool,
   #[arg(
+    short = 'w',
     long,
     help = "Overwrite the output file or replace the output directory if it exists"
   )]
@@ -150,8 +152,8 @@ struct WriteCommand {
 
 #[derive(Args, Debug)]
 struct ValidateCommand {
-  #[arg(value_name = "FILE_OR_DIRECTORY")]
-  path: PathBuf,
+  #[arg(value_name = "INPUT")]
+  input: PathBuf,
 }
 
 fn main() -> Result<()> {
@@ -181,7 +183,7 @@ async fn run(cli: Cli) -> Result<()> {
       }
       Ok(())
     }
-    Command::Validate(args) => match spatial::validate(&args.path)?.ensure_valid() {
+    Command::Validate(args) => match spatial::validate(&args.input)?.ensure_valid() {
       Ok(report) => {
         render_validation_report(&report);
         Ok(())
@@ -210,7 +212,7 @@ impl From<WriteCommand> for SpatialPipelineOptions {
       output: OutputOptions {
         path: args.output,
         mode: output_mode,
-        file_count: args.output_files,
+        file_count: args.partitions,
         compression: args.compression,
         output_wkid: args.out_sr,
         covering: args.covering,
@@ -285,7 +287,6 @@ mod tests {
     let cli = Cli::try_parse_from([
       "sop",
       "write",
-      "--input",
       "input.parquet",
       "--output",
       "output.parquet",
@@ -307,7 +308,6 @@ mod tests {
       let error = Cli::try_parse_from([
         "sop",
         "write",
-        "--input",
         "input.parquet",
         "--output",
         "output.parquet",
@@ -318,5 +318,59 @@ mod tests {
 
       assert!(error.to_string().contains("must be >= 1"));
     }
+  }
+
+  #[test]
+  fn write_subcommand_uses_positional_input_and_short_option_aliases() {
+    let cli = Cli::try_parse_from([
+      "sop",
+      "write",
+      "input.parquet",
+      "-l",
+      "buildings",
+      "-o",
+      "output",
+      "-p",
+      "2",
+      "-w",
+    ])
+    .unwrap();
+
+    let Command::Write(args) = cli.command else {
+      panic!("expected write command");
+    };
+    assert_eq!(args.input, "input.parquet");
+    assert_eq!(args.layer.as_deref(), Some("buildings"));
+    assert_eq!(args.output, PathBuf::from("output"));
+    assert_eq!(args.partitions, Some(2));
+    assert!(args.overwrite);
+  }
+
+  #[test]
+  fn write_subcommand_rejects_removed_input_and_output_files_options() {
+    for option in ["--input", "--output-files"] {
+      let error = Cli::try_parse_from([
+        "sop",
+        "write",
+        "input.parquet",
+        "--output",
+        "output.parquet",
+        option,
+        "value",
+      ])
+      .unwrap_err();
+
+      assert!(error.to_string().contains("unexpected argument"));
+    }
+  }
+
+  #[test]
+  fn validate_subcommand_uses_positional_input() {
+    let cli = Cli::try_parse_from(["sop", "validate", "output.parquet"]).unwrap();
+
+    let Command::Validate(args) = cli.command else {
+      panic!("expected validate command");
+    };
+    assert_eq!(args.input, PathBuf::from("output.parquet"));
   }
 }
