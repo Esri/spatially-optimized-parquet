@@ -3,7 +3,7 @@
 use anyhow::Result;
 
 use crate::geometry::{GeometryType, QuantizationTransform};
-use crate::output::{DEFAULT_OUTPUT_WKID, WEB_MERCATOR_OUTPUT_WKID};
+use crate::geoparquet::{DEFAULT_OUTPUT_WKID, WEB_MERCATOR_OUTPUT_WKID};
 
 const WGS84_SEMI_MAJOR_AXIS: f64 = 6_378_137.0;
 const ROOT_GRID_SIZE: f64 = 512.0;

@@ -4,9 +4,10 @@ use anyhow::{Result, bail};
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
 
+use crate::geoparquet::validate_output_wkid;
 use crate::input::{InputOpenOptions, InputSource, RowRange, open_input, resolve_source_format};
 use crate::optimized::validate_internal_projection_columns;
-use crate::output::{OutputMode, OutputPath, validate_output_wkid};
+use crate::output::{OutputMode, OutputPath};
 use crate::session::DataFusionSession;
 
 use super::{

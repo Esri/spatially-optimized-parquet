@@ -78,7 +78,7 @@ impl<'a> GeoParquetWriter<'a> {
       .source_spatial_reference
       .projjson
       .as_ref()
-      .context("missing resolved source CRS PROJJSON")?;
+      .context("missing resolved source spatial-reference PROJJSON")?;
     let reprojection = ResolvedReprojection::from_source_projjson(source_projjson, output_wkid)?;
     let normalized = NormalizedSpatialFrame::new(
       self.input_dataframe.clone(),

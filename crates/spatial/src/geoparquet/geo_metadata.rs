@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::geometry::{Extent2D, GeometryKind};
-use crate::output::SpatialReferenceInfo;
+use crate::geoparquet::SpatialReference;
 
 use ::parquet::file::metadata::KeyValue;
 
@@ -20,7 +20,7 @@ pub(crate) struct GeoMetadataInput<'a> {
   /// Stores the geometry extent in output coordinates.
   pub(crate) output_extent: Extent2D,
   /// Stores the output coordinate reference system.
-  pub(crate) output_spatial_reference: &'a SpatialReferenceInfo,
+  pub(crate) output_spatial_reference: &'a SpatialReference,
   /// Indicates whether geometry values contain Z components.
   pub(crate) has_z: bool,
   /// Indicates whether geometry values contain M components.
@@ -83,7 +83,7 @@ impl GeoMetadata {
         .output_spatial_reference
         .projjson
         .clone()
-        .context("missing output CRS PROJJSON")?,
+        .context("missing output spatial-reference PROJJSON")?,
       covering: input
         .covering
         .then(|| GeoCovering::new(input.covering_column)),

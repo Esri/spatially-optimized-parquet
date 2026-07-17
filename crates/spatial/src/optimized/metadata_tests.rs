@@ -4,7 +4,7 @@ use ::parquet::file::metadata::KeyValue;
 use serde_json::{Value, json};
 
 use crate::geometry::{Extent2D, GeometryKind};
-use crate::output::SpatialReferenceInfo;
+use crate::geoparquet::SpatialReference;
 
 use crate::geoparquet::{GeoMetadataInput, geoparquet_metadata};
 
@@ -13,8 +13,8 @@ use super::{
   optimized_xz_metadata,
 };
 
-fn spatial_reference() -> SpatialReferenceInfo {
-  SpatialReferenceInfo {
+fn spatial_reference() -> SpatialReference {
+  SpatialReference {
     wkid: Some(4326),
     wkt: Some("EPSG:4326 WKT".to_string()),
     projjson: Some(json!({
@@ -30,7 +30,7 @@ fn spatial_reference() -> SpatialReferenceInfo {
 
 fn geo_input<'a>(
   geometry_types: &'a [GeometryKind],
-  spatial_reference: &'a SpatialReferenceInfo,
+  spatial_reference: &'a SpatialReference,
   covering: bool,
 ) -> GeoMetadataInput<'a> {
   GeoMetadataInput {

@@ -23,9 +23,10 @@ mod plan_diagnostics;
 mod session;
 pub mod validate;
 
+pub use geoparquet::DEFAULT_OUTPUT_WKID;
 pub use input::{RowRange, SourceFormat};
 pub use optimized::MultiscaleEncoding;
-pub use output::{DEFAULT_OUTPUT_WKID, OutputMode};
+pub use output::OutputMode;
 pub use pipeline::{
   InputOptions, OutputOptions, SpatialPipelineOptions, SpatialPipelineResult, WriteProgress,
   WriteReporter, run,

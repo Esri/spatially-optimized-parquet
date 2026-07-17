@@ -4,10 +4,10 @@ use anyhow::{Context, Result};
 use arrow_schema::Schema;
 
 use crate::geometry::{Extent2D, GeometryColumn, GeometryEncoding, GeometryKind, GeometryType};
+use crate::geoparquet::SpatialReference;
 use crate::geoparquet::geometry_scan::scan_geometry_metadata;
-use crate::geoparquet::source_crs::{resolve_source_crs, spatial_reference_info};
+use crate::geoparquet::spatial_reference::resolve_source_spatial_reference;
 use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata};
-use crate::output::SpatialReferenceInfo;
 
 /// Stores normalized source geometry facts required by either GeoParquet output workflow.
 #[derive(Debug, Clone)]
@@ -19,7 +19,7 @@ pub(crate) struct ResolvedGeoParquetSource {
   /// Stores the selected-row extent in source coordinates.
   pub(crate) source_extent: Extent2D,
   /// Stores the source coordinate reference system.
-  pub(crate) source_spatial_reference: SpatialReferenceInfo,
+  pub(crate) source_spatial_reference: SpatialReference,
   /// Stores the normalized geometry type used by plain output mechanics.
   pub(crate) geometry_type: GeometryType,
   /// Indicates whether source metadata declares Z values.
@@ -43,7 +43,7 @@ impl ResolvedGeoParquetSource {
   }
 }
 
-/// Resolve geometry, CRS, exact type, and extent for the selected rows.
+/// Resolve geometry, spatial reference, exact type, and extent for the selected rows.
 pub(crate) async fn resolve_source(
   input: &dyn InputSource,
   input_dataframe: datafusion::dataframe::DataFrame,
@@ -58,13 +58,13 @@ pub(crate) async fn resolve_source(
     explicit_geometry_column,
   )?;
   let mut source_metadata = input.source_metadata()?;
-  resolve_source_crs(&mut source_metadata, &geometry.column, input_wkid)?;
+  resolve_source_spatial_reference(&mut source_metadata, &geometry.column, input_wkid)?;
 
   let source_geometry = source_metadata
     .geometry
     .as_ref()
     .filter(|source_geometry| source_geometry.column == geometry.column)
-    .context("missing geometry metadata after input CRS resolution")?;
+    .context("missing geometry metadata after input spatial-reference resolution")?;
   let requires_scan = !row_range.is_full()
     || source_geometry.geometry_types.is_empty()
     || source_geometry.bbox.is_none();
@@ -82,8 +82,8 @@ pub(crate) async fn resolve_source(
   let projjson = source_geometry
     .projjson
     .clone()
-    .context("missing input CRS metadata")?;
-  let source_spatial_reference = spatial_reference_info(&projjson)?;
+    .context("missing input spatial-reference metadata")?;
+  let source_spatial_reference = SpatialReference::from_projjson(&projjson)?;
   let has_z = source_geometry.has_z;
   let has_m = source_geometry.has_m;
 

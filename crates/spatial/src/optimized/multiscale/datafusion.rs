@@ -522,9 +522,11 @@ mod tests {
   }
 
   fn assert_encoding_parameter_changes_identity(mutate: impl FnOnce(&mut MultiscaleLevel)) {
-    let levels =
-      create_multiscale_levels(crate::output::DEFAULT_OUTPUT_WKID, GeometryType::Polygon)
-        .expect("levels");
+    let levels = create_multiscale_levels(
+      crate::geoparquet::DEFAULT_OUTPUT_WKID,
+      GeometryType::Polygon,
+    )
+    .expect("levels");
     let original =
       ComplexGeometryGeodisplayUdf::new(GeometryType::Polygon, false, false, levels.clone());
     let mut changed_levels = levels;
@@ -563,9 +565,11 @@ mod tests {
 
   #[test]
   fn identity_includes_geometry_type_encoding_order_and_count() {
-    let levels =
-      create_multiscale_levels(crate::output::DEFAULT_OUTPUT_WKID, GeometryType::Polygon)
-        .expect("levels");
+    let levels = create_multiscale_levels(
+      crate::geoparquet::DEFAULT_OUTPUT_WKID,
+      GeometryType::Polygon,
+    )
+    .expect("levels");
     let original =
       ComplexGeometryGeodisplayUdf::new(GeometryType::Polygon, false, false, levels.clone());
     let equal =
@@ -594,9 +598,11 @@ mod tests {
 
   #[test]
   fn missing_m_values_are_encoded_as_zero_for_output_zm() {
-    let levels =
-      create_multiscale_levels(crate::output::DEFAULT_OUTPUT_WKID, GeometryType::Polyline)
-        .expect("levels");
+    let levels = create_multiscale_levels(
+      crate::geoparquet::DEFAULT_OUTPUT_WKID,
+      GeometryType::Polyline,
+    )
+    .expect("levels");
     let warning_store = PipelineWarningStore::default();
     let udf = ComplexGeometryGeodisplayUdf::new_with_warning_store(
       GeometryType::Polyline,
@@ -629,9 +635,11 @@ mod tests {
 
   #[test]
   fn missing_m_values_are_null_for_native_output_zm() {
-    let levels =
-      create_multiscale_levels(crate::output::DEFAULT_OUTPUT_WKID, GeometryType::Polyline)
-        .expect("levels");
+    let levels = create_multiscale_levels(
+      crate::geoparquet::DEFAULT_OUTPUT_WKID,
+      GeometryType::Polyline,
+    )
+    .expect("levels");
     let warning_store = PipelineWarningStore::default();
     let udf = ComplexGeometryGeodisplayUdf::new_with_warning_store(
       GeometryType::Polyline,

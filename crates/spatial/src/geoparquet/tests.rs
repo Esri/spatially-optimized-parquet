@@ -81,8 +81,8 @@ fn write_parquet(
 }
 
 fn geoparquet_kv(primary_column: &str, geometry_types: &[&str]) -> KeyValue {
-  let crs = SpatialRef::from_epsg(4326).unwrap().to_projjson().unwrap();
-  let crs: serde_json::Value = serde_json::from_str(&crs).unwrap();
+  let spatial_reference = SpatialRef::from_epsg(4326).unwrap().to_projjson().unwrap();
+  let spatial_reference: serde_json::Value = serde_json::from_str(&spatial_reference).unwrap();
   let geometry_types = geometry_types
     .iter()
     .map(|item| serde_json::Value::String((*item).to_string()))
@@ -94,7 +94,7 @@ fn geoparquet_kv(primary_column: &str, geometry_types: &[&str]) -> KeyValue {
       primary_column: {
         "encoding": "WKB",
         "geometry_types": geometry_types,
-        "crs": crs
+        "crs": spatial_reference
       }
     }
   });
@@ -266,7 +266,7 @@ fn source_metadata_tolerates_null_bbox_metadata() {
 }
 
 #[test]
-fn resolved_source_retains_crs_and_extent_in_source_metadata() {
+fn resolved_source_retains_spatial_reference_and_extent_in_source_metadata() {
   let temp = TempDir::new().unwrap();
   let path = temp.path().join("data.parquet");
   let schema = sample_schema_with_geometry();
@@ -347,7 +347,7 @@ fn resolved_source_uses_complete_metadata_without_creating_dataframe() {
 }
 
 #[test]
-fn resolved_source_prefers_top_level_crs_authority_code() {
+fn resolved_source_prefers_top_level_spatial_reference_authority_code() {
   let mut projjson = epsg_projjson(4269);
   projjson["datum"]["id"] = serde_json::json!({
     "authority": "EPSG",
@@ -391,7 +391,7 @@ fn resolved_source_prefers_top_level_crs_authority_code() {
 }
 
 #[test]
-fn resolved_source_preserves_projjson_for_unknown_crs_authority() {
+fn resolved_source_preserves_projjson_for_unknown_spatial_reference_authority() {
   let mut projjson = epsg_projjson(4326);
   projjson["id"] = serde_json::json!({
     "authority": "IGNF",
