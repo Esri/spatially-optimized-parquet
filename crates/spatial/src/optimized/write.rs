@@ -76,7 +76,7 @@ impl<'a> PartitionedOutputWriter<'a> {
   ) -> Result<u64> {
     let writer_options =
       ParquetWriterOptions::new(self.compression.unwrap_or("snappy"), &metadata)?
-        .with_delta_binary_packed_columns(self.optimization.native_coordinate_column_paths())
+        .with_delta_binary_packed_columns(self.optimization.delta_binary_packed_column_paths())
         .into_datafusion();
     let partition_column = cluster_partition_column(self.optimization.geometry().clustering_family);
     let partitioned_sort = PartitionedSortConfig::new(

@@ -61,15 +61,17 @@ impl ResolvedOptimization {
     self.multiscale_encoding
   }
 
-  pub(super) fn native_coordinate_column_paths(&self) -> Vec<String> {
-    if self.multiscale_encoding != MultiscaleEncoding::QuantizedNative {
-      return Vec::new();
+  pub(super) fn delta_binary_packed_column_paths(&self) -> Vec<String> {
+    match self.multiscale_encoding {
+      MultiscaleEncoding::Pbf => Vec::new(),
+      MultiscaleEncoding::QuantizedNative => {
+        crate::optimized::multiscale::native_coordinate_column_paths(
+          &self.encodings,
+          self.geometry.geometry_type,
+          self.geometry.has_z,
+          self.geometry.has_m,
+        )
+      }
     }
-    crate::optimized::multiscale::native_coordinate_column_paths(
-      &self.encodings,
-      self.geometry.geometry_type,
-      self.geometry.has_z,
-      self.geometry.has_m,
-    )
   }
 }

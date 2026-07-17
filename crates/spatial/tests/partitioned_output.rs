@@ -9,8 +9,8 @@ use arrow_array::{
 use arrow_schema::{DataType, Field, Schema};
 use parquet::basic::Compression;
 use spatial::{
-  InputOptions, OutputMode, OutputOptions, RowRange, SpatialPipelineOptions, WriteProgress, run,
-  validate,
+  InputOptions, MultiscaleEncoding, OutputMode, OutputOptions, RowRange, SpatialPipelineOptions,
+  WriteProgress, run, validate,
 };
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
@@ -238,6 +238,16 @@ fn partitioned_output_writes_sorted_range_partitions() {
 
 #[test]
 fn partitioned_output_writes_native_multiscale_coordinate_leaves() {
+  assert_partitioned_multiscale_integer_leaves(
+    MultiscaleEncoding::QuantizedNative,
+    &["level_16.list.element.list.element.x"],
+  );
+}
+
+fn assert_partitioned_multiscale_integer_leaves(
+  encoding: MultiscaleEncoding,
+  leaf_suffixes: &[&str],
+) {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("polygons.parquet");
   let output = temp.path().join("out");
@@ -290,7 +300,7 @@ fn partitioned_output_writes_native_multiscale_coordinate_leaves() {
         false,
         true,
       )
-      .with_multiscale_encoding(spatial::MultiscaleEncoding::QuantizedNative),
+      .with_multiscale_encoding(encoding),
     )))
     .unwrap();
 
@@ -299,23 +309,19 @@ fn partitioned_output_writes_native_multiscale_coordinate_leaves() {
   assert_eq!(files.len(), 2);
   for file in files {
     let parquet_metadata = reader_metadata(&file);
-    let coordinate_column = parquet_metadata
-      .metadata()
-      .row_group(0)
-      .columns()
-      .iter()
-      .find(|column| {
-        column
-          .column_descr()
-          .path()
-          .string()
-          .ends_with("level_16.list.element.list.element.x")
-      })
-      .expect("native x coordinate column");
-    let encodings = coordinate_column.encodings().collect::<Vec<_>>();
-    assert!(encodings.contains(&parquet::basic::Encoding::DELTA_BINARY_PACKED));
-    assert!(!encodings.contains(&parquet::basic::Encoding::RLE_DICTIONARY));
-    assert!(!encodings.contains(&parquet::basic::Encoding::PLAIN_DICTIONARY));
+    for leaf_suffix in leaf_suffixes {
+      let integer_column = parquet_metadata
+        .metadata()
+        .row_group(0)
+        .columns()
+        .iter()
+        .find(|column| column.column_descr().path().string().ends_with(leaf_suffix))
+        .unwrap_or_else(|| panic!("missing integer column ending in {leaf_suffix}"));
+      let encodings = integer_column.encodings().collect::<Vec<_>>();
+      assert!(encodings.contains(&parquet::basic::Encoding::DELTA_BINARY_PACKED));
+      assert!(!encodings.contains(&parquet::basic::Encoding::RLE_DICTIONARY));
+      assert!(!encodings.contains(&parquet::basic::Encoding::PLAIN_DICTIONARY));
+    }
   }
 }
 

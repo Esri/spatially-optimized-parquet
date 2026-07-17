@@ -153,7 +153,7 @@ impl<'a> OptimizedOutput<'a, ResolvedOutputState> {
       hidden_sort_column,
       self.total_input_rows,
       self.write_reporter.clone(),
-      self.state.optimization.native_coordinate_column_paths(),
+      self.state.optimization.delta_binary_packed_column_paths(),
     )
     .await
   }

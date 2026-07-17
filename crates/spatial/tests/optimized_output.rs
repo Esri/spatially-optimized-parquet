@@ -55,6 +55,14 @@ fn run_optimized(
 }
 
 fn run_optimized_native(input: &Path, output: &Path) -> Result<SpatialPipelineResult> {
+  run_optimized_multiscale(input, output, MultiscaleEncoding::QuantizedNative)
+}
+
+fn run_optimized_multiscale(
+  input: &Path,
+  output: &Path,
+  encoding: MultiscaleEncoding,
+) -> Result<SpatialPipelineResult> {
   runtime().block_on(run(SpatialPipelineOptions::new(
     InputOptions::new(
       input.to_string_lossy(),
@@ -65,7 +73,7 @@ fn run_optimized_native(input: &Path, output: &Path) -> Result<SpatialPipelineRe
       None,
     ),
     OutputOptions::new(output, OutputMode::Optimized, None, None, 4326, false, true)
-      .with_multiscale_encoding(MultiscaleEncoding::QuantizedNative),
+      .with_multiscale_encoding(encoding),
   )))
 }
 
