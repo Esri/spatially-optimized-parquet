@@ -6,8 +6,8 @@ use arrow_array::{Array, BinaryArray, StringArray, StructArray, UInt64Array};
 use arrow_schema::{DataType, Field, Schema};
 use parquet::file::metadata::KeyValue;
 use spatial::{
-  InputOptions, OutputMode, OutputOptions, RowRange, SpatialPipelineOptions, ValidationRule,
-  WriteProgress, run, validate,
+  InputOptions, OutputMode, OutputOptions, Pipeline, RowRange, SpatialPipelineOptions,
+  ValidationRule, WriteProgress, validate,
 };
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
@@ -66,7 +66,7 @@ fn plain_output_preserves_wkb_rows_and_passthrough_metadata() {
   let progress = Arc::new(Mutex::new(Vec::new()));
   let reported = Arc::clone(&progress);
   let result = runtime()
-    .block_on(run(
+    .block_on(Pipeline::run(
       SpatialPipelineOptions::new(
         InputOptions::new(
           input.to_string_lossy(),
@@ -165,7 +165,7 @@ fn plain_output_strips_z_and_m_independently() {
   ] {
     let output = temp.path().join(format!("{name}.parquet"));
     runtime()
-      .block_on(run(SpatialPipelineOptions::new(
+      .block_on(Pipeline::run(SpatialPipelineOptions::new(
         InputOptions::new(
           input.to_string_lossy(),
           None,
@@ -232,7 +232,7 @@ fn plain_output_writes_covering_bbox() {
   );
 
   runtime()
-    .block_on(run(SpatialPipelineOptions::new(
+    .block_on(Pipeline::run(SpatialPipelineOptions::new(
       InputOptions::new(
         input.to_string_lossy(),
         None,
@@ -296,7 +296,7 @@ fn plain_output_reprojects_selected_rows_and_covering_extent() {
   );
 
   runtime()
-    .block_on(run(SpatialPipelineOptions::new(
+    .block_on(Pipeline::run(SpatialPipelineOptions::new(
       InputOptions::new(
         input.to_string_lossy(),
         None,
@@ -368,7 +368,7 @@ fn plain_output_rejects_non_wgs84_before_filesystem_mutation() {
     let input = temp.path().join("missing-input.parquet");
     let output = temp.path().join("must-not-exist.parquet");
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-      runtime().block_on(run(SpatialPipelineOptions::new(
+      runtime().block_on(Pipeline::run(SpatialPipelineOptions::new(
         InputOptions::new(
           input.to_string_lossy(),
           None,
@@ -419,7 +419,7 @@ fn plain_output_rejects_partition_count() {
   );
 
   let error = runtime()
-    .block_on(run(SpatialPipelineOptions::new(
+    .block_on(Pipeline::run(SpatialPipelineOptions::new(
       InputOptions::new(
         input.to_string_lossy(),
         None,

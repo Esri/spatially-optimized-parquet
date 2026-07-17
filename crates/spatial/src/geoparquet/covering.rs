@@ -16,10 +16,68 @@ use datafusion::prelude::col;
 
 use crate::geometry::GeometryType;
 use crate::geometry::to_datafusion_error;
-use crate::optimized::{COVERING_BBOX_COLUMN, bounds_expr, point_expr};
+use crate::optimized::{BoundsUdf, COVERING_BBOX_COLUMN, PointGeometryUdf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct FeatureBboxUdf;
+
+impl FeatureBboxUdf {
+  fn scalar_udf() -> ScalarUDF {
+    ScalarUDF::new_from_impl(Self)
+  }
+
+  fn float_argument<'a>(
+    arrays: &'a [ArrayRef],
+    index: usize,
+    name: &str,
+  ) -> DataFusionResult<&'a Float64Array> {
+    as_float64_array(
+      arrays
+        .get(index)
+        .ok_or_else(|| DataFusionError::Execution(format!("missing {name} argument")))?
+        .as_ref(),
+    )
+  }
+
+  fn bounds_fields() -> Fields {
+    static FIELDS: OnceLock<Fields> = OnceLock::new();
+    FIELDS
+      .get_or_init(|| {
+        Fields::from(vec![
+          Arc::new(Field::new("xmin", DataType::Float64, true)),
+          Arc::new(Field::new("ymin", DataType::Float64, true)),
+          Arc::new(Field::new("xmax", DataType::Float64, true)),
+          Arc::new(Field::new("ymax", DataType::Float64, true)),
+        ])
+      })
+      .clone()
+  }
+
+  fn signature() -> &'static Signature {
+    static SIGNATURE: OnceLock<Signature> = OnceLock::new();
+    SIGNATURE.get_or_init(|| {
+      Signature::one_of(
+        [
+          DataType::Binary,
+          DataType::LargeBinary,
+          DataType::BinaryView,
+        ]
+        .into_iter()
+        .map(|geometry_type| {
+          TypeSignature::Exact(vec![
+            geometry_type,
+            DataType::Float64,
+            DataType::Float64,
+            DataType::Float64,
+            DataType::Float64,
+          ])
+        })
+        .collect(),
+        Volatility::Immutable,
+      )
+    })
+  }
+}
 
 impl ScalarUDFImpl for FeatureBboxUdf {
   fn as_any(&self) -> &dyn Any {
@@ -31,11 +89,11 @@ impl ScalarUDFImpl for FeatureBboxUdf {
   }
 
   fn signature(&self) -> &Signature {
-    covering_signature()
+    Self::signature()
   }
 
   fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
-    Ok(DataType::Struct(bounds_fields()))
+    Ok(DataType::Struct(Self::bounds_fields()))
   }
 
   fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
@@ -43,13 +101,13 @@ impl ScalarUDFImpl for FeatureBboxUdf {
     let geometry = arrays
       .first()
       .ok_or_else(|| DataFusionError::Execution("missing geometry argument".to_string()))?;
-    let xmin = float_argument(&arrays, 1, "xmin")?;
-    let ymin = float_argument(&arrays, 2, "ymin")?;
-    let xmax = float_argument(&arrays, 3, "xmax")?;
-    let ymax = float_argument(&arrays, 4, "ymax")?;
+    let xmin = Self::float_argument(&arrays, 1, "xmin")?;
+    let ymin = Self::float_argument(&arrays, 2, "ymin")?;
+    let xmax = Self::float_argument(&arrays, 3, "xmax")?;
+    let ymax = Self::float_argument(&arrays, 4, "ymax")?;
     let nulls = geometry.nulls().cloned();
     let output = StructArray::try_new(
-      bounds_fields(),
+      Self::bounds_fields(),
       vec![
         Arc::new(Float64Array::new(xmin.values().clone(), nulls.clone())),
         Arc::new(Float64Array::new(ymin.values().clone(), nulls.clone())),
@@ -63,24 +121,20 @@ impl ScalarUDFImpl for FeatureBboxUdf {
   }
 }
 
-fn feature_bbox_udf() -> ScalarUDF {
-  ScalarUDF::new_from_impl(FeatureBboxUdf)
-}
-
 pub(crate) fn geometry_bbox_expr(geometry_column: &str, geometry_type: GeometryType) -> Expr {
   let geometry = col(geometry_column);
   match geometry_type {
     GeometryType::Point => {
-      let coordinates = point_expr(geometry_column);
+      let coordinates = PointGeometryUdf::expression(geometry_column);
       let x = coordinates.clone().field("x");
       let y = coordinates.field("y");
-      feature_bbox_udf()
+      FeatureBboxUdf::scalar_udf()
         .call(vec![geometry, x.clone(), y.clone(), x, y])
         .alias(COVERING_BBOX_COLUMN)
     }
     GeometryType::MultiPoint | GeometryType::Polyline | GeometryType::Polygon => {
-      let bounds = bounds_expr(geometry_column);
-      feature_bbox_udf()
+      let bounds = BoundsUdf::expression(geometry_column);
+      FeatureBboxUdf::scalar_udf()
         .call(vec![
           geometry,
           bounds.clone().field("xmin"),
@@ -95,56 +149,4 @@ pub(crate) fn geometry_bbox_expr(geometry_column: &str, geometry_type: GeometryT
 
 pub(crate) fn bbox_field_expr(field: &str) -> Expr {
   col(COVERING_BBOX_COLUMN).field(field)
-}
-
-fn float_argument<'a>(
-  arrays: &'a [ArrayRef],
-  index: usize,
-  name: &str,
-) -> DataFusionResult<&'a Float64Array> {
-  as_float64_array(
-    arrays
-      .get(index)
-      .ok_or_else(|| DataFusionError::Execution(format!("missing {name} argument")))?
-      .as_ref(),
-  )
-}
-
-fn bounds_fields() -> Fields {
-  static FIELDS: OnceLock<Fields> = OnceLock::new();
-  FIELDS
-    .get_or_init(|| {
-      Fields::from(vec![
-        Arc::new(Field::new("xmin", DataType::Float64, true)),
-        Arc::new(Field::new("ymin", DataType::Float64, true)),
-        Arc::new(Field::new("xmax", DataType::Float64, true)),
-        Arc::new(Field::new("ymax", DataType::Float64, true)),
-      ])
-    })
-    .clone()
-}
-
-fn covering_signature() -> &'static Signature {
-  static SIGNATURE: OnceLock<Signature> = OnceLock::new();
-  SIGNATURE.get_or_init(|| {
-    Signature::one_of(
-      [
-        DataType::Binary,
-        DataType::LargeBinary,
-        DataType::BinaryView,
-      ]
-      .into_iter()
-      .map(|geometry_type| {
-        TypeSignature::Exact(vec![
-          geometry_type,
-          DataType::Float64,
-          DataType::Float64,
-          DataType::Float64,
-          DataType::Float64,
-        ])
-      })
-      .collect(),
-      Volatility::Immutable,
-    )
-  })
 }

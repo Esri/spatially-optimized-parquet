@@ -39,7 +39,22 @@ impl StdoutWriteReporter {
       .unwrap_or_else(|poisoned| poisoned.into_inner());
     state.highest_count = state.highest_count.max(rows_written);
     state.total_count = total_rows;
-    render(rows_written, total_rows, true);
+    Self::render(rows_written, total_rows, true);
+  }
+
+  fn render(rows_written: u64, total_rows: u64, finished: bool) {
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+    Self::render_to(&mut stdout, rows_written, total_rows, finished);
+  }
+
+  fn render_to(writer: &mut dyn Write, rows_written: u64, total_rows: u64, finished: bool) {
+    if finished {
+      let _ = writeln!(writer, "\rWrote {rows_written}/{total_rows} features");
+    } else {
+      let _ = write!(writer, "\rWrote {rows_written}/{total_rows} features");
+    }
+    let _ = writer.flush();
   }
 }
 
@@ -65,21 +80,6 @@ impl WriteReporter for StdoutWriteReporter {
       return;
     }
     state.last_rendered_at = Some(now);
-    render(state.highest_count, state.total_count, false);
+    Self::render(state.highest_count, state.total_count, false);
   }
-}
-
-fn render(rows_written: u64, total_rows: u64, finished: bool) {
-  let stdout = io::stdout();
-  let mut stdout = stdout.lock();
-  render_to(&mut stdout, rows_written, total_rows, finished);
-}
-
-fn render_to(writer: &mut dyn Write, rows_written: u64, total_rows: u64, finished: bool) {
-  if finished {
-    let _ = writeln!(writer, "\rWrote {rows_written}/{total_rows} features");
-  } else {
-    let _ = write!(writer, "\rWrote {rows_written}/{total_rows} features");
-  }
-  let _ = writer.flush();
 }

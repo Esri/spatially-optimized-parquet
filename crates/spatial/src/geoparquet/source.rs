@@ -42,6 +42,26 @@ impl ResolvedGeoParquetSource {
   }
 }
 
+impl GeometryColumn {
+  fn resolve(
+    schema: &Schema,
+    inferred_geometry_column: Option<Self>,
+    explicit_geometry_column: Option<&str>,
+  ) -> Result<Self> {
+    if let Some(column) = explicit_geometry_column {
+      schema
+        .field_with_name(column)
+        .with_context(|| format!("missing geometry column '{column}'"))?;
+      return Ok(Self {
+        column: column.to_string(),
+        encoding: GeometryEncoding::Wkb,
+        geometry_kind: None,
+      });
+    }
+    inferred_geometry_column.context("unable to resolve geometry column; pass --geometry-column")
+  }
+}
+
 /// Resolve geometry, spatial reference, exact type, and extent for the selected rows.
 pub(crate) async fn resolve_source(
   input: &dyn InputSource,
@@ -51,7 +71,7 @@ pub(crate) async fn resolve_source(
   input_wkid: Option<u32>,
   row_range: RowRange,
 ) -> Result<ResolvedGeoParquetSource> {
-  let geometry = resolve_geometry_column(
+  let geometry = GeometryColumn::resolve(
     schema,
     input.inferred_geometry_column()?,
     explicit_geometry_column,
@@ -104,22 +124,4 @@ pub(crate) async fn resolve_source(
     has_m,
     source_metadata,
   })
-}
-
-fn resolve_geometry_column(
-  schema: &Schema,
-  inferred_geometry_column: Option<GeometryColumn>,
-  explicit_geometry_column: Option<&str>,
-) -> Result<GeometryColumn> {
-  if let Some(column) = explicit_geometry_column {
-    schema
-      .field_with_name(column)
-      .with_context(|| format!("missing geometry column '{column}'"))?;
-    return Ok(GeometryColumn {
-      column: column.to_string(),
-      encoding: GeometryEncoding::Wkb,
-      geometry_kind: None,
-    });
-  }
-  inferred_geometry_column.context("unable to resolve geometry column; pass --geometry-column")
 }

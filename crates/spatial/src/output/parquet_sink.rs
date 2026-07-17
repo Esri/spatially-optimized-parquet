@@ -83,6 +83,32 @@ pub(super) struct TrackingParquetSink {
 }
 
 impl TrackingParquetSink {
+  /// Create a tracked Parquet sink for one output path and partitioning configuration.
+  pub(super) fn create(
+    write_path: String,
+    output_schema: SchemaRef,
+    partition_by: Vec<String>,
+    writer_options: TableParquetOptions,
+    tracker: Arc<WriteTracker>,
+  ) -> Result<Arc<Self>> {
+    let parsed_url = ListingTableUrl::parse(&write_path)?;
+    let config = FileSinkConfig {
+      original_url: write_path,
+      object_store_url: parsed_url.object_store(),
+      file_group: Default::default(),
+      table_paths: vec![parsed_url],
+      output_schema,
+      table_partition_cols: partition_by
+        .into_iter()
+        .map(|column| (column, DataType::Null))
+        .collect(),
+      insert_op: InsertOp::Append,
+      keep_partition_by_columns: false,
+      file_extension: "parquet".to_string(),
+    };
+    Ok(Arc::new(Self::new(config, writer_options, tracker)))
+  }
+
   fn new(
     config: FileSinkConfig,
     parquet_options: TableParquetOptions,
@@ -163,35 +189,6 @@ impl DataSink for TrackingParquetSink {
       )
       .await
   }
-}
-
-pub(super) fn create_sink(
-  write_path: String,
-  output_schema: SchemaRef,
-  partition_by: Vec<String>,
-  writer_options: TableParquetOptions,
-  tracker: Arc<WriteTracker>,
-) -> Result<Arc<TrackingParquetSink>> {
-  let parsed_url = ListingTableUrl::parse(&write_path)?;
-  let config = FileSinkConfig {
-    original_url: write_path,
-    object_store_url: parsed_url.object_store(),
-    file_group: Default::default(),
-    table_paths: vec![parsed_url],
-    output_schema,
-    table_partition_cols: partition_by
-      .into_iter()
-      .map(|column| (column, DataType::Null))
-      .collect(),
-    insert_op: InsertOp::Append,
-    keep_partition_by_columns: false,
-    file_extension: "parquet".to_string(),
-  };
-  Ok(Arc::new(TrackingParquetSink::new(
-    config,
-    writer_options,
-    tracker,
-  )))
 }
 
 #[cfg(test)]

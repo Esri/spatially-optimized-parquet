@@ -30,7 +30,7 @@ pub(super) struct ConcurrentPartitionSinkExec {
 
 impl ConcurrentPartitionSinkExec {
   pub(super) fn new(input: Arc<dyn ExecutionPlan>, sink: Arc<TrackingParquetSink>) -> Self {
-    let count_schema = count_schema();
+    let count_schema = Self::count_schema();
     let cache = PlanProperties::new(
       EquivalenceProperties::new(Arc::clone(&count_schema)),
       Partitioning::UnknownPartitioning(1),
@@ -45,6 +45,62 @@ impl ConcurrentPartitionSinkExec {
       count_schema,
       cache,
     }
+  }
+
+  async fn run_concurrent_partition_writes(
+    input: Arc<dyn ExecutionPlan>,
+    sink: Arc<TrackingParquetSink>,
+    context: &Arc<TaskContext>,
+  ) -> DataFusionResult<u64> {
+    let mut write_tasks = JoinSet::new();
+    for partition in 0..input.output_partitioning().partition_count() {
+      let input = Arc::clone(&input);
+      let sink = Arc::clone(&sink);
+      let context = Arc::clone(context);
+      write_tasks.spawn(async move {
+        let data = execute_input_stream(
+          input,
+          Arc::clone(sink.schema()),
+          partition,
+          Arc::clone(&context),
+        )?;
+        sink.write_all(data, &context).await
+      });
+    }
+
+    let mut rows_written = 0;
+    let mut first_error = None;
+    while let Some(result) = write_tasks.join_next().await {
+      match result {
+        Ok(Ok(count)) => rows_written += count,
+        Ok(Err(error)) => {
+          first_error.get_or_insert(error);
+        }
+        Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+        Err(error) => {
+          first_error.get_or_insert_with(|| {
+            DataFusionError::Execution(format!("partitioned parquet write task failed: {error}"))
+          });
+        }
+      }
+    }
+    first_error.map_or(Ok(rows_written), Err)
+  }
+
+  fn count_schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![Field::new(
+      "count",
+      DataType::UInt64,
+      false,
+    )]))
+  }
+
+  fn make_count_batch(count: u64) -> RecordBatch {
+    RecordBatch::try_new(
+      Self::count_schema(),
+      vec![Arc::new(UInt64Array::from(vec![count]))],
+    )
+    .expect("count batch should always be valid")
   }
 }
 
@@ -108,69 +164,13 @@ impl ExecutionPlan for ConcurrentPartitionSinkExec {
     let input = Arc::clone(&self.input);
     let sink = Arc::clone(&self.sink);
     let stream = futures_util::stream::once(async move {
-      run_concurrent_partition_writes(input, sink, &context)
+      Self::run_concurrent_partition_writes(input, sink, &context)
         .await
-        .map(make_count_batch)
+        .map(Self::make_count_batch)
     });
     Ok(Box::pin(RecordBatchStreamAdapter::new(
       count_schema,
       stream,
     )))
   }
-}
-
-async fn run_concurrent_partition_writes(
-  input: Arc<dyn ExecutionPlan>,
-  sink: Arc<TrackingParquetSink>,
-  context: &Arc<TaskContext>,
-) -> DataFusionResult<u64> {
-  let mut write_tasks = JoinSet::new();
-  for partition in 0..input.output_partitioning().partition_count() {
-    let input = Arc::clone(&input);
-    let sink = Arc::clone(&sink);
-    let context = Arc::clone(context);
-    write_tasks.spawn(async move {
-      let data = execute_input_stream(
-        input,
-        Arc::clone(sink.schema()),
-        partition,
-        Arc::clone(&context),
-      )?;
-      sink.write_all(data, &context).await
-    });
-  }
-
-  let mut rows_written = 0;
-  let mut first_error = None;
-  while let Some(result) = write_tasks.join_next().await {
-    match result {
-      Ok(Ok(count)) => rows_written += count,
-      Ok(Err(error)) => {
-        first_error.get_or_insert(error);
-      }
-      Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
-      Err(error) => {
-        first_error.get_or_insert_with(|| {
-          DataFusionError::Execution(format!("partitioned parquet write task failed: {error}"))
-        });
-      }
-    }
-  }
-  first_error.map_or(Ok(rows_written), Err)
-}
-
-fn count_schema() -> SchemaRef {
-  Arc::new(Schema::new(vec![Field::new(
-    "count",
-    DataType::UInt64,
-    false,
-  )]))
-}
-
-fn make_count_batch(count: u64) -> RecordBatch {
-  RecordBatch::try_new(
-    count_schema(),
-    vec![Arc::new(UInt64Array::from(vec![count]))],
-  )
-  .expect("count batch should always be valid")
 }

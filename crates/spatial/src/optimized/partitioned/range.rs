@@ -12,55 +12,57 @@ use crate::plan_diagnostics::collect_dataframe;
 
 use crate::optimized::clustering::ClusterRangeBoundaries;
 
-/// Estimate balanced cluster-key ranges with one minimum and approximate percentiles.
-pub(super) async fn compute_cluster_range_boundaries(
-  dataframe: DataFrame,
-  cluster_key_column: &str,
-  bucket_count: usize,
-) -> Result<ClusterRangeBoundaries> {
-  if bucket_count <= 1 {
-    return Ok(ClusterRangeBoundaries::new(0, Vec::new()));
-  }
+impl ClusterRangeBoundaries {
+  /// Compute balanced cluster-key ranges from one dataframe and target bucket count.
+  pub(super) async fn compute(
+    dataframe: DataFrame,
+    cluster_key_column: &str,
+    bucket_count: usize,
+  ) -> Result<Self> {
+    if bucket_count <= 1 {
+      return Ok(Self::new(0, Vec::new()));
+    }
 
-  let mut aggregate_expressions = vec![min(ident(cluster_key_column)).alias("range_min")];
-  aggregate_expressions.extend((1..bucket_count).map(|index| {
-    approx_percentile_cont(
-      ident(cluster_key_column).sort(true, false),
-      lit(index as f64 / bucket_count as f64),
-      None,
-    )
-    .alias(format!("range_boundary_{index}"))
-  }));
-  let aggregate_dataframe = dataframe.aggregate(vec![], aggregate_expressions)?;
-  let batches = collect_dataframe(aggregate_dataframe, "cluster boundary aggregate").await?;
-  let Some(batch) = batches.first() else {
-    return Ok(ClusterRangeBoundaries::new(0, Vec::new()));
-  };
-  if batch.num_rows() == 0 {
-    return Ok(ClusterRangeBoundaries::new(0, Vec::new()));
-  }
+    let mut aggregate_expressions = vec![min(ident(cluster_key_column)).alias("range_min")];
+    aggregate_expressions.extend((1..bucket_count).map(|index| {
+      approx_percentile_cont(
+        ident(cluster_key_column).sort(true, false),
+        lit(index as f64 / bucket_count as f64),
+        None,
+      )
+      .alias(format!("range_boundary_{index}"))
+    }));
+    let aggregate_dataframe = dataframe.aggregate(vec![], aggregate_expressions)?;
+    let batches = collect_dataframe(aggregate_dataframe, "cluster boundary aggregate").await?;
+    let Some(batch) = batches.first() else {
+      return Ok(Self::new(0, Vec::new()));
+    };
+    if batch.num_rows() == 0 {
+      return Ok(Self::new(0, Vec::new()));
+    }
 
-  let minimum_values = batch
-    .column(0)
-    .as_any()
-    .downcast_ref::<UInt64Array>()
-    .context("range partition minimum aggregate did not return UInt64")?;
-  let min_value = if minimum_values.is_null(0) {
-    0
-  } else {
-    minimum_values.value(0)
-  };
-
-  let mut boundaries = Vec::with_capacity(batch.num_columns().saturating_sub(1));
-  for column in batch.columns().iter().skip(1) {
-    let values = column
+    let minimum_values = batch
+      .column(0)
       .as_any()
       .downcast_ref::<UInt64Array>()
-      .context("range boundary aggregate did not return UInt64")?;
-    if !values.is_null(0) {
-      boundaries.push(values.value(0));
+      .context("range partition minimum aggregate did not return UInt64")?;
+    let min_value = if minimum_values.is_null(0) {
+      0
+    } else {
+      minimum_values.value(0)
+    };
+
+    let mut boundaries = Vec::with_capacity(batch.num_columns().saturating_sub(1));
+    for column in batch.columns().iter().skip(1) {
+      let values = column
+        .as_any()
+        .downcast_ref::<UInt64Array>()
+        .context("range boundary aggregate did not return UInt64")?;
+      if !values.is_null(0) {
+        boundaries.push(values.value(0));
+      }
     }
+    boundaries.sort_unstable();
+    Ok(Self::new(min_value, boundaries))
   }
-  boundaries.sort_unstable();
-  Ok(ClusterRangeBoundaries::new(min_value, boundaries))
 }

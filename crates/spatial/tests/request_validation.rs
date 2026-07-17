@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use arrow_array::{BinaryArray, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema};
-use spatial::{InputOptions, OutputMode, OutputOptions, RowRange, SpatialPipelineOptions, run};
+use spatial::{
+  InputOptions, OutputMode, OutputOptions, Pipeline, RowRange, SpatialPipelineOptions,
+};
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
@@ -22,7 +24,7 @@ fn optimized_output_rejects_non_wgs84_before_filesystem_mutation() {
     let input = temp.path().join("missing-input.parquet");
     let output = temp.path().join("must-not-exist.parquet");
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-      runtime().block_on(run(SpatialPipelineOptions::new(
+      runtime().block_on(Pipeline::run(SpatialPipelineOptions::new(
         InputOptions::new(
           input.to_string_lossy(),
           None,
@@ -80,7 +82,7 @@ fn output_rejects_explicit_geometry_without_crs_metadata() {
   for output_mode in [OutputMode::GeoParquet, OutputMode::OptimizedGeoParquet] {
     let output = temp.path().join(format!("{output_mode:?}.parquet"));
     let error = runtime()
-      .block_on(run(SpatialPipelineOptions::new(
+      .block_on(Pipeline::run(SpatialPipelineOptions::new(
         InputOptions::new(
           input.to_string_lossy(),
           None,
@@ -97,7 +99,7 @@ fn output_rejects_explicit_geometry_without_crs_metadata() {
 
   let output = temp.path().join("plain-with-crs.parquet");
   runtime()
-    .block_on(run(SpatialPipelineOptions::new(
+    .block_on(Pipeline::run(SpatialPipelineOptions::new(
       InputOptions::new(
         input.to_string_lossy(),
         None,
@@ -149,7 +151,7 @@ fn output_rejects_input_wkid_when_crs_metadata_exists() {
   );
 
   let error = runtime()
-    .block_on(run(SpatialPipelineOptions::new(
+    .block_on(Pipeline::run(SpatialPipelineOptions::new(
       InputOptions::new(
         input.to_string_lossy(),
         None,

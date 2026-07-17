@@ -17,21 +17,16 @@ mod wkb;
 pub(crate) use arrow::{GeometryArray, geometry_signature, to_datafusion_error};
 pub(crate) use extent::Extent2D;
 pub(crate) use geometry::{Coord, Geometry, GeometryType};
-pub(crate) use native::{
-  NativeGeometryArrayBuilder, native_coordinate_column_paths, native_geometry_data_type,
-};
-pub(crate) use pbf::{
-  GeometryEncodeScratch, PbfArrayBuilder, PbfGeometry, decode_pbf_geometry,
-  encode_quantized_geometry_with_scratch,
-};
+pub(crate) use native::NativeGeometryArrayBuilder;
+pub(crate) use pbf::{PbfArrayBuilder, PbfGeometry};
 pub(crate) use quantization::{
   ComponentValidity, QuantizationOptions, QuantizationTransform, QuantizedGeometry,
-  encode_deltas_xy, quantize_geometry_into,
+  encode_deltas_xy,
 };
 pub(crate) use types::{GeometryColumn, GeometryEncoding, GeometryKind};
 #[cfg(test)]
 pub(crate) use wkb::write_test_geometry;
 pub(crate) use wkb::{
-  PolygonRingOrder, WkbCoordinate, WkbPartRole, WkbSink, geometry_kind_from_wkb, read_geometry,
-  read_wkb_point_coordinate, strip_wkb_dimensions, visit_wkb_geometry, write_geometry,
+  PolygonRingOrder, WkbCoordinate, WkbHeader, WkbPartRole, WkbSink, strip_wkb_dimensions,
+  visit_wkb_geometry,
 };

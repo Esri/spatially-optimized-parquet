@@ -49,98 +49,93 @@ impl PartitionedSortConfig {
     &self,
     plan: Arc<dyn ExecutionPlan>,
   ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-    insert_partitioned_sort_exec(plan, self)
+    self.insert_partitioned_sort_exec(plan)
   }
-}
 
-fn insert_partitioned_sort_exec(
-  plan: Arc<dyn ExecutionPlan>,
-  config: &PartitionedSortConfig,
-) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-  let schema = plan.schema();
-  let partition_column_index = schema.index_of(&config.partition_column);
-  let cluster_key_column_index = schema.index_of(&config.cluster_key_column);
-  if let (Ok(partition_column_index), Ok(cluster_key_column_index)) =
-    (partition_column_index, cluster_key_column_index)
-  {
-    return partitioned_sort_exec(
+  fn insert_partitioned_sort_exec(
+    &self,
+    plan: Arc<dyn ExecutionPlan>,
+  ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
+    let schema = plan.schema();
+    let partition_column_index = schema.index_of(&self.partition_column);
+    let cluster_key_column_index = schema.index_of(&self.cluster_key_column);
+    if let (Ok(partition_column_index), Ok(cluster_key_column_index)) =
+      (partition_column_index, cluster_key_column_index)
+    {
+      return self.partitioned_sort_exec(plan, partition_column_index, cluster_key_column_index);
+    }
+    let children = plan.children();
+    if children.is_empty() {
+      return Err(DataFusionError::Execution(format!(
+        "unable to insert partitioned sort: columns '{}' and '{}' were not both available in plan schema {:?}",
+        self.partition_column,
+        self.cluster_key_column,
+        schema
+          .fields()
+          .iter()
+          .map(|field| field.name().clone())
+          .collect::<Vec<_>>(),
+      )));
+    }
+    let rewritten_children = children
+      .into_iter()
+      .map(|child| self.insert_partitioned_sort_exec(Arc::clone(child)))
+      .collect::<DataFusionResult<Vec<_>>>()?;
+    plan.with_new_children(rewritten_children)
+  }
+
+  fn partitioned_sort_exec(
+    &self,
+    plan: Arc<dyn ExecutionPlan>,
+    partition_column_index: usize,
+    cluster_key_column_index: usize,
+  ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
+    let repartitioned_input: Arc<dyn ExecutionPlan> = Arc::new(RepartitionExec::try_new(
       plan,
-      config,
-      partition_column_index,
-      cluster_key_column_index,
-    );
+      Partitioning::Hash(
+        vec![Arc::new(PhysicalColumn::new(
+          &self.partition_column,
+          partition_column_index,
+        ))],
+        Self::partition_count(self.bucket_count),
+      ),
+    )?);
+    let sort_order: LexOrdering = [PhysicalSortExpr {
+      expr: Arc::new(PhysicalColumn::new(
+        &self.cluster_key_column,
+        cluster_key_column_index,
+      )),
+      options: SortOptions {
+        descending: false,
+        nulls_first: false,
+      },
+    }]
+    .into();
+    let sorted_input: Arc<dyn ExecutionPlan> =
+      Arc::new(SortExec::new(sort_order, repartitioned_input).with_preserve_partitioning(true));
+    if !self.drop_cluster_key_after_sort {
+      return Ok(sorted_input);
+    }
+    let projection_exprs = sorted_input
+      .schema()
+      .fields()
+      .iter()
+      .enumerate()
+      .filter(|(_, field)| field.name() != &self.cluster_key_column)
+      .map(|(index, field)| ProjectionExpr {
+        expr: Arc::new(PhysicalColumn::new(field.name(), index)),
+        alias: field.name().to_string(),
+      })
+      .collect::<Vec<_>>();
+    Ok(Arc::new(ProjectionExec::try_new(
+      projection_exprs,
+      sorted_input,
+    )?))
   }
-  let children = plan.children();
-  if children.is_empty() {
-    return Err(DataFusionError::Execution(format!(
-      "unable to insert partitioned sort: columns '{}' and '{}' were not both available in plan schema {:?}",
-      config.partition_column,
-      config.cluster_key_column,
-      schema
-        .fields()
-        .iter()
-        .map(|field| field.name().clone())
-        .collect::<Vec<_>>(),
-    )));
-  }
-  let rewritten_children = children
-    .into_iter()
-    .map(|child| insert_partitioned_sort_exec(Arc::clone(child), config))
-    .collect::<DataFusionResult<Vec<_>>>()?;
-  plan.with_new_children(rewritten_children)
-}
 
-fn partitioned_sort_exec(
-  plan: Arc<dyn ExecutionPlan>,
-  config: &PartitionedSortConfig,
-  partition_column_index: usize,
-  cluster_key_column_index: usize,
-) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-  let repartitioned_input: Arc<dyn ExecutionPlan> = Arc::new(RepartitionExec::try_new(
-    plan,
-    Partitioning::Hash(
-      vec![Arc::new(PhysicalColumn::new(
-        &config.partition_column,
-        partition_column_index,
-      ))],
-      partitioned_sort_partition_count(config.bucket_count),
-    ),
-  )?);
-  let sort_order: LexOrdering = [PhysicalSortExpr {
-    expr: Arc::new(PhysicalColumn::new(
-      &config.cluster_key_column,
-      cluster_key_column_index,
-    )),
-    options: SortOptions {
-      descending: false,
-      nulls_first: false,
-    },
-  }]
-  .into();
-  let sorted_input: Arc<dyn ExecutionPlan> =
-    Arc::new(SortExec::new(sort_order, repartitioned_input).with_preserve_partitioning(true));
-  if !config.drop_cluster_key_after_sort {
-    return Ok(sorted_input);
+  fn partition_count(bucket_count: usize) -> usize {
+    bucket_count.saturating_mul(2).max(8)
   }
-  let projection_exprs = sorted_input
-    .schema()
-    .fields()
-    .iter()
-    .enumerate()
-    .filter(|(_, field)| field.name() != &config.cluster_key_column)
-    .map(|(index, field)| ProjectionExpr {
-      expr: Arc::new(PhysicalColumn::new(field.name(), index)),
-      alias: field.name().to_string(),
-    })
-    .collect::<Vec<_>>();
-  Ok(Arc::new(ProjectionExec::try_new(
-    projection_exprs,
-    sorted_input,
-  )?))
-}
-
-fn partitioned_sort_partition_count(bucket_count: usize) -> usize {
-  bucket_count.saturating_mul(2).max(8)
 }
 
 #[cfg(test)]
@@ -150,14 +145,13 @@ mod tests {
   use arrow_schema::{DataType, Field, Schema};
   use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
 
-  use crate::optimized::clustering::cluster_partition_column;
   use crate::optimized::geometry_info::ClusteringFamily;
   use crate::optimized::multiscale::POINT_Z_CODE_COLUMN;
   use crate::session::DataFusionSession;
 
   #[test]
   fn preserves_partitioned_sort_for_multi_file_writes() {
-    let point_range_column = cluster_partition_column(ClusteringFamily::PointGeometry);
+    let point_range_column = ClusteringFamily::PointGeometry.cluster_partition_column();
     let batch = RecordBatch::try_new(
       Arc::new(Schema::new(vec![
         Field::new(POINT_Z_CODE_COLUMN, DataType::UInt64, false),

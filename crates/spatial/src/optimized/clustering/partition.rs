@@ -19,34 +19,39 @@ pub(crate) struct ClusterRangeBoundaries {
   boundaries: Vec<ClusterKey>,
 }
 
-pub(crate) fn cluster_sort_expr(clustering_family: ClusteringFamily) -> SortExpr {
-  ident(cluster_key_column(clustering_family)).sort(true, false)
-}
-
-pub(crate) fn cluster_key_column(clustering_family: ClusteringFamily) -> &'static str {
-  match clustering_family {
-    ClusteringFamily::PointGeometry => POINT_Z_CODE_COLUMN,
-    ClusteringFamily::ComplexGeometry => TEMP_XZ_CODE_COLUMN,
+impl ClusteringFamily {
+  /// Build the ascending sort expression for this clustering strategy.
+  pub(crate) fn sort_expr(self) -> SortExpr {
+    ident(self.cluster_key_column()).sort(true, false)
   }
-}
 
-pub(crate) fn cluster_partition_column(clustering_family: ClusteringFamily) -> &'static str {
-  match clustering_family {
-    ClusteringFamily::PointGeometry => POINT_GEOMETRY_RANGE_COLUMN,
-    ClusteringFamily::ComplexGeometry => COMPLEX_GEOMETRY_RANGE_COLUMN,
+  /// Return the generated cluster-key column for this clustering strategy.
+  pub(crate) fn cluster_key_column(self) -> &'static str {
+    match self {
+      Self::PointGeometry => POINT_Z_CODE_COLUMN,
+      Self::ComplexGeometry => TEMP_XZ_CODE_COLUMN,
+    }
   }
-}
 
-pub(crate) fn validate_cluster_partition_column(
-  source_schema: &arrow_schema::Schema,
-  partition_column: Option<&str>,
-) -> Result<()> {
-  if let Some(partition_column) = partition_column
-    && source_schema.field_with_name(partition_column).is_ok()
-  {
-    bail!("output partition column '{partition_column}' conflicts with an existing input column");
+  /// Return the generated range-partition column for this clustering strategy.
+  pub(crate) fn cluster_partition_column(self) -> &'static str {
+    match self {
+      Self::PointGeometry => POINT_GEOMETRY_RANGE_COLUMN,
+      Self::ComplexGeometry => COMPLEX_GEOMETRY_RANGE_COLUMN,
+    }
   }
-  Ok(())
+
+  /// Reject an input schema that already owns this strategy's partition column.
+  pub(crate) fn validate_partition_column(
+    self,
+    source_schema: &arrow_schema::Schema,
+  ) -> Result<()> {
+    let partition_column = self.cluster_partition_column();
+    if source_schema.field_with_name(partition_column).is_ok() {
+      bail!("output partition column '{partition_column}' conflicts with an existing input column");
+    }
+    Ok(())
+  }
 }
 
 impl ClusterRangeBoundaries {

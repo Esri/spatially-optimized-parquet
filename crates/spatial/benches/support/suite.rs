@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use criterion::{BenchmarkGroup, BenchmarkId, Criterion, SamplingMode, Throughput};
-use spatial::{InputOptions, OutputMode, OutputOptions, RowRange, SpatialPipelineOptions, run};
+use spatial::{
+  InputOptions, OutputMode, OutputOptions, Pipeline, RowRange, SpatialPipelineOptions,
+};
 use tokio::runtime::Runtime;
 
 use super::{BenchmarkFixture, BenchmarkFixtureSet, remove_output};
@@ -127,7 +129,7 @@ fn benchmark_case(
           );
           let started = Instant::now();
           runtime
-            .block_on(run(options))
+            .block_on(Pipeline::run(options))
             .expect("execute writer benchmark");
           measured += started.elapsed();
           remove_output(&output);

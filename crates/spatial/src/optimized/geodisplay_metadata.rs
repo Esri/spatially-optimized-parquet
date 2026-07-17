@@ -20,12 +20,12 @@ pub(crate) struct GeodisplayMetadata {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub(crate) enum GeodisplayIndex {
-  Z(ZClusteringIndex),
-  Xz(XzClusteringIndex),
+  Z(ClusteringIndexZ),
+  Xz(ClusteringIndexXZ),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct ZClusteringIndex {
+pub(crate) struct ClusteringIndexZ {
   #[serde(rename = "type")]
   pub(crate) index_type: String,
   pub(crate) version: String,
@@ -57,7 +57,7 @@ pub(crate) struct ZClusteringIndex {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct XzClusteringIndex {
+pub(crate) struct ClusteringIndexXZ {
   #[serde(rename = "type")]
   pub(crate) index_type: String,
   pub(crate) version: String,
@@ -89,7 +89,7 @@ pub(crate) struct WriterMetadata {
 }
 
 /// Stores point index values before fixed metadata fields are applied.
-pub(crate) struct ZClusteringIndexInput {
+pub(crate) struct ClusteringIndexZInput {
   /// Names the Z-order code column.
   pub(crate) code: String,
   /// Names the x-coordinate column.
@@ -115,7 +115,7 @@ pub(crate) struct ZClusteringIndexInput {
 }
 
 /// Stores non-point index values before fixed metadata fields are applied.
-pub(crate) struct XzClusteringIndexInput {
+pub(crate) struct ClusteringIndexXZInput {
   /// Names the XZ-order code field.
   pub(crate) code: String,
   /// Names the geometry payload encoding.
@@ -164,14 +164,14 @@ pub(crate) struct MultiscaleLevel {
 }
 
 impl GeodisplayMetadata {
-  pub(super) fn point(parent_column: &str, index: ZClusteringIndex) -> Self {
+  pub(super) fn point(parent_column: &str, index: ClusteringIndexZ) -> Self {
     Self {
       parent_column: Some(parent_column.to_string()),
       index: GeodisplayIndex::Z(index),
     }
   }
 
-  pub(super) fn xz(parent_column: &str, index: XzClusteringIndex) -> Self {
+  pub(super) fn xz(parent_column: &str, index: ClusteringIndexXZ) -> Self {
     Self {
       parent_column: Some(parent_column.to_string()),
       index: GeodisplayIndex::Xz(index),
@@ -179,16 +179,18 @@ impl GeodisplayMetadata {
   }
 }
 
-/// Serialize one Geodisplay metadata entry.
-pub(crate) fn geodisplay_metadata_entry(metadata: &GeodisplayMetadata) -> Result<KeyValue> {
-  Ok(KeyValue::new(
-    "geodisplay".to_string(),
-    Some(serde_json::to_string(metadata)?),
-  ))
+impl GeodisplayMetadata {
+  /// Serialize this Geodisplay metadata into one Parquet key-value entry.
+  pub(crate) fn parquet_entry(&self) -> Result<KeyValue> {
+    Ok(KeyValue::new(
+      "geodisplay".to_string(),
+      Some(serde_json::to_string(self)?),
+    ))
+  }
 }
 
-impl ZClusteringIndex {
-  pub(super) fn new(input: ZClusteringIndexInput) -> Self {
+impl ClusteringIndexZ {
+  pub(super) fn new(input: ClusteringIndexZInput) -> Self {
     Self {
       index_type: "z".to_string(),
       version: GEODISPLAY_VERSION.to_string(),
@@ -209,8 +211,8 @@ impl ZClusteringIndex {
   }
 }
 
-impl XzClusteringIndex {
-  pub(super) fn new(input: XzClusteringIndexInput) -> Self {
+impl ClusteringIndexXZ {
+  pub(super) fn new(input: ClusteringIndexXZInput) -> Self {
     Self {
       index_type: "xz".to_string(),
       version: GEODISPLAY_VERSION.to_string(),

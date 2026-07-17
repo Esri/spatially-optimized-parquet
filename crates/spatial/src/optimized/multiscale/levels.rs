@@ -35,46 +35,45 @@ pub(crate) struct MultiscaleLevel {
   pub(crate) min_length: usize,
 }
 
-/// Create supported even-numbered multiscale level specifications for the target spatial reference.
-pub(crate) fn create_multiscale_levels(
-  output_wkid: u32,
-  geometry_type: GeometryType,
-) -> Result<Vec<MultiscaleLevel>> {
-  let min_length = min_vertex_count(geometry_type);
-  let mut resolution = match output_wkid {
-    DEFAULT_OUTPUT_WKID => FIRST_LEVEL_RESOLUTION,
-    WEB_MERCATOR_OUTPUT_WKID => FIRST_PROJECTED_LEVEL_RESOLUTION,
-    _ => todo!("multiscale levels for output WKID {output_wkid}"),
-  };
-  let mut scale = FIRST_LEVEL_SCALE;
-  let mut levels = Vec::new();
+impl MultiscaleLevel {
+  /// Create supported even-numbered level specifications for the target spatial reference.
+  pub(crate) fn create_all(output_wkid: u32, geometry_type: GeometryType) -> Result<Vec<Self>> {
+    let min_length = Self::min_vertex_count(geometry_type);
+    let mut resolution = match output_wkid {
+      DEFAULT_OUTPUT_WKID => FIRST_LEVEL_RESOLUTION,
+      WEB_MERCATOR_OUTPUT_WKID => FIRST_PROJECTED_LEVEL_RESOLUTION,
+      _ => todo!("multiscale levels for output WKID {output_wkid}"),
+    };
+    let mut scale = FIRST_LEVEL_SCALE;
+    let mut levels = Vec::new();
 
-  for level in 0..=MAX_MULTISCALE_LEVEL {
-    if level % 2 == 0 {
-      levels.push(MultiscaleLevel {
-        level,
-        column: format!("level_{level}"),
-        resolution,
-        scale,
-        transform: QuantizationTransform {
-          scale: [resolution, resolution, 1.0, 1.0],
-          translate: [0.0, 0.0, 0.0, 0.0],
-        },
-        min_length,
-      });
+    for level in 0..=MAX_MULTISCALE_LEVEL {
+      if level % 2 == 0 {
+        levels.push(Self {
+          level,
+          column: format!("level_{level}"),
+          resolution,
+          scale,
+          transform: QuantizationTransform {
+            scale: [resolution, resolution, 1.0, 1.0],
+            translate: [0.0, 0.0, 0.0, 0.0],
+          },
+          min_length,
+        });
+      }
+      resolution /= 2.0;
+      scale /= 2.0;
     }
-    resolution /= 2.0;
-    scale /= 2.0;
+
+    Ok(levels)
   }
 
-  Ok(levels)
-}
-
-fn min_vertex_count(geometry_type: GeometryType) -> usize {
-  match geometry_type {
-    GeometryType::MultiPoint | GeometryType::Point => 1,
-    GeometryType::Polyline => 2,
-    GeometryType::Polygon => 3,
+  fn min_vertex_count(geometry_type: GeometryType) -> usize {
+    match geometry_type {
+      GeometryType::MultiPoint | GeometryType::Point => 1,
+      GeometryType::Polyline => 2,
+      GeometryType::Polygon => 3,
+    }
   }
 }
 
@@ -84,7 +83,7 @@ mod tests {
 
   #[test]
   fn creates_even_wgs84_levels() {
-    let levels = create_multiscale_levels(DEFAULT_OUTPUT_WKID, GeometryType::Polygon).unwrap();
+    let levels = MultiscaleLevel::create_all(DEFAULT_OUTPUT_WKID, GeometryType::Polygon).unwrap();
     assert_eq!(levels.first().unwrap().level, 0);
     assert_eq!(levels.last().unwrap().level, 16);
     assert_eq!(levels[0].min_length, 3);
@@ -101,7 +100,8 @@ mod tests {
 
   #[test]
   fn creates_web_mercator_levels() {
-    let levels = create_multiscale_levels(WEB_MERCATOR_OUTPUT_WKID, GeometryType::Polygon).unwrap();
+    let levels =
+      MultiscaleLevel::create_all(WEB_MERCATOR_OUTPUT_WKID, GeometryType::Polygon).unwrap();
     assert_eq!(levels[0].resolution, FIRST_PROJECTED_LEVEL_RESOLUTION);
     assert_eq!(
       levels[0].transform.scale,

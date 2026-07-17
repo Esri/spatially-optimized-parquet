@@ -172,7 +172,7 @@ async fn run(cli: Cli) -> Result<()> {
     Command::Write(args) => {
       let reporter = StdoutWriteReporter::new(!args.no_progress);
       let options = SpatialPipelineOptions::from(args).with_write_reporter(reporter.clone());
-      let result = spatial::run(options).await?;
+      let result = spatial::Pipeline::run(options).await?;
       reporter.finish(result.rows_written(), result.rows_expected());
       for warning in result.warnings() {
         eprintln!("{warning}");
@@ -194,9 +194,9 @@ impl From<WriteCommand> for SpatialPipelineOptions {
     let memory_limit_bytes = args.memory_limit_bytes;
     let sort_concurrency = args.sort_concurrency;
     let output_mode = if args.no_optimization {
-      OutputMode::Plain
+      OutputMode::GeoParquet
     } else {
-      OutputMode::Optimized
+      OutputMode::OptimizedGeoParquet
     };
     let mut options = Self::new(
       InputOptions::new(

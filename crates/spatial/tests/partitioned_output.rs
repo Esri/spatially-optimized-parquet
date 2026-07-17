@@ -9,8 +9,8 @@ use arrow_array::{
 use arrow_schema::{DataType, Field, Schema};
 use parquet::basic::Compression;
 use spatial::{
-  InputOptions, MultiscaleEncoding, OutputMode, OutputOptions, RowRange, SpatialPipelineOptions,
-  WriteProgress, run, validate,
+  InputOptions, MultiscaleEncoding, OutputMode, OutputOptions, Pipeline, RowRange,
+  SpatialPipelineOptions, WriteProgress, validate,
 };
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
@@ -81,7 +81,7 @@ fn partitioned_output_writes_sorted_range_partitions() {
   let progress = Arc::new(Mutex::new(Vec::new()));
   let reported = Arc::clone(&progress);
   let result = runtime()
-    .block_on(run(
+    .block_on(Pipeline::run(
       SpatialPipelineOptions::new(
         InputOptions::new(
           input.to_string_lossy(),
@@ -282,7 +282,7 @@ fn assert_partitioned_multiscale_integer_leaves(
   );
 
   runtime()
-    .block_on(run(SpatialPipelineOptions::new(
+    .block_on(Pipeline::run(SpatialPipelineOptions::new(
       InputOptions::new(
         input.to_string_lossy(),
         None,
@@ -338,7 +338,7 @@ fn partitioned_output_combines_row_range_covering_and_compression() {
   );
 
   let result = runtime()
-    .block_on(run(SpatialPipelineOptions::new(
+    .block_on(Pipeline::run(SpatialPipelineOptions::new(
       InputOptions::new(
         input.to_string_lossy(),
         None,
@@ -424,7 +424,7 @@ fn partitioned_output_requires_overwrite_for_existing_destination() {
   std::fs::write(&stale, "stale-parquet").unwrap();
 
   let error = runtime()
-    .block_on(run(SpatialPipelineOptions::new(
+    .block_on(Pipeline::run(SpatialPipelineOptions::new(
       InputOptions::new(
         input.to_string_lossy(),
         None,
@@ -467,7 +467,7 @@ fn partitioned_output_replaces_existing_destination() {
   std::fs::write(output.join("stale-directory/marker.txt"), "stale").unwrap();
 
   let result = runtime()
-    .block_on(run(SpatialPipelineOptions::new(
+    .block_on(Pipeline::run(SpatialPipelineOptions::new(
       InputOptions::new(
         input.to_string_lossy(),
         None,

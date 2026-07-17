@@ -53,6 +53,17 @@ impl ResolvedReprojection {
   pub(crate) fn target_spatial_reference(&self) -> &SpatialReference {
     &self.target_spatial_reference
   }
+
+  pub(crate) fn geometry_expr(&self, geometry_column: &str) -> Result<Option<Expr>> {
+    let Some(source_definition) = self.source_definition.as_ref() else {
+      return Ok(None);
+    };
+    let target_definition = self.target_spatial_reference.definition()?;
+    Ok(Some(
+      ReprojectGeometryUdf::scalar_udf(source_definition.clone(), target_definition)
+        .call(vec![col(geometry_column)]),
+    ))
+  }
 }
 
 #[derive(Debug)]
@@ -89,6 +100,15 @@ impl PreparedTransform {
 struct ReprojectGeometryUdf {
   source_definition: String,
   target_definition: String,
+}
+
+impl ReprojectGeometryUdf {
+  fn scalar_udf(source_definition: String, target_definition: String) -> ScalarUDF {
+    ScalarUDF::new_from_impl(Self {
+      source_definition,
+      target_definition,
+    })
+  }
 }
 
 impl ScalarUDFImpl for ReprojectGeometryUdf {
@@ -132,25 +152,4 @@ impl ScalarUDFImpl for ReprojectGeometryUdf {
     }
     Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
   }
-}
-
-fn reproject_geometry_udf(source_definition: String, target_definition: String) -> ScalarUDF {
-  ScalarUDF::new_from_impl(ReprojectGeometryUdf {
-    source_definition,
-    target_definition,
-  })
-}
-
-pub(crate) fn reproject_geometry_expr(
-  geometry_column: &str,
-  reprojection: &ResolvedReprojection,
-) -> Result<Option<Expr>> {
-  let Some(source_definition) = reprojection.source_definition.as_ref() else {
-    return Ok(None);
-  };
-  let target_definition = reprojection.target_spatial_reference.definition()?;
-  Ok(Some(
-    reproject_geometry_udf(source_definition.clone(), target_definition)
-      .call(vec![col(geometry_column)]),
-  ))
 }

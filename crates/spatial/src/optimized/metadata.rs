@@ -4,11 +4,11 @@ use anyhow::Result;
 use parquet::file::metadata::KeyValue;
 
 use crate::geometry::GeometryKind;
-use crate::geoparquet::{GeoMetadataInput, geo_metadata_entry};
+use crate::geoparquet::{GeoMetadata, GeoMetadataInput};
 use crate::optimized::clustering::{DEFAULT_COORDINATE_PRECISION, DEFAULT_XZ_MAX_LEVEL};
 use crate::optimized::geodisplay_metadata::{
-  GeodisplayMetadata, MultiscaleLevelInput, XzClusteringIndex, XzClusteringIndexInput,
-  ZClusteringIndex, ZClusteringIndexInput, geodisplay_metadata_entry,
+  ClusteringIndexXZ, ClusteringIndexXZInput, ClusteringIndexZ, ClusteringIndexZInput,
+  GeodisplayMetadata, MultiscaleLevelInput,
 };
 use crate::optimized::multiscale::{
   COVERING_BBOX_COLUMN, GEODISPLAY_COLUMN, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN,
@@ -16,17 +16,9 @@ use crate::optimized::multiscale::{
 };
 use crate::optimized::{ClusteringFamily, ResolvedOptimization};
 
-/// Serialize GeoParquet and Geodisplay metadata for optimized output.
-pub(super) fn parquet_metadata(
-  optimization: &ResolvedOptimization,
-  covering: bool,
-) -> Result<Vec<KeyValue>> {
-  optimization.parquet_metadata(covering)
-}
-
 impl ResolvedOptimization {
   /// Serialize GeoParquet and geodisplay metadata for optimized output.
-  pub(super) fn parquet_metadata(&self, covering: bool) -> Result<Vec<KeyValue>> {
+  pub(crate) fn parquet_metadata(&self, covering: bool) -> Result<Vec<KeyValue>> {
     let source_geometry = self
       .source_metadata()
       .geometry
@@ -48,11 +40,11 @@ impl ResolvedOptimization {
     };
     let source_entries = self.source_metadata().passthrough_kv.clone();
     match self.geometry().clustering_family {
-      ClusteringFamily::PointGeometry => optimized_point_metadata(
+      ClusteringFamily::PointGeometry => Self::optimized_point_metadata(
         source_entries,
         geo_metadata,
         GEODISPLAY_COLUMN,
-        ZClusteringIndexInput {
+        ClusteringIndexZInput {
           code: POINT_Z_CODE_COLUMN.to_string(),
           x_column: POINT_X_COLUMN.to_string(),
           y_column: POINT_Y_COLUMN.to_string(),
@@ -66,11 +58,11 @@ impl ResolvedOptimization {
           has_m: self.geometry().has_m,
         },
       ),
-      ClusteringFamily::ComplexGeometry => optimized_xz_metadata(
+      ClusteringFamily::ComplexGeometry => Self::optimized_xz_metadata(
         source_entries,
         geo_metadata,
         GEODISPLAY_COLUMN,
-        XzClusteringIndexInput {
+        ClusteringIndexXZInput {
           code: XZ_CODE_COLUMN.to_string(),
           encoding: self.multiscale_encoding().metadata_identifier().to_string(),
           geometry_type: self.geometry().ty.as_str().to_string(),
@@ -105,47 +97,47 @@ impl ResolvedOptimization {
       crate::geometry::GeometryType::Polygon => GeometryKind::Polygon,
     }
   }
-}
 
-fn optimized_point_metadata(
-  source_entries: Vec<KeyValue>,
-  geo_input: GeoMetadataInput<'_>,
-  field: &str,
-  index_input: ZClusteringIndexInput,
-) -> Result<Vec<KeyValue>> {
-  optimized_metadata(
-    source_entries,
-    geo_input,
-    GeodisplayMetadata::point(field, ZClusteringIndex::new(index_input)),
-  )
-}
+  fn optimized_point_metadata(
+    source_entries: Vec<KeyValue>,
+    geo_input: GeoMetadataInput<'_>,
+    field: &str,
+    index_input: ClusteringIndexZInput,
+  ) -> Result<Vec<KeyValue>> {
+    Self::optimized_metadata(
+      source_entries,
+      geo_input,
+      GeodisplayMetadata::point(field, ClusteringIndexZ::new(index_input)),
+    )
+  }
 
-fn optimized_xz_metadata(
-  source_entries: Vec<KeyValue>,
-  geo_input: GeoMetadataInput<'_>,
-  field: &str,
-  index_input: XzClusteringIndexInput,
-) -> Result<Vec<KeyValue>> {
-  optimized_metadata(
-    source_entries,
-    geo_input,
-    GeodisplayMetadata::xz(field, XzClusteringIndex::new(index_input)),
-  )
-}
+  fn optimized_xz_metadata(
+    source_entries: Vec<KeyValue>,
+    geo_input: GeoMetadataInput<'_>,
+    field: &str,
+    index_input: ClusteringIndexXZInput,
+  ) -> Result<Vec<KeyValue>> {
+    Self::optimized_metadata(
+      source_entries,
+      geo_input,
+      GeodisplayMetadata::xz(field, ClusteringIndexXZ::new(index_input)),
+    )
+  }
 
-fn optimized_metadata(
-  mut source_entries: Vec<KeyValue>,
-  geo_input: GeoMetadataInput<'_>,
-  geodisplay: GeodisplayMetadata,
-) -> Result<Vec<KeyValue>> {
-  replace_metadata_entry(&mut source_entries, geo_metadata_entry(geo_input)?);
-  replace_metadata_entry(&mut source_entries, geodisplay_metadata_entry(&geodisplay)?);
-  Ok(source_entries)
-}
+  fn optimized_metadata(
+    mut source_entries: Vec<KeyValue>,
+    geo_input: GeoMetadataInput<'_>,
+    geodisplay: GeodisplayMetadata,
+  ) -> Result<Vec<KeyValue>> {
+    Self::replace_metadata_entry(&mut source_entries, GeoMetadata::parquet_entry(geo_input)?);
+    Self::replace_metadata_entry(&mut source_entries, geodisplay.parquet_entry()?);
+    Ok(source_entries)
+  }
 
-fn replace_metadata_entry(entries: &mut Vec<KeyValue>, replacement: KeyValue) {
-  entries.retain(|entry| entry.key != replacement.key);
-  entries.push(replacement);
+  fn replace_metadata_entry(entries: &mut Vec<KeyValue>, replacement: KeyValue) {
+    entries.retain(|entry| entry.key != replacement.key);
+    entries.push(replacement);
+  }
 }
 
 #[cfg(test)]

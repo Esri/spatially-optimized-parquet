@@ -68,7 +68,7 @@ impl GeoMetadata {
       .geometry_types
       .iter()
       .copied()
-      .map(|geometry_kind| geoparquet_geometry_type_name(geometry_kind, input.has_z, input.has_m))
+      .map(|geometry_kind| geometry_kind.geoparquet_type_name(input.has_z, input.has_m))
       .collect::<Result<Vec<_>>>()?;
     let column = GeoColumnMetadata {
       encoding: "WKB".to_string(),
@@ -94,24 +94,24 @@ impl GeoMetadata {
       columns: BTreeMap::from([(input.geometry_column.to_string(), column)]),
     })
   }
-}
 
-/// Serialize the GeoParquet metadata entry while preserving non-reserved source entries.
-pub(crate) fn geoparquet_metadata(
-  mut source_entries: Vec<KeyValue>,
-  input: GeoMetadataInput<'_>,
-) -> Result<Vec<KeyValue>> {
-  source_entries.retain(|entry| entry.key != "geo");
-  source_entries.push(geo_metadata_entry(input)?);
-  Ok(source_entries)
-}
+  /// Serialize GeoParquet metadata while preserving non-reserved source entries.
+  pub(crate) fn parquet_entries(
+    mut source_entries: Vec<KeyValue>,
+    input: GeoMetadataInput<'_>,
+  ) -> Result<Vec<KeyValue>> {
+    source_entries.retain(|entry| entry.key != "geo");
+    source_entries.push(Self::parquet_entry(input)?);
+    Ok(source_entries)
+  }
 
-/// Serialize one GeoParquet metadata entry.
-pub(crate) fn geo_metadata_entry(input: GeoMetadataInput<'_>) -> Result<KeyValue> {
-  Ok(KeyValue::new(
-    "geo".to_string(),
-    Some(serde_json::to_string(&GeoMetadata::new(input)?)?),
-  ))
+  /// Serialize one GeoParquet metadata entry.
+  pub(crate) fn parquet_entry(input: GeoMetadataInput<'_>) -> Result<KeyValue> {
+    Ok(KeyValue::new(
+      "geo".to_string(),
+      Some(serde_json::to_string(&Self::new(input)?)?),
+    ))
+  }
 }
 
 impl GeoCovering {
@@ -127,26 +127,24 @@ impl GeoCovering {
   }
 }
 
-fn geoparquet_geometry_type_name(
-  geometry_kind: GeometryKind,
-  has_z: bool,
-  has_m: bool,
-) -> Result<String> {
-  let base = match geometry_kind {
-    GeometryKind::Point => "Point",
-    GeometryKind::LineString => "LineString",
-    GeometryKind::MultiPoint => "MultiPoint",
-    GeometryKind::MultiLineString => "MultiLineString",
-    GeometryKind::Polygon => "Polygon",
-    GeometryKind::MultiPolygon => "MultiPolygon",
-    GeometryKind::GeometryCollection => "GeometryCollection",
-    GeometryKind::Unknown => return Err(anyhow::anyhow!("unsupported geometry kind metadata")),
-  };
-  let suffix = match (has_z, has_m) {
-    (false, false) => "",
-    (true, false) => " Z",
-    (false, true) => " M",
-    (true, true) => " ZM",
-  };
-  Ok(format!("{base}{suffix}"))
+impl GeometryKind {
+  fn geoparquet_type_name(self, has_z: bool, has_m: bool) -> Result<String> {
+    let base = match self {
+      Self::Point => "Point",
+      Self::LineString => "LineString",
+      Self::MultiPoint => "MultiPoint",
+      Self::MultiLineString => "MultiLineString",
+      Self::Polygon => "Polygon",
+      Self::MultiPolygon => "MultiPolygon",
+      Self::GeometryCollection => "GeometryCollection",
+      Self::Unknown => return Err(anyhow::anyhow!("unsupported geometry kind metadata")),
+    };
+    let suffix = match (has_z, has_m) {
+      (false, false) => "",
+      (true, false) => " Z",
+      (false, true) => " M",
+      (true, true) => " ZM",
+    };
+    Ok(format!("{base}{suffix}"))
+  }
 }

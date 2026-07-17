@@ -17,8 +17,8 @@ use datafusion::prelude::col;
 
 use super::MultiscaleEncoding;
 use crate::geometry::{
-  GeometryArray, GeometryType, QuantizationOptions, QuantizedGeometry, quantize_geometry_into,
-  read_geometry, to_datafusion_error,
+  Geometry, GeometryArray, GeometryType, QuantizationOptions, QuantizedGeometry,
+  to_datafusion_error,
 };
 use crate::pipeline::PipelineWarningStore;
 
@@ -32,7 +32,7 @@ use super::{
 ///
 /// Equality and hashing include every encoding parameter because DataFusion uses UDF
 /// identity when comparing and optimizing logical expressions.
-struct ComplexGeometryGeodisplayUdf {
+pub(crate) struct ComplexGeometryGeodisplayUdf {
   ty: GeometryType,
   has_z: bool,
   has_m: bool,
@@ -44,6 +44,28 @@ struct ComplexGeometryGeodisplayUdf {
 }
 
 impl ComplexGeometryGeodisplayUdf {
+  /// Build the geodisplay expression for complex geometry output.
+  pub(crate) fn expression(
+    geometry_column: &str,
+    geometry_type: GeometryType,
+    has_z: bool,
+    has_m: bool,
+    levels: &[MultiscaleLevel],
+    multiscale_encoding: MultiscaleEncoding,
+    warning_store: PipelineWarningStore,
+  ) -> Expr {
+    Self::udf(
+      geometry_type,
+      has_z,
+      has_m,
+      levels.to_vec(),
+      multiscale_encoding,
+      warning_store,
+    )
+    .call(vec![col(geometry_column), col(TEMP_XZ_CODE_COLUMN)])
+    .alias(GEODISPLAY_COLUMN)
+  }
+
   /// Construct stable output fields for the selected geometry type and multiscale levels.
   #[cfg(test)]
   fn new(ty: GeometryType, has_z: bool, has_m: bool, levels: Vec<MultiscaleLevel>) -> Self {
@@ -77,6 +99,7 @@ impl ComplexGeometryGeodisplayUdf {
         true,
       )));
     }
+
     Self {
       ty,
       has_z,
@@ -87,6 +110,41 @@ impl ComplexGeometryGeodisplayUdf {
       dimension_warning_emitted: Arc::new(AtomicBool::new(false)),
       warning_store,
     }
+  }
+
+  fn udf(
+    geometry_type: GeometryType,
+    has_z: bool,
+    has_m: bool,
+    levels: Vec<MultiscaleLevel>,
+    multiscale_encoding: MultiscaleEncoding,
+    warning_store: PipelineWarningStore,
+  ) -> ScalarUDF {
+    ScalarUDF::new_from_impl(Self::new_with_warning_store(
+      geometry_type,
+      has_z,
+      has_m,
+      levels,
+      multiscale_encoding,
+      warning_store,
+    ))
+  }
+
+  fn signature() -> &'static Signature {
+    static SIGNATURE: OnceLock<Signature> = OnceLock::new();
+    SIGNATURE.get_or_init(|| {
+      Signature::one_of(
+        [
+          DataType::Binary,
+          DataType::LargeBinary,
+          DataType::BinaryView,
+        ]
+        .into_iter()
+        .map(|geometry_type| TypeSignature::Exact(vec![geometry_type, DataType::UInt64]))
+        .collect(),
+        Volatility::Immutable,
+      )
+    })
   }
 
   /// Decode each non-null WKB value once and encode every configured multiscale level.
@@ -120,7 +178,7 @@ impl ComplexGeometryGeodisplayUdf {
     for value in geometry.values() {
       match value {
         Some(bytes) => {
-          let geometry = read_geometry(bytes).map_err(to_datafusion_error)?;
+          let geometry = Geometry::from_wkb(bytes).map_err(to_datafusion_error)?;
           if geometry.ty != self.ty {
             return Err(DataFusionError::Execution(format!(
               "WKB geometry type {:?} does not match expected type {:?}",
@@ -150,7 +208,8 @@ impl ComplexGeometryGeodisplayUdf {
             }
           }
           for (writer, options) in level_builders.iter_mut().zip(&quantization_options) {
-            quantize_geometry_into(&geometry, options, &mut quantized_geometry)
+            quantized_geometry
+              .quantize_from(&geometry, options)
               .map_err(to_datafusion_error)?;
             writer
               .append(&quantized_geometry)
@@ -251,7 +310,7 @@ impl ScalarUDFImpl for ComplexGeometryGeodisplayUdf {
   }
 
   fn signature(&self) -> &Signature {
-    multiscale_signature()
+    Self::signature()
   }
 
   fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
@@ -282,13 +341,31 @@ impl ScalarUDFImpl for ComplexGeometryGeodisplayUdf {
 
 #[derive(Debug)]
 /// Packs generated point index columns into the geodisplay struct.
-struct PointGeometryGeodisplayUdf {
+pub(crate) struct PointGeometryGeodisplayUdf {
   has_z: bool,
   has_m: bool,
   signature: Signature,
 }
 
 impl PointGeometryGeodisplayUdf {
+  /// Build the geodisplay expression for generated point index columns.
+  pub(crate) fn expression(has_z: bool, has_m: bool) -> Expr {
+    let mut arguments = vec![
+      datafusion::logical_expr::expr_fn::ident(POINT_Z_CODE_COLUMN),
+      col(POINT_X_COLUMN),
+      col(POINT_Y_COLUMN),
+    ];
+    if has_z {
+      arguments.push(col(POINT_Z_COLUMN));
+    }
+    if has_m {
+      arguments.push(col(POINT_M_COLUMN));
+    }
+    ScalarUDF::new_from_impl(Self::new(has_z, has_m))
+      .call(arguments)
+      .alias(GEODISPLAY_COLUMN)
+  }
+
   fn new(has_z: bool, has_m: bool) -> Self {
     let mut types = vec![DataType::UInt64, DataType::Float64, DataType::Float64];
     types.extend(std::iter::repeat_n(
@@ -300,6 +377,29 @@ impl PointGeometryGeodisplayUdf {
       has_m,
       signature: Signature::exact(types, Volatility::Immutable),
     }
+  }
+
+  fn fields(has_z: bool, has_m: bool) -> Fields {
+    let mut fields = vec![
+      Arc::new(Field::new(POINT_Z_CODE_COLUMN, DataType::UInt64, false)),
+      Arc::new(Field::new(POINT_X_COLUMN, DataType::Float64, false)),
+      Arc::new(Field::new(POINT_Y_COLUMN, DataType::Float64, false)),
+    ];
+    if has_z {
+      fields.push(Arc::new(Field::new(
+        POINT_Z_COLUMN,
+        DataType::Float64,
+        false,
+      )));
+    }
+    if has_m {
+      fields.push(Arc::new(Field::new(
+        POINT_M_COLUMN,
+        DataType::Float64,
+        false,
+      )));
+    }
+    Fields::from(fields)
   }
 }
 
@@ -332,15 +432,13 @@ impl ScalarUDFImpl for PointGeometryGeodisplayUdf {
   }
 
   fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
-    Ok(DataType::Struct(point_geometry_geodisplay_fields(
-      self.has_z, self.has_m,
-    )))
+    Ok(DataType::Struct(Self::fields(self.has_z, self.has_m)))
   }
 
   fn return_field_from_args(&self, _: ReturnFieldArgs) -> DataFusionResult<FieldRef> {
     Ok(Arc::new(Field::new(
       self.name(),
-      DataType::Struct(point_geometry_geodisplay_fields(self.has_z, self.has_m)),
+      DataType::Struct(Self::fields(self.has_z, self.has_m)),
       true,
     )))
   }
@@ -381,110 +479,10 @@ impl ScalarUDFImpl for PointGeometryGeodisplayUdf {
       let m = as_float64_array(arrays[argument_index].as_ref())?;
       columns.push(Arc::new(Float64Array::new(m.values().clone(), None)));
     }
-    let output = StructArray::try_new(
-      point_geometry_geodisplay_fields(self.has_z, self.has_m),
-      columns,
-      nulls,
-    )
-    .map_err(to_datafusion_error)?;
+    let output = StructArray::try_new(Self::fields(self.has_z, self.has_m), columns, nulls)
+      .map_err(to_datafusion_error)?;
     Ok(ColumnarValue::Array(Arc::new(output)))
   }
-}
-
-fn point_geometry_geodisplay_fields(has_z: bool, has_m: bool) -> Fields {
-  let mut fields = vec![
-    Arc::new(Field::new(POINT_Z_CODE_COLUMN, DataType::UInt64, false)),
-    Arc::new(Field::new(POINT_X_COLUMN, DataType::Float64, false)),
-    Arc::new(Field::new(POINT_Y_COLUMN, DataType::Float64, false)),
-  ];
-  if has_z {
-    fields.push(Arc::new(Field::new(
-      POINT_Z_COLUMN,
-      DataType::Float64,
-      false,
-    )));
-  }
-  if has_m {
-    fields.push(Arc::new(Field::new(
-      POINT_M_COLUMN,
-      DataType::Float64,
-      false,
-    )));
-  }
-  Fields::from(fields)
-}
-
-fn complex_geometry_geodisplay_udf(
-  geometry_type: GeometryType,
-  has_z: bool,
-  has_m: bool,
-  levels: Vec<MultiscaleLevel>,
-  multiscale_encoding: MultiscaleEncoding,
-  warning_store: PipelineWarningStore,
-) -> ScalarUDF {
-  ScalarUDF::new_from_impl(ComplexGeometryGeodisplayUdf::new_with_warning_store(
-    geometry_type,
-    has_z,
-    has_m,
-    levels,
-    multiscale_encoding,
-    warning_store,
-  ))
-}
-
-fn multiscale_signature() -> &'static Signature {
-  static SIGNATURE: OnceLock<Signature> = OnceLock::new();
-  SIGNATURE.get_or_init(|| {
-    Signature::one_of(
-      [
-        DataType::Binary,
-        DataType::LargeBinary,
-        DataType::BinaryView,
-      ]
-      .into_iter()
-      .map(|geometry_type| TypeSignature::Exact(vec![geometry_type, DataType::UInt64]))
-      .collect(),
-      Volatility::Immutable,
-    )
-  })
-}
-
-pub(crate) fn complex_geometry_geodisplay_expr(
-  geometry_column: &str,
-  geometry_type: GeometryType,
-  has_z: bool,
-  has_m: bool,
-  levels: &[MultiscaleLevel],
-  multiscale_encoding: MultiscaleEncoding,
-  warning_store: PipelineWarningStore,
-) -> Expr {
-  complex_geometry_geodisplay_udf(
-    geometry_type,
-    has_z,
-    has_m,
-    levels.to_vec(),
-    multiscale_encoding,
-    warning_store,
-  )
-  .call(vec![col(geometry_column), col(TEMP_XZ_CODE_COLUMN)])
-  .alias(GEODISPLAY_COLUMN)
-}
-
-pub(crate) fn point_geometry_geodisplay_expr(has_z: bool, has_m: bool) -> Expr {
-  let mut arguments = vec![
-    datafusion::logical_expr::expr_fn::ident(POINT_Z_CODE_COLUMN),
-    col(POINT_X_COLUMN),
-    col(POINT_Y_COLUMN),
-  ];
-  if has_z {
-    arguments.push(col(POINT_Z_COLUMN));
-  }
-  if has_m {
-    arguments.push(col(POINT_M_COLUMN));
-  }
-  ScalarUDF::new_from_impl(PointGeometryGeodisplayUdf::new(has_z, has_m))
-    .call(arguments)
-    .alias(GEODISPLAY_COLUMN)
 }
 
 #[cfg(test)]
@@ -494,8 +492,8 @@ mod tests {
 
   use arrow_array::{BinaryArray, Int64Array, ListArray};
 
-  use crate::geometry::decode_pbf_geometry;
-  use crate::optimized::multiscale::create_multiscale_levels;
+  use crate::geometry::PbfGeometry;
+  use crate::optimized::multiscale::MultiscaleLevel;
 
   use super::*;
 
@@ -522,7 +520,7 @@ mod tests {
   }
 
   fn assert_encoding_parameter_changes_identity(mutate: impl FnOnce(&mut MultiscaleLevel)) {
-    let levels = create_multiscale_levels(
+    let levels = MultiscaleLevel::create_all(
       crate::geoparquet::DEFAULT_OUTPUT_WKID,
       GeometryType::Polygon,
     )
@@ -565,7 +563,7 @@ mod tests {
 
   #[test]
   fn identity_includes_geometry_type_encoding_order_and_count() {
-    let levels = create_multiscale_levels(
+    let levels = MultiscaleLevel::create_all(
       crate::geoparquet::DEFAULT_OUTPUT_WKID,
       GeometryType::Polygon,
     )
@@ -598,7 +596,7 @@ mod tests {
 
   #[test]
   fn missing_m_values_are_encoded_as_zero_for_output_zm() {
-    let levels = create_multiscale_levels(
+    let levels = MultiscaleLevel::create_all(
       crate::geoparquet::DEFAULT_OUTPUT_WKID,
       GeometryType::Polyline,
     )
@@ -625,7 +623,7 @@ mod tests {
       .as_any()
       .downcast_ref::<BinaryArray>()
       .expect("binary geometry");
-    let decoded = decode_pbf_geometry(encoded.value(0)).expect("decoded geometry");
+    let decoded = PbfGeometry::from_bytes(encoded.value(0)).expect("decoded geometry");
 
     assert_eq!(decoded.coords.len(), 8);
     assert_eq!(decoded.coords[3], 0);
@@ -635,7 +633,7 @@ mod tests {
 
   #[test]
   fn missing_m_values_are_null_for_native_output_zm() {
-    let levels = create_multiscale_levels(
+    let levels = MultiscaleLevel::create_all(
       crate::geoparquet::DEFAULT_OUTPUT_WKID,
       GeometryType::Polyline,
     )

@@ -24,14 +24,56 @@ pub(crate) enum NativeGeometryArrayBuilder {
 }
 
 impl NativeGeometryArrayBuilder {
+  pub(crate) fn data_type(geometry_type: GeometryType, has_z: bool, has_m: bool) -> DataType {
+    let coordinate_type = Self::coordinate_data_type(has_z, has_m);
+    let coordinate_list = DataType::List(Arc::new(Field::new("element", coordinate_type, false)));
+    match geometry_type {
+      GeometryType::MultiPoint => coordinate_list,
+      GeometryType::Polyline | GeometryType::Polygon => {
+        DataType::List(Arc::new(Field::new("element", coordinate_list, false)))
+      }
+      GeometryType::Point => unreachable!("points do not use multiscale geometry"),
+    }
+  }
+
+  pub(crate) fn coordinate_column_paths(
+    parent_column: &str,
+    level_columns: &[String],
+    geometry_type: GeometryType,
+    has_z: bool,
+    has_m: bool,
+  ) -> Vec<String> {
+    let nesting = match geometry_type {
+      GeometryType::MultiPoint => "list.element",
+      GeometryType::Polyline | GeometryType::Polygon => "list.element.list.element",
+      GeometryType::Point => return Vec::new(),
+    };
+    let mut components = vec!["x", "y"];
+    if has_z {
+      components.push("z");
+    }
+    if has_m {
+      components.push("m");
+    }
+    level_columns
+      .iter()
+      .flat_map(|level_column| {
+        components
+          .iter()
+          .map(move |component| format!("{parent_column}.{level_column}.{nesting}.{component}"))
+      })
+      .collect()
+  }
+
   pub(crate) fn new(
     geometry_type: GeometryType,
     has_z: bool,
     has_m: bool,
     capacity: usize,
   ) -> Self {
-    let coordinate_type = coordinate_data_type(has_z, has_m);
-    let coordinate_builder = StructBuilder::from_fields(coordinate_fields(has_z, has_m), capacity);
+    let coordinate_type = Self::coordinate_data_type(has_z, has_m);
+    let coordinate_builder =
+      StructBuilder::from_fields(Self::coordinate_fields(has_z, has_m), capacity);
     let point_builder = ListBuilder::with_capacity(coordinate_builder, capacity).with_field(
       Arc::new(Field::new("element", coordinate_type.clone(), false)),
     );
@@ -59,7 +101,7 @@ impl NativeGeometryArrayBuilder {
     let stride = coordinate_stride(has_z, has_m);
     match self {
       Self::MultiPoint(builder) => {
-        append_coordinates(builder.values(), coordinates, has_z, has_m, validity, 0);
+        Self::append_coordinates(builder.values(), coordinates, has_z, has_m, validity, 0);
         builder.append(true);
       }
 
@@ -67,7 +109,7 @@ impl NativeGeometryArrayBuilder {
         let mut coordinate_offset = 0usize;
         for &length in lengths {
           let value_count = length as usize * stride;
-          append_coordinates(
+          Self::append_coordinates(
             builder.values().values(),
             &coordinates[coordinate_offset..coordinate_offset + value_count],
             has_z,
@@ -81,6 +123,24 @@ impl NativeGeometryArrayBuilder {
         builder.append(true);
       }
     }
+  }
+
+  fn coordinate_data_type(has_z: bool, has_m: bool) -> DataType {
+    DataType::Struct(Self::coordinate_fields(has_z, has_m))
+  }
+
+  fn coordinate_fields(has_z: bool, has_m: bool) -> Fields {
+    let mut fields = vec![
+      Arc::new(Field::new("x", DataType::Int64, false)),
+      Arc::new(Field::new("y", DataType::Int64, false)),
+    ];
+    if has_z {
+      fields.push(Arc::new(Field::new("z", DataType::Int64, true)));
+    }
+    if has_m {
+      fields.push(Arc::new(Field::new("m", DataType::Int64, true)));
+    }
+    Fields::from(fields)
   }
 
   pub(crate) fn append_quantized_geometry(&mut self, geometry: &QuantizedGeometry) {
@@ -106,113 +166,50 @@ impl NativeGeometryArrayBuilder {
       Self::Multipart(builder) => Arc::new(builder.finish()),
     }
   }
-}
 
-pub(crate) fn native_geometry_data_type(
-  geometry_type: GeometryType,
-  has_z: bool,
-  has_m: bool,
-) -> DataType {
-  let coordinate_type = coordinate_data_type(has_z, has_m);
-  let coordinate_list = DataType::List(Arc::new(Field::new("element", coordinate_type, false)));
-  match geometry_type {
-    GeometryType::MultiPoint => coordinate_list,
-    GeometryType::Polyline | GeometryType::Polygon => {
-      DataType::List(Arc::new(Field::new("element", coordinate_list, false)))
-    }
-    GeometryType::Point => unreachable!("points do not use multiscale geometry"),
-  }
-}
-
-pub(crate) fn native_coordinate_column_paths(
-  parent_column: &str,
-  level_columns: &[String],
-  geometry_type: GeometryType,
-  has_z: bool,
-  has_m: bool,
-) -> Vec<String> {
-  let nesting = match geometry_type {
-    GeometryType::MultiPoint => "list.element",
-    GeometryType::Polyline | GeometryType::Polygon => "list.element.list.element",
-    GeometryType::Point => return Vec::new(),
-  };
-  let mut components = vec!["x", "y"];
-  if has_z {
-    components.push("z");
-  }
-  if has_m {
-    components.push("m");
-  }
-  level_columns
-    .iter()
-    .flat_map(|level_column| {
-      components
-        .iter()
-        .map(move |component| format!("{parent_column}.{level_column}.{nesting}.{component}",))
-    })
-    .collect()
-}
-
-fn coordinate_data_type(has_z: bool, has_m: bool) -> DataType {
-  DataType::Struct(coordinate_fields(has_z, has_m))
-}
-
-fn coordinate_fields(has_z: bool, has_m: bool) -> Fields {
-  let mut fields = vec![
-    Arc::new(Field::new("x", DataType::Int64, false)),
-    Arc::new(Field::new("y", DataType::Int64, false)),
-  ];
-  if has_z {
-    fields.push(Arc::new(Field::new("z", DataType::Int64, true)));
-  }
-  if has_m {
-    fields.push(Arc::new(Field::new("m", DataType::Int64, true)));
-  }
-  Fields::from(fields)
-}
-
-fn append_coordinates(
-  builder: &mut CoordinateBuilder,
-  coordinates: &[i64],
-  has_z: bool,
-  has_m: bool,
-  validity: &ComponentValidity,
-  coordinate_index_offset: usize,
-) {
-  let stride = coordinate_stride(has_z, has_m);
-  for (local_coordinate_index, coordinate) in coordinates.chunks_exact(stride).enumerate() {
-    let coordinate_index = coordinate_index_offset + local_coordinate_index;
-    builder
-      .field_builder::<Int64Builder>(0)
-      .expect("x coordinate builder")
-      .append_value(coordinate[0]);
-    builder
-      .field_builder::<Int64Builder>(1)
-      .expect("y coordinate builder")
-      .append_value(coordinate[1]);
-    let mut component_index = 2;
-    if has_z {
-      let builder = builder
-        .field_builder::<Int64Builder>(component_index)
-        .expect("z coordinate builder");
-      if validity.z_is_valid(coordinate_index) {
-        builder.append_value(coordinate[component_index]);
-      } else {
-        builder.append_null();
+  fn append_coordinates(
+    builder: &mut CoordinateBuilder,
+    coordinates: &[i64],
+    has_z: bool,
+    has_m: bool,
+    validity: &ComponentValidity,
+    coordinate_index_offset: usize,
+  ) {
+    let stride = coordinate_stride(has_z, has_m);
+    for (local_coordinate_index, coordinate) in coordinates.chunks_exact(stride).enumerate() {
+      let coordinate_index = coordinate_index_offset + local_coordinate_index;
+      builder
+        .field_builder::<Int64Builder>(0)
+        .expect("x coordinate builder")
+        .append_value(coordinate[0]);
+      builder
+        .field_builder::<Int64Builder>(1)
+        .expect("y coordinate builder")
+        .append_value(coordinate[1]);
+      let mut component_index = 2;
+      if has_z {
+        let builder = builder
+          .field_builder::<Int64Builder>(component_index)
+          .expect("z coordinate builder");
+        if validity.z_is_valid(coordinate_index) {
+          builder.append_value(coordinate[component_index]);
+        } else {
+          builder.append_null();
+        }
+        component_index += 1;
       }
-      component_index += 1;
-    }
-    if has_m {
-      let builder = builder
-        .field_builder::<Int64Builder>(component_index)
-        .expect("m coordinate builder");
-      if validity.m_is_valid(coordinate_index) {
-        builder.append_value(coordinate[component_index]);
-      } else {
-        builder.append_null();
+      if has_m {
+        let builder = builder
+          .field_builder::<Int64Builder>(component_index)
+          .expect("m coordinate builder");
+        if validity.m_is_valid(coordinate_index) {
+          builder.append_value(coordinate[component_index]);
+        } else {
+          builder.append_null();
+        }
       }
+      builder.append(true);
     }
-    builder.append(true);
   }
 }
 

@@ -1,170 +1,170 @@
 use arrow_array::Array;
 use arrow_schema::DataType;
 
-use crate::geometry::read_wkb_point_coordinate;
-use crate::optimized::ZClusteringIndex;
-use crate::optimized::point_z_code;
+use crate::geometry::WkbCoordinate;
+use crate::optimized::ClusterKey;
+use crate::optimized::ClusteringIndexZ;
 use crate::parquet_dataset::PartitionFamily;
 
-use super::geometry::{binary_value, inspect_wkb_geometry, validate_geometry_inspection};
-use super::metadata::{ValidatedMetadata, float_matches};
+use super::geometry::GeometryInspection;
+use super::metadata::ValidatedMetadata;
 use super::multifile::FileCodeRange;
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
-use super::structure::{
-  LoadedDatasetFile, array_at_path, display_column_path, field_at_path, float64_array_at_path,
-  read_row_groups, uint64_array_at_path,
-};
+use super::structure::LoadedDatasetFile;
 
-pub(crate) fn validate_z_schema(
-  file: &LoadedDatasetFile,
-  parent_column: Option<&str>,
-  index: &ZClusteringIndex,
-  report: &mut ValidationReport,
-) {
-  validate_required_field(
-    file,
-    &display_column_path(parent_column, &index.code),
-    &DataType::UInt64,
-    false,
-    report,
-  );
-  validate_required_field(
-    file,
-    &display_column_path(parent_column, &index.x_column),
-    &DataType::Float64,
-    false,
-    report,
-  );
-  validate_required_field(
-    file,
-    &display_column_path(parent_column, &index.y_column),
-    &DataType::Float64,
-    false,
-    report,
-  );
-  validate_dimension_field(
-    file,
-    index
+impl ClusteringIndexZ {
+  pub(crate) fn validate_schema(
+    &self,
+    file: &LoadedDatasetFile,
+    parent_column: Option<&str>,
+    report: &mut ValidationReport,
+  ) {
+    Self::validate_required_field(
+      file,
+      &LoadedDatasetFile::display_column_path(parent_column, &self.code),
+      &DataType::UInt64,
+      false,
+      report,
+    );
+    Self::validate_required_field(
+      file,
+      &LoadedDatasetFile::display_column_path(parent_column, &self.x_column),
+      &DataType::Float64,
+      false,
+      report,
+    );
+    Self::validate_required_field(
+      file,
+      &LoadedDatasetFile::display_column_path(parent_column, &self.y_column),
+      &DataType::Float64,
+      false,
+      report,
+    );
+    Self::validate_dimension_field(
+      file,
+      self
+        .z_column
+        .as_deref()
+        .map(|column| LoadedDatasetFile::display_column_path(parent_column, column)),
+      self.has_z,
+      "zColumn",
+      report,
+    );
+    Self::validate_dimension_field(
+      file,
+      self
+        .m_column
+        .as_deref()
+        .map(|column| LoadedDatasetFile::display_column_path(parent_column, column)),
+      self.has_m,
+      "mColumn",
+      report,
+    );
+  }
+
+  fn validate_required_field(
+    file: &LoadedDatasetFile,
+    path: &str,
+    expected_type: &DataType,
+    nullable: bool,
+    report: &mut ValidationReport,
+  ) {
+    let location =
+      ValidationLocation::file(file.file.relative_path.clone()).with_column(path.to_string());
+    match LoadedDatasetFile::field_at_path(file.metadata.schema().as_ref(), path) {
+      Some(field) if field.data_type() == expected_type && field.is_nullable() == nullable => {}
+      Some(field) => report.push(
+        ValidationRule::ZSchema,
+        ValidationSeverity::Error,
+        location,
+        format!(
+          "Z column must be {expected_type} with nullable={nullable}, found {} with nullable={}",
+          field.data_type(),
+          field.is_nullable()
+        ),
+      ),
+      None => report.push(
+        ValidationRule::ZSchema,
+        ValidationSeverity::Error,
+        location,
+        "required Z column is missing",
+      ),
+    }
+  }
+
+  fn validate_dimension_field(
+    file: &LoadedDatasetFile,
+    path: Option<String>,
+    required: bool,
+    metadata_name: &str,
+    report: &mut ValidationReport,
+  ) {
+    match (path, required) {
+      (Some(path), true) => {
+        Self::validate_required_field(file, &path, &DataType::Float64, false, report)
+      }
+      (Some(_), false) => report.push(
+        ValidationRule::ZSchema,
+        ValidationSeverity::Error,
+        ValidationLocation::file(file.file.relative_path.clone())
+          .with_column(format!("geodisplay.{metadata_name}")),
+        format!("{metadata_name} must be absent when its dimension flag is false"),
+      ),
+      (None, true) => report.push(
+        ValidationRule::ZSchema,
+        ValidationSeverity::Error,
+        ValidationLocation::file(file.file.relative_path.clone())
+          .with_column(format!("geodisplay.{metadata_name}")),
+        format!("{metadata_name} is required when its dimension flag is true"),
+      ),
+      (None, false) => {}
+    }
+  }
+
+  pub(crate) fn validate_file(
+    &self,
+    file: &LoadedDatasetFile,
+    contract: &ValidatedMetadata,
+    parent_column: Option<&str>,
+    report: &mut ValidationReport,
+  ) -> Option<FileCodeRange> {
+    let code_path = LoadedDatasetFile::display_column_path(parent_column, &self.code);
+    let x_path = LoadedDatasetFile::display_column_path(parent_column, &self.x_column);
+    let y_path = LoadedDatasetFile::display_column_path(parent_column, &self.y_column);
+    let z_path = self
       .z_column
       .as_deref()
-      .map(|column| display_column_path(parent_column, column)),
-    index.has_z,
-    "zColumn",
-    report,
-  );
-  validate_dimension_field(
-    file,
-    index
+      .map(|column| LoadedDatasetFile::display_column_path(parent_column, column));
+    let m_path = self
       .m_column
       .as_deref()
-      .map(|column| display_column_path(parent_column, column)),
-    index.has_m,
-    "mColumn",
-    report,
-  );
-}
-
-fn validate_required_field(
-  file: &LoadedDatasetFile,
-  path: &str,
-  expected_type: &DataType,
-  nullable: bool,
-  report: &mut ValidationReport,
-) {
-  let location =
-    ValidationLocation::file(file.file.relative_path.clone()).with_column(path.to_string());
-  match field_at_path(file.metadata.schema().as_ref(), path) {
-    Some(field) if field.data_type() == expected_type && field.is_nullable() == nullable => {}
-    Some(field) => report.push(
-      ValidationRule::ZSchema,
-      ValidationSeverity::Error,
-      location,
-      format!(
-        "Z column must be {expected_type} with nullable={nullable}, found {} with nullable={}",
-        field.data_type(),
-        field.is_nullable()
-      ),
-    ),
-    None => report.push(
-      ValidationRule::ZSchema,
-      ValidationSeverity::Error,
-      location,
-      "required Z column is missing",
-    ),
-  }
-}
-
-fn validate_dimension_field(
-  file: &LoadedDatasetFile,
-  path: Option<String>,
-  required: bool,
-  metadata_name: &str,
-  report: &mut ValidationReport,
-) {
-  match (path, required) {
-    (Some(path), true) => validate_required_field(file, &path, &DataType::Float64, false, report),
-    (Some(_), false) => report.push(
-      ValidationRule::ZSchema,
-      ValidationSeverity::Error,
-      ValidationLocation::file(file.file.relative_path.clone())
-        .with_column(format!("geodisplay.{metadata_name}")),
-      format!("{metadata_name} must be absent when its dimension flag is false"),
-    ),
-    (None, true) => report.push(
-      ValidationRule::ZSchema,
-      ValidationSeverity::Error,
-      ValidationLocation::file(file.file.relative_path.clone())
-        .with_column(format!("geodisplay.{metadata_name}")),
-      format!("{metadata_name} is required when its dimension flag is true"),
-    ),
-    (None, false) => {}
-  }
-}
-
-pub(crate) fn validate_z_file(
-  file: &LoadedDatasetFile,
-  contract: &ValidatedMetadata,
-  parent_column: Option<&str>,
-  index: &ZClusteringIndex,
-  report: &mut ValidationReport,
-) -> Option<FileCodeRange> {
-  let code_path = display_column_path(parent_column, &index.code);
-  let x_path = display_column_path(parent_column, &index.x_column);
-  let y_path = display_column_path(parent_column, &index.y_column);
-  let z_path = index
-    .z_column
-    .as_deref()
-    .map(|column| display_column_path(parent_column, column));
-  let m_path = index
-    .m_column
-    .as_deref()
-    .map(|column| display_column_path(parent_column, column));
-  let projected_columns = [
-    contract.geometry_column().to_string(),
-    code_path.clone(),
-    x_path.clone(),
-    y_path.clone(),
-  ]
-  .into_iter()
-  .chain(z_path.iter().cloned())
-  .chain(m_path.iter().cloned())
-  .collect::<Vec<_>>();
-  let mut previous_code = None;
-  let mut minimum = None::<u64>;
-  let mut maximum = None::<u64>;
-  let mut sampled_geometry_count = 0usize;
-  let read_result = read_row_groups(file, &projected_columns, |row_group, row_offset, batch| {
-    let geometry = array_at_path(batch, contract.geometry_column())?;
-    let x_values = float64_array_at_path(batch, &x_path)?;
-    let y_values = float64_array_at_path(batch, &y_path)?;
-    let code_values = uint64_array_at_path(batch, &code_path)?;
+      .map(|column| LoadedDatasetFile::display_column_path(parent_column, column));
+    let projected_columns = [
+      contract.geometry_column().to_string(),
+      code_path.clone(),
+      x_path.clone(),
+      y_path.clone(),
+    ]
+    .into_iter()
+    .chain(z_path.iter().cloned())
+    .chain(m_path.iter().cloned())
+    .collect::<Vec<_>>();
+    let mut previous_code = None;
+    let mut minimum = None::<u64>;
+    let mut maximum = None::<u64>;
+    let mut sampled_geometry_count = 0usize;
+    let read_result = file.read_row_groups(&projected_columns, |row_group, row_offset, batch| {
+    let geometry = LoadedDatasetFile::array_at_path(batch, contract.geometry_column())?;
+    let x_values = LoadedDatasetFile::float64_array_at_path(batch, &x_path)?;
+    let y_values = LoadedDatasetFile::float64_array_at_path(batch, &y_path)?;
+    let code_values = LoadedDatasetFile::uint64_array_at_path(batch, &code_path)?;
     let z_values = z_path
       .as_deref()
-      .map(|path| float64_array_at_path(batch, path))
+      .map(|path| LoadedDatasetFile::float64_array_at_path(batch, path))
       .transpose()?;
     let m_values = m_path
       .as_deref()
-      .map(|path| float64_array_at_path(batch, path))
+      .map(|path| LoadedDatasetFile::float64_array_at_path(batch, path))
       .transpose()?;
 
     for row_index in 0..batch.num_rows() {
@@ -241,7 +241,7 @@ pub(crate) fn validate_z_file(
         continue;
       }
       sampled_geometry_count += 1;
-      let bytes = match binary_value(geometry, row_index) {
+      let bytes = match GeometryInspection::binary_value(geometry, row_index) {
         Ok(Some(bytes)) => bytes,
         Ok(None) => continue,
         Err(error) => {
@@ -258,7 +258,7 @@ pub(crate) fn validate_z_file(
         .with_row_group(row_group)
         .with_row(row)
         .with_column(contract.geometry_column().to_string());
-      let inspection = match inspect_wkb_geometry(&bytes) {
+      let inspection = match GeometryInspection::inspect(&bytes) {
         Ok(inspection) => inspection,
         Err(error) => {
           report.push(
@@ -278,15 +278,14 @@ pub(crate) fn validate_z_file(
           continue;
         }
       };
-      validate_geometry_inspection(
-        &inspection,
+      inspection.validate(
         "point",
-        index.has_z,
-        index.has_m,
+        self.has_z,
+        self.has_m,
         geometry_location,
         report,
       );
-      let Ok(geometry_coordinate) = read_wkb_point_coordinate(&bytes) else {
+      let Ok(geometry_coordinate) = WkbCoordinate::from_point_wkb(&bytes) else {
         continue;
       };
       let geometry_x = geometry_coordinate.x;
@@ -296,8 +295,8 @@ pub(crate) fn validate_z_file(
       };
       if !x.is_finite()
         || !y.is_finite()
-        || !float_matches(x, geometry_x)
-        || !float_matches(y, geometry_y)
+        || !ValidatedMetadata::float_matches(x, geometry_x)
+        || !ValidatedMetadata::float_matches(y, geometry_y)
       {
         report.push(
           ValidationRule::ZCoordinate,
@@ -326,11 +325,11 @@ pub(crate) fn validate_z_file(
         file,
         report,
       );
-      let expected_code = point_z_code(
-        index.full_extent,
+      let expected_code = ClusterKey::from_z_coordinates(
+        self.full_extent,
         geometry_x,
         geometry_y,
-        index.coordinate_precision,
+        self.coordinate_precision,
       )
       .value();
       if code != expected_code {
@@ -357,7 +356,7 @@ pub(crate) fn validate_z_file(
           return;
         };
         if (geometry_value.is_nan() && column_value.is_nan())
-          || float_matches(geometry_value, column_value)
+          || ValidatedMetadata::float_matches(geometry_value, column_value)
         {
           return;
         }
@@ -376,23 +375,24 @@ pub(crate) fn validate_z_file(
     }
     Ok(())
   });
-  if let Err(error) = read_result {
-    report.push(
-      ValidationRule::RowGroup,
-      ValidationSeverity::Error,
-      ValidationLocation::file(file.file.relative_path.clone()),
-      error.to_string(),
-    );
-  }
+    if let Err(error) = read_result {
+      report.push(
+        ValidationRule::RowGroup,
+        ValidationSeverity::Error,
+        ValidationLocation::file(file.file.relative_path.clone()),
+        error.to_string(),
+      );
+    }
 
-  match (minimum, maximum) {
-    (Some(minimum), Some(maximum)) => Some(FileCodeRange {
-      file: file.file.relative_path.clone(),
-      family: PartitionFamily::Z,
-      minimum,
-      maximum,
-      partition: file.file.partition,
-    }),
-    _ => None,
+    match (minimum, maximum) {
+      (Some(minimum), Some(maximum)) => Some(FileCodeRange {
+        file: file.file.relative_path.clone(),
+        family: PartitionFamily::Z,
+        minimum,
+        maximum,
+        partition: file.file.partition,
+      }),
+      _ => None,
+    }
   }
 }

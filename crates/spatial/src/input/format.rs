@@ -43,36 +43,35 @@ impl fmt::Display for SourceFormat {
   }
 }
 
-/// Resolve an input format from an override, directory, local extension, or URL path.
-pub(crate) fn resolve_source_format(
-  location: &str,
-  explicit_format: Option<SourceFormat>,
-) -> Result<SourceFormat> {
-  if let Some(explicit_format) = explicit_format {
-    return Ok(explicit_format);
-  }
+impl SourceFormat {
+  /// Resolve an input format from an override, directory, local extension, or URL path.
+  pub(crate) fn resolve(location: &str, explicit_format: Option<Self>) -> Result<Self> {
+    if let Some(explicit_format) = explicit_format {
+      return Ok(explicit_format);
+    }
 
-  if !is_http_location(location) && Path::new(location).is_dir() {
-    return Ok(SourceFormat::Parquet);
-  }
+    if !is_http_location(location) && Path::new(location).is_dir() {
+      return Ok(Self::Parquet);
+    }
 
-  let extension = if is_http_location(location) {
-    let url = Url::parse(location).with_context(|| format!("parse input URL: {location}"))?;
-    Path::new(url.path())
-      .extension()
-      .map(|extension| extension.to_string_lossy().into_owned())
-  } else {
-    Path::new(location)
-      .extension()
-      .map(|extension| extension.to_string_lossy().into_owned())
-  };
+    let extension = if is_http_location(location) {
+      let url = Url::parse(location).with_context(|| format!("parse input URL: {location}"))?;
+      Path::new(url.path())
+        .extension()
+        .map(|extension| extension.to_string_lossy().into_owned())
+    } else {
+      Path::new(location)
+        .extension()
+        .map(|extension| extension.to_string_lossy().into_owned())
+    };
 
-  match extension.as_deref().map(str::to_ascii_lowercase).as_deref() {
-    Some("gpkg") => Ok(SourceFormat::GeoPackage),
-    Some("parquet") => Ok(SourceFormat::Parquet),
-    _ => bail!(
-      "unable to determine input format for '{location}'; pass --input-format gpkg or --input-format parquet"
-    ),
+    match extension.as_deref().map(str::to_ascii_lowercase).as_deref() {
+      Some("gpkg") => Ok(Self::GeoPackage),
+      Some("parquet") => Ok(Self::Parquet),
+      _ => bail!(
+        "unable to determine input format for '{location}'; pass --input-format gpkg or --input-format parquet"
+      ),
+    }
   }
 }
 
@@ -83,7 +82,7 @@ mod tests {
   #[test]
   fn explicit_format_wins_over_extension() {
     assert_eq!(
-      resolve_source_format("data.gpkg", Some(SourceFormat::Parquet)).unwrap(),
+      SourceFormat::resolve("data.gpkg", Some(SourceFormat::Parquet)).unwrap(),
       SourceFormat::Parquet
     );
   }
@@ -91,14 +90,14 @@ mod tests {
   #[test]
   fn resolves_url_path_without_query_string() {
     assert_eq!(
-      resolve_source_format("https://example.com/data.parquet?token=value", None).unwrap(),
+      SourceFormat::resolve("https://example.com/data.parquet?token=value", None).unwrap(),
       SourceFormat::Parquet
     );
   }
 
   #[test]
   fn unknown_location_requires_override() {
-    let error = resolve_source_format("data.current", None).unwrap_err();
+    let error = SourceFormat::resolve("data.current", None).unwrap_err();
     assert!(error.to_string().contains("--input-format"));
   }
 }

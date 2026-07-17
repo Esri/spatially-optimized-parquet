@@ -35,161 +35,159 @@ pub(super) struct GpkgBatchReader {
   remaining: Option<usize>,
 }
 
-/// Load the normalized Arrow schema without consuming feature batches.
-pub(super) fn load_schema(
-  path: &Path,
-  layer_name: &str,
-  geometry_column: &str,
-) -> Result<SchemaRef> {
-  let arrow_reader = open_arrow_reader(path, layer_name, None)?;
-  Ok(normalize_schema(
-    arrow_reader.reader.schema(),
-    geometry_column,
-  ))
-}
-
-/// Open a GDAL Arrow stream while retaining the layer that owns its lifetime.
-fn open_arrow_reader(
-  path: &Path,
-  layer_name: &str,
-  attribute_filter: Option<&str>,
-) -> Result<GpkgArrowReader> {
-  let mut layer = open_gpkg_layer(path, layer_name)?;
-  if let Some(attribute_filter) = attribute_filter {
-    layer
-      .set_attribute_filter(attribute_filter)
-      .with_context(|| {
-        format!("failed to apply GeoPackage attribute filter {attribute_filter:?}")
-      })?;
-  }
-  let options = CslStringList::from_iter(["INCLUDE_FID=NO", "GEOMETRY_ENCODING=WKB"]);
-  let mut stream = FFI_ArrowArrayStream::empty();
-  unsafe {
-    layer.read_arrow_stream(
-      (&mut stream as *mut FFI_ArrowArrayStream).cast::<ArrowArrayStream>(),
-      &options,
-    )
-  }
-  .with_context(|| format!("failed to open Arrow stream for GeoPackage layer {layer_name}"))?;
-  let reader = ArrowArrayStreamReader::try_new(stream)
-    .with_context(|| format!("failed to create Arrow reader for GeoPackage layer {layer_name}"))?;
-  Ok(GpkgArrowReader {
-    _layer: layer,
-    reader,
-  })
-}
-
-/// Retain the GDAL layer owner alongside its Arrow reader for the stream lifetime.
-pub(super) fn open_gpkg_batch_reader(
-  input_path: &Path,
-  layer_name: &str,
-  schema: SchemaRef,
-  attribute_filter: Option<&str>,
-  limit: Option<usize>,
-) -> Result<GpkgBatchReader> {
-  Ok(GpkgBatchReader {
-    arrow_reader: open_arrow_reader(input_path, layer_name, attribute_filter)?,
-    schema,
-    remaining: limit,
-  })
-}
-
-/// Convert a stateful GDAL Arrow reader into a fallible asynchronous batch stream.
-pub(super) fn batch_stream(
-  state: GpkgBatchReader,
-) -> impl futures_util::Stream<Item = Result<RecordBatch>> + Send + 'static {
-  stream::unfold(Some(state), |state| async move {
-    let mut state = match state {
-      Some(state) => state,
-      None => return None,
-    };
-    if state.remaining == Some(0) {
-      return None;
+impl GpkgArrowReader {
+  /// Open a GDAL Arrow stream while retaining the layer that owns its lifetime.
+  fn open(path: &Path, layer_name: &str, attribute_filter: Option<&str>) -> Result<Self> {
+    let mut layer = open_gpkg_layer(path, layer_name)?;
+    if let Some(attribute_filter) = attribute_filter {
+      layer
+        .set_attribute_filter(attribute_filter)
+        .with_context(|| {
+          format!("failed to apply GeoPackage attribute filter {attribute_filter:?}")
+        })?;
     }
+    let options = CslStringList::from_iter(["INCLUDE_FID=NO", "GEOMETRY_ENCODING=WKB"]);
+    let mut stream = FFI_ArrowArrayStream::empty();
+    unsafe {
+      layer.read_arrow_stream(
+        (&mut stream as *mut FFI_ArrowArrayStream).cast::<ArrowArrayStream>(),
+        &options,
+      )
+    }
+    .with_context(|| format!("failed to open Arrow stream for GeoPackage layer {layer_name}"))?;
+    let reader = ArrowArrayStreamReader::try_new(stream).with_context(|| {
+      format!("failed to create Arrow reader for GeoPackage layer {layer_name}")
+    })?;
+    Ok(Self {
+      _layer: layer,
+      reader,
+    })
+  }
+}
 
-    match state.arrow_reader.reader.next() {
-      Some(Ok(batch)) => {
-        let batch = match normalize_batch_schema(batch, state.schema.clone()) {
-          Ok(batch) => batch,
-          Err(err) => return Some((Err(err), None)),
-        };
-        let batch = truncate_batch(batch, &mut state.remaining);
-        Some((Ok(batch), Some(state)))
+impl GpkgBatchReader {
+  /// Load the normalized Arrow schema without consuming feature batches.
+  pub(super) fn load_schema(
+    path: &Path,
+    layer_name: &str,
+    geometry_column: &str,
+  ) -> Result<SchemaRef> {
+    let arrow_reader = GpkgArrowReader::open(path, layer_name, None)?;
+    Ok(Self::normalize_schema(
+      arrow_reader.reader.schema(),
+      geometry_column,
+    ))
+  }
+
+  /// Retain the GDAL layer owner alongside its Arrow reader for the stream lifetime.
+  pub(super) fn open(
+    input_path: &Path,
+    layer_name: &str,
+    schema: SchemaRef,
+    attribute_filter: Option<&str>,
+    limit: Option<usize>,
+  ) -> Result<Self> {
+    Ok(Self {
+      arrow_reader: GpkgArrowReader::open(input_path, layer_name, attribute_filter)?,
+      schema,
+      remaining: limit,
+    })
+  }
+
+  /// Convert this stateful GDAL Arrow reader into a fallible asynchronous batch stream.
+  pub(super) fn into_stream(
+    self,
+  ) -> impl futures_util::Stream<Item = Result<RecordBatch>> + Send + 'static {
+    stream::unfold(Some(self), |state| async move {
+      let mut state = state?;
+      if state.remaining == Some(0) {
+        return None;
       }
-      Some(Err(err)) => Some((Err(err.into()), None)),
-      None => None,
-    }
-  })
-}
 
-pub(super) fn to_datafusion_error(err: anyhow::Error) -> DataFusionError {
-  DataFusionError::External(err.into())
-}
-
-/// Normalize provider-specific geometry field names and extension metadata.
-fn normalize_schema(schema: SchemaRef, geometry_column: &str) -> SchemaRef {
-  let Some(source_geometry_name) = find_geometry_field_name(schema.as_ref()) else {
-    return schema;
-  };
-  if source_geometry_name == geometry_column {
-    return schema;
-  }
-
-  let fields: Vec<_> = schema
-    .fields()
-    .iter()
-    .map(|field| {
-      if field.name() == source_geometry_name {
-        Arc::new(
-          Field::new(
-            geometry_column,
-            field.data_type().clone(),
-            field.is_nullable(),
-          )
-          .with_metadata(field.metadata().clone()),
-        )
-      } else {
-        field.clone()
+      match state.arrow_reader.reader.next() {
+        Some(Ok(batch)) => {
+          let batch = match Self::normalize_batch_schema(batch, state.schema.clone()) {
+            Ok(batch) => batch,
+            Err(err) => return Some((Err(err), None)),
+          };
+          let batch = Self::truncate_batch(&mut state.remaining, batch);
+          Some((Ok(batch), Some(state)))
+        }
+        Some(Err(err)) => Some((Err(err.into()), None)),
+        None => None,
       }
     })
-    .collect();
-
-  Arc::new(Schema::new_with_metadata(fields, schema.metadata().clone()))
-}
-
-fn find_geometry_field_name(schema: &Schema) -> Option<&str> {
-  schema.fields().iter().find_map(|field| {
-    field
-      .metadata()
-      .get(GEOMETRY_EXTENSION_NAME)
-      .filter(|value| value.as_str() == GEOMETRY_EXTENSION_VALUE)
-      .map(|_| field.name().as_str())
-  })
-}
-
-/// Replace a provider batch schema with the stable source schema after field normalization.
-fn normalize_batch_schema(batch: RecordBatch, schema: SchemaRef) -> Result<RecordBatch> {
-  if batch.schema() == schema {
-    return Ok(batch);
   }
 
-  Ok(RecordBatch::try_new(schema, batch.columns().to_vec())?)
-}
-
-/// Slice a batch to the remaining requested row count and update that count.
-fn truncate_batch(batch: RecordBatch, remaining: &mut Option<usize>) -> RecordBatch {
-  let Some(remaining_rows) = remaining else {
-    return batch;
-  };
-
-  if batch.num_rows() <= *remaining_rows {
-    *remaining_rows -= batch.num_rows();
-    return batch;
+  pub(super) fn to_datafusion_error(err: anyhow::Error) -> DataFusionError {
+    DataFusionError::External(err.into())
   }
 
-  let sliced = batch.slice(0, *remaining_rows);
-  *remaining_rows = 0;
-  sliced
+  /// Normalize provider-specific geometry field names and extension metadata.
+  fn normalize_schema(schema: SchemaRef, geometry_column: &str) -> SchemaRef {
+    let Some(source_geometry_name) = Self::find_geometry_field_name(schema.as_ref()) else {
+      return schema;
+    };
+    if source_geometry_name == geometry_column {
+      return schema;
+    }
+
+    let fields: Vec<_> = schema
+      .fields()
+      .iter()
+      .map(|field| {
+        if field.name() == source_geometry_name {
+          Arc::new(
+            Field::new(
+              geometry_column,
+              field.data_type().clone(),
+              field.is_nullable(),
+            )
+            .with_metadata(field.metadata().clone()),
+          )
+        } else {
+          field.clone()
+        }
+      })
+      .collect();
+
+    Arc::new(Schema::new_with_metadata(fields, schema.metadata().clone()))
+  }
+
+  fn find_geometry_field_name(schema: &Schema) -> Option<&str> {
+    schema.fields().iter().find_map(|field| {
+      field
+        .metadata()
+        .get(GEOMETRY_EXTENSION_NAME)
+        .filter(|value| value.as_str() == GEOMETRY_EXTENSION_VALUE)
+        .map(|_| field.name().as_str())
+    })
+  }
+
+  /// Replace a provider batch schema with the stable source schema after field normalization.
+  fn normalize_batch_schema(batch: RecordBatch, schema: SchemaRef) -> Result<RecordBatch> {
+    if batch.schema() == schema {
+      return Ok(batch);
+    }
+
+    Ok(RecordBatch::try_new(schema, batch.columns().to_vec())?)
+  }
+
+  /// Slice a batch to the remaining requested row count and update that count.
+  fn truncate_batch(remaining: &mut Option<usize>, batch: RecordBatch) -> RecordBatch {
+    let Some(remaining_rows) = *remaining else {
+      return batch;
+    };
+
+    if batch.num_rows() <= remaining_rows {
+      *remaining = Some(remaining_rows - batch.num_rows());
+      return batch;
+    }
+
+    let sliced = batch.slice(0, remaining_rows);
+    *remaining = Some(0);
+    sliced
+  }
 }
 
 #[cfg(test)]
@@ -200,10 +198,7 @@ mod tests {
   use arrow_array::{BinaryArray, Int32Array, RecordBatch};
   use arrow_schema::{DataType, Field, Schema};
 
-  use super::{
-    GEOMETRY_EXTENSION_NAME, GEOMETRY_EXTENSION_VALUE, normalize_batch_schema, normalize_schema,
-    truncate_batch,
-  };
+  use super::{GEOMETRY_EXTENSION_NAME, GEOMETRY_EXTENSION_VALUE, GpkgBatchReader};
 
   fn provider_schema(geometry_name: &str) -> Arc<Schema> {
     Arc::new(Schema::new(vec![
@@ -217,7 +212,7 @@ mod tests {
 
   #[test]
   fn schema_normalization_renames_only_the_geometry_extension_field() {
-    let schema = normalize_schema(provider_schema("geom"), "geometry");
+    let schema = GpkgBatchReader::normalize_schema(provider_schema("geom"), "geometry");
 
     assert_eq!(schema.fields()[0].name(), "id");
     assert_eq!(schema.fields()[1].name(), "geometry");
@@ -230,7 +225,7 @@ mod tests {
   #[test]
   fn batch_normalization_applies_the_stable_schema_without_reordering_columns() {
     let provider_schema = provider_schema("geom");
-    let stable_schema = normalize_schema(provider_schema.clone(), "geometry");
+    let stable_schema = GpkgBatchReader::normalize_schema(provider_schema.clone(), "geometry");
     let batch = RecordBatch::try_new(
       provider_schema,
       vec![
@@ -240,7 +235,7 @@ mod tests {
     )
     .unwrap();
 
-    let normalized = normalize_batch_schema(batch, stable_schema.clone()).unwrap();
+    let normalized = GpkgBatchReader::normalize_batch_schema(batch, stable_schema.clone()).unwrap();
 
     assert_eq!(normalized.schema(), stable_schema);
     assert_eq!(normalized.num_rows(), 2);
@@ -253,7 +248,7 @@ mod tests {
       RecordBatch::try_new(schema, vec![Arc::new(Int32Array::from(vec![1, 2, 3]))]).unwrap();
     let mut remaining = Some(2);
 
-    let truncated = truncate_batch(batch, &mut remaining);
+    let truncated = GpkgBatchReader::truncate_batch(&mut remaining, batch);
 
     assert_eq!(truncated.num_rows(), 2);
     assert_eq!(remaining, Some(0));

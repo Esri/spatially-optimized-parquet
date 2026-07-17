@@ -21,7 +21,7 @@ use crate::pipeline::SharedWriteReporter;
 use crate::plan_diagnostics::print_physical_plan;
 
 use super::parquet_partition_exec::ConcurrentPartitionSinkExec;
-use super::parquet_sink::{TrackingParquetSink, WriteTracker, create_sink};
+use super::parquet_sink::{TrackingParquetSink, WriteTracker};
 
 /// Executes single-file and concurrent partitioned Parquet writes through one tracking sink.
 pub(crate) struct ParquetOutputWriter {
@@ -63,7 +63,7 @@ impl ParquetOutputWriter {
       input = Self::project_without_columns(input, &hidden_columns)?;
       None
     };
-    let sink = create_sink(
+    let sink = TrackingParquetSink::create(
       write_path,
       input.schema(),
       Vec::new(),
@@ -72,7 +72,7 @@ impl ParquetOutputWriter {
     )?;
     let plan: Arc<dyn ExecutionPlan> =
       Arc::new(DataSinkExec::new(input, Arc::clone(&sink) as _, sort_order));
-    let rows_written = execute_sink_plan("single-file sink", plan, sink, context).await?;
+    let rows_written = Self::execute_sink_plan("single-file sink", plan, sink, context).await?;
     self.tracker.finish(rows_written);
     Ok(rows_written)
   }
@@ -110,7 +110,7 @@ impl ParquetOutputWriter {
     let (state, logical_plan) = dataframe.into_parts();
     let context = Arc::new(TaskContext::from(&state));
     let input = rewrite_plan(state.create_physical_plan(&logical_plan).await?)?;
-    let sink = create_sink(
+    let sink = TrackingParquetSink::create(
       write_path,
       input.schema(),
       partition_by,
@@ -119,39 +119,39 @@ impl ParquetOutputWriter {
     )?;
     let plan: Arc<dyn ExecutionPlan> =
       Arc::new(ConcurrentPartitionSinkExec::new(input, Arc::clone(&sink)));
-    let rows_written = execute_sink_plan("partitioned sink", plan, sink, context).await?;
+    let rows_written = Self::execute_sink_plan("partitioned sink", plan, sink, context).await?;
     self.tracker.finish(rows_written);
     Ok(rows_written)
   }
-}
 
-async fn execute_sink_plan(
-  label: &str,
-  plan: Arc<dyn ExecutionPlan>,
-  sink: Arc<TrackingParquetSink>,
-  context: Arc<TaskContext>,
-) -> Result<u64> {
-  print_physical_plan(label, plan.as_ref());
-  let batches = match collect(plan, Arc::clone(&context)).await {
-    Ok(batches) => batches,
-    Err(error) => {
-      if let Err(cleanup_error) = sink.cleanup_written_files(&context).await {
-        return Err(anyhow!(
-          "parquet write failed: {error}; cleanup failed: {cleanup_error}"
-        ));
+  async fn execute_sink_plan(
+    label: &str,
+    plan: Arc<dyn ExecutionPlan>,
+    sink: Arc<TrackingParquetSink>,
+    context: Arc<TaskContext>,
+  ) -> Result<u64> {
+    print_physical_plan(label, plan.as_ref());
+    let batches = match collect(plan, Arc::clone(&context)).await {
+      Ok(batches) => batches,
+      Err(error) => {
+        if let Err(cleanup_error) = sink.cleanup_written_files(&context).await {
+          return Err(anyhow!(
+            "parquet write failed: {error}; cleanup failed: {cleanup_error}"
+          ));
+        }
+        return Err(error.into());
       }
-      return Err(error.into());
-    }
-  };
-  let batch = batches.first().context("write returned no row count")?;
-  let values = batch
-    .column(0)
-    .as_any()
-    .downcast_ref::<UInt64Array>()
-    .context("write result count column was not UInt64")?;
-  Ok(if values.is_empty() {
-    0
-  } else {
-    values.value(0)
-  })
+    };
+    let batch = batches.first().context("write returned no row count")?;
+    let values = batch
+      .column(0)
+      .as_any()
+      .downcast_ref::<UInt64Array>()
+      .context("write result count column was not UInt64")?;
+    Ok(if values.is_empty() {
+      0
+    } else {
+      values.value(0)
+    })
+  }
 }

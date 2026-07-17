@@ -4,15 +4,11 @@ use anyhow::Result;
 use datafusion::dataframe::DataFrame;
 
 use crate::optimized::ResolvedOptimization;
-use crate::optimized::clustering::{
-  cluster_key_column, cluster_partition_column, validate_cluster_partition_column,
-};
-use crate::optimized::metadata::parquet_metadata;
+use crate::optimized::clustering::ClusterRangeBoundaries;
 use crate::output::{OutputPath, ParquetOutputWriter, ParquetWriterOptions};
 use crate::pipeline::{PipelineWarningStore, SharedWriteReporter};
 
 use super::dataframe;
-use super::range::compute_cluster_range_boundaries;
 use super::sort::PartitionedSortConfig;
 
 /// Write range-partitioned optimized GeoParquet files.
@@ -27,12 +23,13 @@ pub(crate) async fn write(
   write_reporter: Option<SharedWriteReporter>,
   warning_store: PipelineWarningStore,
 ) -> Result<u64> {
-  let partition_column = cluster_partition_column(optimization.geometry().clustering_family);
-  validate_cluster_partition_column(source_schema, Some(partition_column))?;
+  let clustering_family = optimization.geometry().clustering_family;
+  let partition_column = clustering_family.cluster_partition_column();
+  clustering_family.validate_partition_column(source_schema)?;
   let range_source = dataframe::range_source(input_dataframe.clone(), optimization)?;
-  let boundaries = compute_cluster_range_boundaries(
+  let boundaries = ClusterRangeBoundaries::compute(
     range_source,
-    cluster_key_column(optimization.geometry().clustering_family),
+    clustering_family.cluster_key_column(),
     output_path.part_count(),
   )
   .await?;
@@ -44,13 +41,13 @@ pub(crate) async fn write(
     covering,
     warning_store,
   )?;
-  let metadata = parquet_metadata(optimization, covering)?;
+  let metadata = optimization.parquet_metadata(covering)?;
   let writer_options = ParquetWriterOptions::new(compression.unwrap_or("snappy"), &metadata)?
     .with_delta_binary_packed_columns(optimization.delta_binary_packed_column_paths())
     .into_datafusion();
   let partitioned_sort = PartitionedSortConfig::new(
     partition_column,
-    cluster_key_column(optimization.geometry().clustering_family),
+    clustering_family.cluster_key_column(),
     output_path.part_count(),
     true,
   );

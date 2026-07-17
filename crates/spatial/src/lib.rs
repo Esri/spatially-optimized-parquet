@@ -1,12 +1,13 @@
 //! Writes and validates Spatially Optimized Parquet through stable public façades.
 //!
 //! Construct [`SpatialPipelineOptions`] from [`InputOptions`] and [`OutputOptions`], then pass the
-//! request to [`run`]. [`RowRange`] selects source rows, [`SourceFormat`] overrides source
+//! request to [`Pipeline::run`]. [`RowRange`] selects source rows, [`SourceFormat`] overrides source
 //! detection, and [`OutputMode`] chooses plain or optimized GeoParquet output. Attach a
 //! [`WriteReporter`] when cumulative write counts are needed.
 //!
-//! [`run`] validates the request, executes the complete DataFusion workflow, writes durable output,
-//! and automatically validates optimized output before returning [`SpatialPipelineResult`].
+//! [`Pipeline::run`] validates the request, executes the complete DataFusion workflow, writes
+//! durable output, and automatically validates optimized output before returning
+//! [`SpatialPipelineResult`].
 //! [`validate`] inspects an existing file or recursive partitioned directory. The root façade keeps
 //! storage adapters, geometry processing, optimization algorithms, and output mechanics private.
 
@@ -28,8 +29,8 @@ pub use input::{RowRange, SourceFormat};
 pub use optimized::MultiscaleEncoding;
 pub use output::OutputMode;
 pub use pipeline::{
-  InputOptions, OutputOptions, SpatialPipelineOptions, SpatialPipelineResult, WriteProgress,
-  WriteReporter, run,
+  InputOptions, OutputOptions, Pipeline, SpatialPipelineOptions, SpatialPipelineResult,
+  WriteProgress, WriteReporter,
 };
 pub use validate::{
   ValidationFailure, ValidationFinding, ValidationLocation, ValidationReport, ValidationRule,

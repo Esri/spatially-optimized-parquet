@@ -8,10 +8,7 @@ use crate::geometry::GeometryType;
 use crate::optimized::{ESRI_PBF_ENCODING, QUANTIZED_NATIVE_ENCODING};
 
 use super::{GEODISPLAY_COLUMN, MultiscaleLevel};
-use crate::geometry::{
-  NativeGeometryArrayBuilder, PbfArrayBuilder, QuantizedGeometry, native_coordinate_column_paths,
-  native_geometry_data_type,
-};
+use crate::geometry::{NativeGeometryArrayBuilder, PbfArrayBuilder, QuantizedGeometry};
 
 /// Builds one multiscale level array through its selected physical encoding.
 pub(crate) enum MultiscaleLevelArrayBuilder {
@@ -28,7 +25,7 @@ impl MultiscaleEncoding {
   ) -> DataType {
     match self {
       Self::Pbf => DataType::Binary,
-      Self::QuantizedNative => native_geometry_data_type(geometry_type, has_z, has_m),
+      Self::QuantizedNative => NativeGeometryArrayBuilder::data_type(geometry_type, has_z, has_m),
     }
   }
 
@@ -55,7 +52,7 @@ impl MultiscaleEncoding {
   ) -> Vec<String> {
     match self {
       Self::Pbf => Vec::new(),
-      Self::QuantizedNative => native_coordinate_column_paths(
+      Self::QuantizedNative => NativeGeometryArrayBuilder::coordinate_column_paths(
         GEODISPLAY_COLUMN,
         &levels
           .iter()

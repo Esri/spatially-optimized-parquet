@@ -12,10 +12,7 @@ pub(crate) use columns::{
   GEODISPLAY_COLUMN, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_CODE_COLUMN,
   POINT_Z_COLUMN, TEMP_XZ_CODE_COLUMN, XZ_CODE_COLUMN,
 };
-pub(crate) use datafusion::{complex_geometry_geodisplay_expr, point_geometry_geodisplay_expr};
+pub(crate) use datafusion::{ComplexGeometryGeodisplayUdf, PointGeometryGeodisplayUdf};
 pub use encoding::MultiscaleEncoding;
-pub(crate) use levels::{MultiscaleLevel, create_multiscale_levels};
-pub(crate) use traversal::{
-  GeometryPartRole, GeometryPartSink, geometry_extent_from_wkb, visit_wkb_geometry,
-  visit_wkb_geometry_for_display,
-};
+pub(crate) use levels::MultiscaleLevel;
+pub(crate) use traversal::{GeometryPartRole, GeometryPartSink};

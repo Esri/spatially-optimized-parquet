@@ -18,14 +18,10 @@ use url::Url;
 use crate::geometry::{GeometryColumn, GeometryEncoding};
 use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata};
 
-use super::metadata::{
-  load_covering_metadata, load_geo_metadata, map_geo_geometry_type, passthrough_metadata,
-};
-
 /// Stores Parquet footer metadata and the location needed to construct future scans.
-pub(super) struct ParquetInputSource {
+pub(crate) struct ParquetInputSource {
   location: ParquetInputLocation,
-  metadata: Vec<ArrowReaderMetadata>,
+  pub(super) metadata: Vec<ArrowReaderMetadata>,
 }
 
 /// Distinguishes local DataFusion paths from registered HTTP object-store locations.
@@ -73,7 +69,7 @@ impl InputSource for ParquetInputSource {
   }
 
   fn inferred_geometry_column(&self) -> Result<Option<GeometryColumn>> {
-    let Some(geo_meta) = load_geo_metadata(&self.metadata)? else {
+    let Some(geo_meta) = self.geo_metadata()? else {
       return Ok(None);
     };
     let Some(column_meta) = geo_meta.columns.get(&geo_meta.primary_column) else {
@@ -85,7 +81,9 @@ impl InputSource for ParquetInputSource {
 
     let geometry_kind = if column_meta.geometry_types.len() == 1 {
       let geo_type = column_meta.geometry_types.iter().next().unwrap();
-      Some(map_geo_geometry_type(geo_type.geometry_type()))
+      Some(SourceGeometryMetadata::from_geoparquet_geometry_type(
+        geo_type.geometry_type(),
+      ))
     } else {
       None
     };
@@ -98,9 +96,9 @@ impl InputSource for ParquetInputSource {
   }
 
   fn source_metadata(&self) -> Result<SourceDatasetMetadata> {
-    let geometry = match load_geo_metadata(&self.metadata)? {
+    let geometry = match self.geo_metadata()? {
       Some(geo_meta) => {
-        let covering = load_covering_metadata(&self.metadata, &geo_meta.primary_column)?;
+        let covering = self.covering_metadata(&geo_meta.primary_column)?;
         SourceGeometryMetadata::from_geoparquet(&geo_meta, covering)?
       }
       None => None,
@@ -108,7 +106,7 @@ impl InputSource for ParquetInputSource {
 
     Ok(SourceDatasetMetadata {
       geometry,
-      passthrough_kv: passthrough_metadata(&self.metadata),
+      passthrough_kv: self.passthrough_metadata(),
     })
   }
 

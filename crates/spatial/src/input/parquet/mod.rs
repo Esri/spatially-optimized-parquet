@@ -1,6 +1,6 @@
 //! Integrates local and HTTP Parquet sources, including GeoParquet metadata normalization.
 //!
-//! [`open_source`] accepts one local file, a directory of `.parquet` files, or a direct
+//! [`ParquetInputSource::open`] accepts one local file, a directory of `.parquet` files, or a direct
 //! HTTP(S) URL ending in `.parquet`. Discovery reads every local footer or performs HTTP object
 //! metadata and footer range requests. GeoParquet `geo` JSON must remain semantically consistent
 //! across a local file set. Reserved metadata stays under writer control, while unrelated
@@ -17,7 +17,7 @@ mod metadata;
 mod open;
 mod source;
 
-pub(super) use open::open_source;
+pub(super) use source::ParquetInputSource;
 
 #[cfg(test)]
 mod tests;

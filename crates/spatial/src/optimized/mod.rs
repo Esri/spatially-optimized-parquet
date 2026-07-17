@@ -11,18 +11,15 @@ mod resolve;
 mod select;
 pub(crate) mod single;
 
-pub(crate) use clustering::{
-  DEFAULT_XZ_MAX_LEVEL, bounds_expr, extent_xz_code, point_expr, point_z_code,
-};
+pub(crate) use clustering::{BoundsUdf, ClusterKey, DEFAULT_XZ_MAX_LEVEL, PointGeometryUdf};
 pub(crate) use extent_resolve::ExtentResolver;
 pub(crate) use geodisplay_metadata::{
-  ESRI_PBF_ENCODING, GEODISPLAY_VERSION, GeodisplayIndex, GeodisplayMetadata, MultiscaleLevel,
-  QUANTIZED_NATIVE_ENCODING, XzClusteringIndex, ZClusteringIndex,
+  ClusteringIndexXZ, ClusteringIndexZ, ESRI_PBF_ENCODING, GEODISPLAY_VERSION, GeodisplayIndex,
+  GeodisplayMetadata, MultiscaleLevel, QUANTIZED_NATIVE_ENCODING,
 };
 pub use multiscale::MultiscaleEncoding;
 pub(crate) use multiscale::{
-  COVERING_BBOX_COLUMN, GeometryPartRole, GeometryPartSink, geometry_extent_from_wkb,
-  validate_internal_projection_columns, visit_wkb_geometry, visit_wkb_geometry_for_display,
+  COVERING_BBOX_COLUMN, GeometryPartRole, GeometryPartSink, validate_internal_projection_columns,
 };
 pub(crate) use resolve::{ResolvedOptimization, resolve_optimized_geoparquet};
 

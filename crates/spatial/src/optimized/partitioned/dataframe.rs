@@ -5,11 +5,8 @@ use datafusion::dataframe::DataFrame;
 use datafusion::logical_expr::expr_fn::ident;
 
 use crate::optimized::ResolvedOptimization;
-use crate::optimized::clustering::{
-  ClusterRangeBoundaries, cluster_key_column, cluster_partition_column, clustering_dataframe,
-};
+use crate::optimized::clustering::ClusterRangeBoundaries;
 use crate::optimized::multiscale::COVERING_BBOX_COLUMN;
-use crate::optimized::select::output_expressions;
 use crate::pipeline::PipelineWarningStore;
 
 /// Build the narrow cluster-key dataframe consumed by partition-boundary analysis.
@@ -21,11 +18,9 @@ pub(super) fn range_source(
     ident(&optimization.geometry().geometry.column),
     ident(COVERING_BBOX_COLUMN),
   ])?;
-  clustering_dataframe(
-    dataframe,
-    optimization.geometry(),
-    optimization.target_extent(),
-  )
+  optimization
+    .geometry()
+    .clustering_dataframe(dataframe, optimization.target_extent())
 }
 
 /// Build optimized output with one range partition value per row.
@@ -46,22 +41,17 @@ pub(super) fn dataframe(
       .chain(std::iter::once(ident(COVERING_BBOX_COLUMN)))
       .collect::<Vec<_>>(),
   )?;
-  let partition_column = cluster_partition_column(optimization.geometry().clustering_family);
-  let dataframe = clustering_dataframe(
-    dataframe,
-    optimization.geometry(),
-    optimization.target_extent(),
-  )?
-  .with_column(
-    partition_column,
-    boundaries.partition_expr(cluster_key_column(
-      optimization.geometry().clustering_family,
-    ))?,
-  )?;
-  let mut expressions = output_expressions(source_schema, optimization, covering, warning_store);
+  let clustering_family = optimization.geometry().clustering_family;
+  let partition_column = clustering_family.cluster_partition_column();
+  let dataframe = optimization
+    .geometry()
+    .clustering_dataframe(dataframe, optimization.target_extent())?
+    .with_column(
+      partition_column,
+      boundaries.partition_expr(clustering_family.cluster_key_column())?,
+    )?;
+  let mut expressions = optimization.output_expressions(source_schema, covering, warning_store);
   expressions.push(ident(partition_column));
-  expressions.push(ident(cluster_key_column(
-    optimization.geometry().clustering_family,
-  )));
+  expressions.push(ident(clustering_family.cluster_key_column()));
   dataframe.select(expressions).map_err(Into::into)
 }

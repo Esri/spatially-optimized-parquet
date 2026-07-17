@@ -11,7 +11,6 @@ mod parquet;
 mod source;
 
 pub use format::SourceFormat;
-pub(crate) use format::resolve_source_format;
 pub(crate) use metadata::{SourceCoveringMetadata, SourceDatasetMetadata, SourceGeometryMetadata};
 pub use source::RowRange;
 pub(crate) use source::{InputOpenOptions, InputSource, open_input};

@@ -11,8 +11,8 @@ use arrow_array::{
 use arrow_schema::{DataType, Field, Schema};
 use gdal_sys::OGRwkbGeometryType;
 use spatial::{
-  InputOptions, MultiscaleEncoding, OutputMode, OutputOptions, RowRange, SpatialPipelineOptions,
-  SpatialPipelineResult, ValidationRule, WriteProgress, run, validate,
+  InputOptions, MultiscaleEncoding, OutputMode, OutputOptions, Pipeline, RowRange,
+  SpatialPipelineOptions, SpatialPipelineResult, ValidationRule, WriteProgress, validate,
 };
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
@@ -63,7 +63,7 @@ fn run_optimized_multiscale(
   output: &Path,
   encoding: MultiscaleEncoding,
 ) -> Result<SpatialPipelineResult> {
-  runtime().block_on(run(SpatialPipelineOptions::new(
+  runtime().block_on(Pipeline::run(SpatialPipelineOptions::new(
     InputOptions::new(
       input.to_string_lossy(),
       None,
@@ -97,7 +97,7 @@ fn run_optimized_with_stripping(
   strip_z: bool,
   strip_m: bool,
 ) -> Result<SpatialPipelineResult> {
-  runtime().block_on(run(SpatialPipelineOptions::new(
+  runtime().block_on(Pipeline::run(SpatialPipelineOptions::new(
     InputOptions::new(
       input.to_string_lossy(),
       None,
@@ -152,7 +152,7 @@ fn optimized_output_sorts_points_and_writes_metadata() {
   let progress = Arc::new(Mutex::new(Vec::new()));
   let reported = Arc::clone(&progress);
   let result = runtime()
-    .block_on(run(
+    .block_on(Pipeline::run(
       SpatialPipelineOptions::new(
         InputOptions::new(
           input.to_string_lossy(),

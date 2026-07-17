@@ -15,98 +15,102 @@ use parquet::arrow::async_reader::ParquetObjectReader;
 use url::Url;
 
 use crate::input::{InputOpenOptions, InputSource};
-use crate::parquet_dataset::{DiscoveryMode, load_parquet_metadata, try_discover_parquet_dataset};
+use crate::parquet_dataset::{DiscoveryMode, ParquetDatasetFile};
 
 use super::source::{ParquetInputLocation, ParquetInputSource};
 
-/// Open a local Parquet file set or one direct HTTP Parquet object.
-pub(crate) async fn open_source(options: &InputOpenOptions) -> Result<Arc<dyn InputSource>> {
-  if let Some(layer) = options.layer() {
-    return Err(anyhow::anyhow!(
-      "parquet input does not support --layer (got '{layer}')"
-    ));
-  }
-  if options.is_http() {
-    return open_http_parquet(options.location()).await;
+impl ParquetInputSource {
+  /// Open a local Parquet file set or one direct HTTP Parquet object.
+  pub(crate) async fn open(options: &InputOpenOptions) -> Result<Arc<dyn InputSource>> {
+    if let Some(layer) = options.layer() {
+      return Err(anyhow::anyhow!(
+        "parquet input does not support --layer (got '{layer}')"
+      ));
+    }
+    if options.is_http() {
+      return Self::open_http(options.location()).await;
+    }
+
+    let path = options
+      .local_path()
+      .context("parquet input requires a local path or HTTP URL")?;
+    let files = Self::discover_files(path)?.with_context(|| {
+      format!(
+        "parquet input must be a .parquet file or directory containing .parquet files: {}",
+        path.display()
+      )
+    })?;
+    let metadata = files
+      .iter()
+      .map(|file| Self::load_arrow_metadata(file))
+      .collect::<Result<Vec<_>>>()?;
+
+    Ok(Arc::new(Self::new(
+      ParquetInputLocation::Local {
+        input_path: options.location().to_string(),
+      },
+      metadata,
+    )))
   }
 
-  let path = options
-    .local_path()
-    .context("parquet input requires a local path or HTTP URL")?;
-  let files = discover_parquet_files(path)?.with_context(|| {
-    format!(
-      "parquet input must be a .parquet file or directory containing .parquet files: {}",
-      path.display()
+  /// Open one HTTP Parquet object and load its footer metadata with range requests.
+  async fn open_http(location: &str) -> Result<Arc<dyn InputSource>> {
+    if !location
+      .split('?')
+      .next()
+      .is_some_and(|path| path.ends_with(".parquet"))
+    {
+      return Err(anyhow::anyhow!(
+        "HTTP input must point directly to a .parquet file: {location}"
+      ));
+    }
+    let parsed = Url::parse(location).with_context(|| format!("parse input URL: {location}"))?;
+    let store_url = Url::parse(&format!(
+      "{}://{}",
+      parsed.scheme(),
+      parsed
+        .host_str()
+        .context("HTTP input URL must include a host")?
+    ))?;
+    let object_path = ObjectPath::parse(parsed.path().trim_start_matches('/'))?;
+    let store =
+      Arc::new(HttpBuilder::new().with_url(store_url.as_str()).build()?) as Arc<dyn ObjectStore>;
+    let object_meta = store
+      .head(&object_path)
+      .await
+      .with_context(|| format!("read HTTP parquet metadata: {location}"))?;
+    let mut reader = ParquetObjectReader::new(Arc::clone(&store), object_path.clone())
+      .with_file_size(object_meta.size);
+    let metadata = ArrowReaderMetadata::load_async(&mut reader, ArrowReaderOptions::new())
+      .await
+      .with_context(|| format!("read parquet footer: {location}"))?;
+
+    Ok(Arc::new(Self::new(
+      ParquetInputLocation::Http {
+        input_url: location.to_string(),
+        store_url,
+        store,
+      },
+      vec![metadata],
+    )))
+  }
+
+  /// Discover a single Parquet file or a sorted directory of Parquet files.
+  ///
+  /// Returns `None` for unsupported paths so another input provider can attempt them.
+  fn discover_files(input: &Path) -> Result<Option<Vec<PathBuf>>> {
+    Ok(
+      DiscoveryMode::Flat
+        .discover(input)?
+        .map(|files| files.into_iter().map(|file| file.path).collect()),
     )
-  })?;
-  let metadata = files
-    .iter()
-    .map(|file| load_arrow_metadata(file))
-    .collect::<Result<Vec<_>>>()?;
-
-  Ok(Arc::new(ParquetInputSource::new(
-    ParquetInputLocation::Local {
-      input_path: options.location().to_string(),
-    },
-    metadata,
-  )))
-}
-
-/// Open one HTTP Parquet object and load its footer metadata with range requests.
-async fn open_http_parquet(location: &str) -> Result<Arc<dyn InputSource>> {
-  if !location
-    .split('?')
-    .next()
-    .is_some_and(|path| path.ends_with(".parquet"))
-  {
-    return Err(anyhow::anyhow!(
-      "HTTP input must point directly to a .parquet file: {location}"
-    ));
   }
-  let parsed = Url::parse(location).with_context(|| format!("parse input URL: {location}"))?;
-  let store_url = Url::parse(&format!(
-    "{}://{}",
-    parsed.scheme(),
-    parsed
-      .host_str()
-      .context("HTTP input URL must include a host")?
-  ))?;
-  let object_path = ObjectPath::parse(parsed.path().trim_start_matches('/'))?;
-  let store =
-    Arc::new(HttpBuilder::new().with_url(store_url.as_str()).build()?) as Arc<dyn ObjectStore>;
-  let object_meta = store
-    .head(&object_path)
-    .await
-    .with_context(|| format!("read HTTP parquet metadata: {location}"))?;
-  let mut reader = ParquetObjectReader::new(Arc::clone(&store), object_path.clone())
-    .with_file_size(object_meta.size);
-  let metadata = ArrowReaderMetadata::load_async(&mut reader, ArrowReaderOptions::new())
-    .await
-    .with_context(|| format!("read parquet footer: {location}"))?;
 
-  Ok(Arc::new(ParquetInputSource::new(
-    ParquetInputLocation::Http {
-      input_url: location.to_string(),
-      store_url,
-      store,
-    },
-    vec![metadata],
-  )))
-}
-
-/// Discover a single Parquet file or a sorted directory of Parquet files.
-///
-/// Returns `None` for unsupported paths so another input provider can attempt them.
-fn discover_parquet_files(input: &Path) -> Result<Option<Vec<PathBuf>>> {
-  Ok(
-    try_discover_parquet_dataset(input, DiscoveryMode::Flat)?
-      .map(|files| files.into_iter().map(|file| file.path).collect()),
-  )
-}
-
-/// Load Arrow and Parquet metadata from one local file footer.
-fn load_arrow_metadata(file: &Path) -> Result<ArrowReaderMetadata> {
-  load_parquet_metadata(file).with_context(|| format!("read arrow metadata: {}", file.display()))
+  /// Load Arrow and Parquet metadata from one local file footer.
+  fn load_arrow_metadata(file: &Path) -> Result<ArrowReaderMetadata> {
+    ParquetDatasetFile::load_metadata(file)
+      .with_context(|| format!("read arrow metadata: {}", file.display()))
+  }
 }
 
 #[cfg(test)]
@@ -115,7 +119,7 @@ mod tests {
 
   use tempfile::TempDir;
 
-  use super::{discover_parquet_files, load_arrow_metadata};
+  use super::ParquetInputSource;
 
   #[test]
   fn parquet_discovery_sorts_files_and_ignores_other_extensions() {
@@ -124,7 +128,9 @@ mod tests {
     fs::write(temp.path().join("a.parquet"), []).unwrap();
     fs::write(temp.path().join("notes.txt"), []).unwrap();
 
-    let files = discover_parquet_files(temp.path()).unwrap().unwrap();
+    let files = ParquetInputSource::discover_files(temp.path())
+      .unwrap()
+      .unwrap();
 
     assert_eq!(
       files,
@@ -138,7 +144,7 @@ mod tests {
     let path = temp.path().join("broken.parquet");
     fs::write(&path, b"not parquet").unwrap();
 
-    let error = load_arrow_metadata(&path).unwrap_err();
+    let error = ParquetInputSource::load_arrow_metadata(&path).unwrap_err();
 
     assert!(error.to_string().contains("read arrow metadata"));
   }

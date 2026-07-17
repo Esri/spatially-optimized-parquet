@@ -48,48 +48,48 @@ impl<'a> ExtentResolver<'a> {
     let target_extent = if metadata_fast_path {
       source.source_extent
     } else {
-      let aggregate_dataframe = target_extent_aggregate(normalized.dataframe())?;
+      let aggregate_dataframe = Self::target_extent_aggregate(normalized.dataframe())?;
       let batches = collect_dataframe(aggregate_dataframe, "target extent aggregate").await?;
-      extract_target_extent(&batches)?
+      Self::extract_target_extent(&batches)?
     };
     Ok(target_extent)
   }
-}
 
-fn target_extent_aggregate(dataframe: DataFrame) -> Result<DataFrame> {
-  dataframe
-    .aggregate(
-      vec![],
-      vec![
-        min(bbox_field_expr("xmin")).alias(EXTENT_XMIN_COLUMN),
-        min(bbox_field_expr("ymin")).alias(EXTENT_YMIN_COLUMN),
-        max(bbox_field_expr("xmax")).alias(EXTENT_XMAX_COLUMN),
-        max(bbox_field_expr("ymax")).alias(EXTENT_YMAX_COLUMN),
-      ],
-    )
-    .map_err(Into::into)
-}
-
-fn extract_target_extent(batches: &[RecordBatch]) -> Result<Extent2D> {
-  let Some(batch) = batches.first().filter(|batch| batch.num_rows() > 0) else {
-    bail!("unable to determine dataset target extent");
-  };
-  Ok(Extent2D {
-    xmin: extract_aggregate_value(batch, 0, "xmin")?,
-    ymin: extract_aggregate_value(batch, 1, "ymin")?,
-    xmax: extract_aggregate_value(batch, 2, "xmax")?,
-    ymax: extract_aggregate_value(batch, 3, "ymax")?,
-  })
-}
-
-fn extract_aggregate_value(batch: &RecordBatch, column_index: usize, label: &str) -> Result<f64> {
-  let values = batch
-    .column(column_index)
-    .as_any()
-    .downcast_ref::<Float64Array>()
-    .with_context(|| format!("target extent aggregate column '{label}' was not Float64"))?;
-  if values.is_null(0) {
-    bail!("unable to determine dataset target extent");
+  fn target_extent_aggregate(dataframe: DataFrame) -> Result<DataFrame> {
+    dataframe
+      .aggregate(
+        vec![],
+        vec![
+          min(bbox_field_expr("xmin")).alias(EXTENT_XMIN_COLUMN),
+          min(bbox_field_expr("ymin")).alias(EXTENT_YMIN_COLUMN),
+          max(bbox_field_expr("xmax")).alias(EXTENT_XMAX_COLUMN),
+          max(bbox_field_expr("ymax")).alias(EXTENT_YMAX_COLUMN),
+        ],
+      )
+      .map_err(Into::into)
   }
-  Ok(values.value(0))
+
+  fn extract_target_extent(batches: &[RecordBatch]) -> Result<Extent2D> {
+    let Some(batch) = batches.first().filter(|batch| batch.num_rows() > 0) else {
+      bail!("unable to determine dataset target extent");
+    };
+    Ok(Extent2D {
+      xmin: Self::extract_aggregate_value(batch, 0, "xmin")?,
+      ymin: Self::extract_aggregate_value(batch, 1, "ymin")?,
+      xmax: Self::extract_aggregate_value(batch, 2, "xmax")?,
+      ymax: Self::extract_aggregate_value(batch, 3, "ymax")?,
+    })
+  }
+
+  fn extract_aggregate_value(batch: &RecordBatch, column_index: usize, label: &str) -> Result<f64> {
+    let values = batch
+      .column(column_index)
+      .as_any()
+      .downcast_ref::<Float64Array>()
+      .with_context(|| format!("target extent aggregate column '{label}' was not Float64"))?;
+    if values.is_null(0) {
+      bail!("unable to determine dataset target extent");
+    }
+    Ok(values.value(0))
+  }
 }

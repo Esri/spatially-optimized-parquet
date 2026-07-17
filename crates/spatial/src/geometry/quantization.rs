@@ -85,151 +85,149 @@ pub(crate) struct QuantizationOptions {
   pub(crate) has_m: bool,
 }
 
-/// Quantize, simplify, and preserve valid coordinate components in codec-ready geometry storage.
-pub(crate) fn quantize_geometry_into(
-  input: &Geometry,
-  options: &QuantizationOptions,
-  output: &mut QuantizedGeometry,
-) -> Result<()> {
-  output.coordinates.clear();
-  output.lengths.clear();
-  output.validity.values.clear();
+impl QuantizedGeometry {
+  /// Quantize, simplify, and preserve valid coordinate components from geometry.
+  pub(crate) fn quantize_from(
+    &mut self,
+    input: &Geometry,
+    options: &QuantizationOptions,
+  ) -> Result<()> {
+    self.coordinates.clear();
+    self.lengths.clear();
+    self.validity.values.clear();
 
-  let mut coordinate_offset = 0usize;
-  let mut degenerated_coordinate = None::<Vec<i64>>;
-  let mut degenerated_validity = None::<u8>;
+    let mut coordinate_offset = 0usize;
+    let mut degenerated_coordinate = None::<Vec<i64>>;
+    let mut degenerated_validity = None::<u8>;
 
-  for &length in &input.lengths {
-    let point_count = length as usize;
-    if point_count == 0 {
-      continue;
-    }
-
-    let part_start = output.coordinates.len();
-    let validity_start = output.validity.values.len();
-    let part = &input.coordinates[coordinate_offset..coordinate_offset + point_count];
-    let output_length = if options.has_z || options.has_m {
-      quantize_dimensional_part(part, options, output)?
-    } else {
-      quantize_xy_part(part, options, output)?
-    };
-
-    if output_length < options.min_length as u32 {
-      degenerated_coordinate.get_or_insert_with(|| {
-        output.coordinates[part_start..part_start + coordinate_stride(options)].to_vec()
-      });
-      if options.has_z || options.has_m {
-        degenerated_validity.get_or_insert(output.validity.values[validity_start]);
-        output.validity.values.truncate(validity_start);
+    for &length in &input.lengths {
+      let point_count = length as usize;
+      if point_count == 0 {
+        continue;
       }
-      output.coordinates.truncate(part_start);
-    } else {
-      output.lengths.push(output_length);
+
+      let part_start = self.coordinates.len();
+      let validity_start = self.validity.values.len();
+      let part = &input.coordinates[coordinate_offset..coordinate_offset + point_count];
+      let output_length = if options.has_z || options.has_m {
+        self.quantize_dimensional_part(part, options)?
+      } else {
+        self.quantize_xy_part(part, options)?
+      };
+
+      if output_length < options.min_length as u32 {
+        degenerated_coordinate.get_or_insert_with(|| {
+          self.coordinates[part_start..part_start + Self::coordinate_stride(options)].to_vec()
+        });
+        if options.has_z || options.has_m {
+          degenerated_validity.get_or_insert(self.validity.values[validity_start]);
+          self.validity.values.truncate(validity_start);
+        }
+        self.coordinates.truncate(part_start);
+      } else {
+        self.lengths.push(output_length);
+      }
+      coordinate_offset += point_count;
     }
-    coordinate_offset += point_count;
+
+    if self.lengths.is_empty()
+      && let Some(coordinate) = degenerated_coordinate
+    {
+      self.coordinates.extend(coordinate);
+      self.lengths.push(1);
+      if let Some(validity) = degenerated_validity {
+        self.validity.values.push(validity);
+      }
+    }
+
+    self.has_z = options.has_z;
+    self.has_m = options.has_m;
+    Ok(())
   }
 
-  if output.lengths.is_empty()
-    && let Some(coordinate) = degenerated_coordinate
-  {
-    output.coordinates.extend(coordinate);
-    output.lengths.push(1);
-    if let Some(validity) = degenerated_validity {
-      output.validity.values.push(validity);
+  fn quantize_xy_part(&mut self, part: &[Coord], options: &QuantizationOptions) -> Result<u32> {
+    let first = part.first().expect("non-empty part");
+    let mut previous_x = options.transform.quantize(first.x, 0)?;
+    let mut previous_y = options.transform.quantize(first.y, 1)?;
+    self.coordinates.extend([previous_x, previous_y]);
+    let mut output_length = 1u32;
+    let mut previous_dx = 0i64;
+    let mut previous_dy = 0i64;
+
+    for coordinate in &part[1..] {
+      let x = options.transform.quantize(coordinate.x, 0)?;
+      let y = options.transform.quantize(coordinate.y, 1)?;
+      if x == previous_x && y == previous_y {
+        continue;
+      }
+      let dx = x - previous_x;
+      let dy = y - previous_y;
+      if is_collinear_delta(previous_dx, previous_dy, dx, dy) {
+        let coordinate_count = self.coordinates.len();
+        self.coordinates[coordinate_count - 2] = x;
+        self.coordinates[coordinate_count - 1] = y;
+        previous_x = x;
+        previous_y = y;
+      } else {
+        self.coordinates.extend([x, y]);
+        previous_x = x;
+        previous_y = y;
+        previous_dx = dx;
+        previous_dy = dy;
+        output_length += 1;
+      }
+    }
+    Ok(output_length)
+  }
+
+  fn quantize_dimensional_part(
+    &mut self,
+    part: &[Coord],
+    options: &QuantizationOptions,
+  ) -> Result<u32> {
+    let retained = douglas_peucker_indices(part, options.tolerance);
+    for input_index in retained.iter().copied() {
+      let coordinate = part[input_index];
+      self.coordinates.extend([
+        options.transform.quantize(coordinate.x, 0)?,
+        options.transform.quantize(coordinate.y, 1)?,
+      ]);
+      if options.has_z {
+        self.coordinates.push(Self::quantize_optional_component(
+          coordinate.z,
+          &options.transform,
+          2,
+        )?);
+      }
+      if options.has_m {
+        self.coordinates.push(Self::quantize_optional_component(
+          coordinate.m,
+          &options.transform,
+          3,
+        )?);
+      }
+      self.validity.push(
+        options.has_z && coordinate.z.is_some_and(f64::is_finite),
+        options.has_m && coordinate.m.is_some_and(f64::is_finite),
+      );
+    }
+    Ok(u32::try_from(retained.len()).expect("geometry part length originates from u32"))
+  }
+
+  fn quantize_optional_component(
+    value: Option<f64>,
+    transform: &QuantizationTransform,
+    axis: usize,
+  ) -> Result<i64> {
+    match value {
+      Some(value) if value.is_finite() => transform.quantize(value, axis),
+      _ => Ok(0),
     }
   }
 
-  output.has_z = options.has_z;
-  output.has_m = options.has_m;
-  Ok(())
-}
-
-fn quantize_xy_part(
-  part: &[Coord],
-  options: &QuantizationOptions,
-  output: &mut QuantizedGeometry,
-) -> Result<u32> {
-  let first = part.first().expect("non-empty part");
-  let mut previous_x = options.transform.quantize(first.x, 0)?;
-  let mut previous_y = options.transform.quantize(first.y, 1)?;
-  output.coordinates.extend([previous_x, previous_y]);
-  let mut output_length = 1u32;
-  let mut previous_dx = 0i64;
-  let mut previous_dy = 0i64;
-
-  for coordinate in &part[1..] {
-    let x = options.transform.quantize(coordinate.x, 0)?;
-    let y = options.transform.quantize(coordinate.y, 1)?;
-    if x == previous_x && y == previous_y {
-      continue;
-    }
-    let dx = x - previous_x;
-    let dy = y - previous_y;
-    if is_collinear_delta(previous_dx, previous_dy, dx, dy) {
-      let coordinate_count = output.coordinates.len();
-      output.coordinates[coordinate_count - 2] = x;
-      output.coordinates[coordinate_count - 1] = y;
-      previous_x = x;
-      previous_y = y;
-    } else {
-      output.coordinates.extend([x, y]);
-      previous_x = x;
-      previous_y = y;
-      previous_dx = dx;
-      previous_dy = dy;
-      output_length += 1;
-    }
+  fn coordinate_stride(options: &QuantizationOptions) -> usize {
+    2 + usize::from(options.has_z) + usize::from(options.has_m)
   }
-  Ok(output_length)
-}
-
-fn quantize_dimensional_part(
-  part: &[Coord],
-  options: &QuantizationOptions,
-  output: &mut QuantizedGeometry,
-) -> Result<u32> {
-  let retained = douglas_peucker_indices(part, options.tolerance);
-  for input_index in retained.iter().copied() {
-    let coordinate = part[input_index];
-    output.coordinates.extend([
-      options.transform.quantize(coordinate.x, 0)?,
-      options.transform.quantize(coordinate.y, 1)?,
-    ]);
-    if options.has_z {
-      output.coordinates.push(quantize_optional_component(
-        coordinate.z,
-        &options.transform,
-        2,
-      )?);
-    }
-    if options.has_m {
-      output.coordinates.push(quantize_optional_component(
-        coordinate.m,
-        &options.transform,
-        3,
-      )?);
-    }
-    output.validity.push(
-      options.has_z && coordinate.z.is_some_and(f64::is_finite),
-      options.has_m && coordinate.m.is_some_and(f64::is_finite),
-    );
-  }
-  Ok(u32::try_from(retained.len()).expect("geometry part length originates from u32"))
-}
-
-fn quantize_optional_component(
-  value: Option<f64>,
-  transform: &QuantizationTransform,
-  axis: usize,
-) -> Result<i64> {
-  match value {
-    Some(value) if value.is_finite() => transform.quantize(value, axis),
-    _ => Ok(0),
-  }
-}
-
-fn coordinate_stride(options: &QuantizationOptions) -> usize {
-  2 + usize::from(options.has_z) + usize::from(options.has_m)
 }
 
 fn is_collinear_delta(previous_dx: i64, previous_dy: i64, dx: i64, dy: i64) -> bool {
@@ -361,9 +359,7 @@ pub(crate) fn encode_deltas_xy(coordinates: &mut [i64], lengths: &[u32], has_z: 
 
 #[cfg(test)]
 mod tests {
-  use super::{
-    QuantizationOptions, QuantizationTransform, QuantizedGeometry, quantize_geometry_into,
-  };
+  use super::{QuantizationOptions, QuantizationTransform, QuantizedGeometry};
   use crate::geometry::{Coord, Geometry, GeometryType};
 
   fn coordinate(x: f64, y: f64, z: Option<f64>, m: Option<f64>) -> Coord {
@@ -421,7 +417,9 @@ mod tests {
     .unwrap();
     let mut quantized = QuantizedGeometry::default();
 
-    quantize_geometry_into(&geometry, &options(2, false, false), &mut quantized).unwrap();
+    quantized
+      .quantize_from(&geometry, &options(2, false, false))
+      .unwrap();
 
     assert_eq!(quantized.lengths, [2]);
     assert_eq!(quantized.coordinates, [0, 0, 2, 2]);
@@ -442,7 +440,9 @@ mod tests {
     .unwrap();
     let mut quantized = QuantizedGeometry::default();
 
-    quantize_geometry_into(&geometry, &options(2, false, false), &mut quantized).unwrap();
+    quantized
+      .quantize_from(&geometry, &options(2, false, false))
+      .unwrap();
 
     assert_eq!(quantized.lengths, [2]);
     assert_eq!(quantized.coordinates, [0, 0, 1, 1]);
@@ -462,7 +462,9 @@ mod tests {
     .unwrap();
     let mut quantized = QuantizedGeometry::default();
 
-    quantize_geometry_into(&geometry, &options(2, true, true), &mut quantized).unwrap();
+    quantized
+      .quantize_from(&geometry, &options(2, true, true))
+      .unwrap();
 
     assert_eq!(quantized.lengths, [2]);
     assert_eq!(quantized.coordinates, [0, 0, 10, 100, 2, 0, 20, 200]);
@@ -476,7 +478,9 @@ mod tests {
     ]);
     let mut quantized = QuantizedGeometry::default();
 
-    quantize_geometry_into(&geometry, &options(2, false, false), &mut quantized).unwrap();
+    quantized
+      .quantize_from(&geometry, &options(2, false, false))
+      .unwrap();
 
     assert_eq!(quantized.lengths, [1]);
     assert_eq!(quantized.coordinates, [0, 0]);
@@ -490,7 +494,9 @@ mod tests {
     ]);
     let mut quantized = QuantizedGeometry::default();
 
-    quantize_geometry_into(&geometry, &options(3, true, true), &mut quantized).unwrap();
+    quantized
+      .quantize_from(&geometry, &options(3, true, true))
+      .unwrap();
 
     assert_eq!(quantized.lengths, [1]);
     assert!(!quantized.validity.z_is_valid(0));
@@ -505,7 +511,9 @@ mod tests {
     ]);
     let mut quantized = QuantizedGeometry::default();
 
-    quantize_geometry_into(&geometry, &options(2, true, true), &mut quantized).unwrap();
+    quantized
+      .quantize_from(&geometry, &options(2, true, true))
+      .unwrap();
 
     assert_eq!(quantized.coordinates, [0, 0, 0, 0, 2, 0, 0, 0]);
     assert!(quantized.validity.z_is_valid(0));
@@ -522,7 +530,9 @@ mod tests {
     ]);
     let mut quantized = QuantizedGeometry::default();
 
-    quantize_geometry_into(&geometry, &options(2, true, true), &mut quantized).unwrap();
+    quantized
+      .quantize_from(&geometry, &options(2, true, true))
+      .unwrap();
 
     assert_eq!(quantized.coordinates, [0, 0, 0, 0, 2, 0, 0, 0]);
   }

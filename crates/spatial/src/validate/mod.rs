@@ -12,7 +12,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use crate::parquet_dataset::{DiscoveryMode, try_discover_parquet_dataset};
+use crate::parquet_dataset::DiscoveryMode;
 
 pub use report::{
   ValidationFailure, ValidationFinding, ValidationLocation, ValidationReport, ValidationRule,
@@ -23,27 +23,31 @@ pub use report::{
 pub fn validate(path: impl AsRef<Path>) -> Result<ValidationReport> {
   let path = path.as_ref();
   let dataset_path = path.to_path_buf();
-  let files = try_discover_parquet_dataset(path, DiscoveryMode::Recursive)?.with_context(|| {
+  let files = DiscoveryMode::Recursive.discover(path)?.with_context(|| {
     format!(
       "validation path must be a .parquet file or directory: {}",
       path.display()
     )
   })?;
   let mut report = ValidationReport::new(dataset_path);
-  validate_dataset(&files, &mut report);
+  report.validate_dataset(&files);
   report.sort_findings();
   Ok(report)
 }
 
-fn validate_dataset(
-  files: &[crate::parquet_dataset::ParquetDatasetFile],
-  report: &mut ValidationReport,
-) {
-  let validated_files = structure::load_dataset_files(files, report);
-  let validated_dataset_files = metadata::validate_dataset_metadata(&validated_files, report);
-  structure::validate_dataset_structure(&validated_files, &validated_dataset_files, report);
-  let ranges = structure::validate_file_data(&validated_dataset_files, report);
-  multifile::validate_multifile_ranges(&ranges, report);
+impl ValidationReport {
+  fn validate_dataset(&mut self, files: &[crate::parquet_dataset::ParquetDatasetFile]) {
+    let validated_files = structure::LoadedDatasetFile::load_all(files, self);
+    let validated_dataset_files =
+      metadata::ValidatedMetadata::validate_dataset(&validated_files, self);
+    structure::LoadedDatasetFile::validate_dataset_structure(
+      &validated_files,
+      &validated_dataset_files,
+      self,
+    );
+    let ranges = structure::LoadedDatasetFile::validate_file_data(&validated_dataset_files, self);
+    multifile::FileCodeRange::validate_dataset(&ranges, self);
+  }
 }
 
 #[cfg(test)]
@@ -62,7 +66,7 @@ mod tests {
   use tempfile::TempDir;
 
   use crate::geometry::Extent2D;
-  use crate::optimized::point_z_code;
+  use crate::optimized::ClusterKey;
 
   use super::*;
 
@@ -220,7 +224,7 @@ mod tests {
       ymax: 10.0,
     };
     let geometry = wkb_point(1.0, 1.0);
-    let code = point_z_code(extent, 1.0, 1.0, 20).value();
+    let code = ClusterKey::from_z_coordinates(extent, 1.0, 1.0, 20).value();
     let schema = Arc::new(Schema::new(vec![
       Field::new("geometry", DataType::Binary, true),
       Field::new("zCode", code_type.clone(), false),

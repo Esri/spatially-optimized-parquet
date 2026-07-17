@@ -114,8 +114,8 @@ pub(crate) async fn open_input(
   }
 
   match format {
-    SourceFormat::GeoPackage => gpkg::open_source(options).await,
-    SourceFormat::Parquet => parquet::open_source(options).await,
+    SourceFormat::GeoPackage => gpkg::GpkgInputSource::open(options).await,
+    SourceFormat::Parquet => parquet::ParquetInputSource::open(options).await,
   }
 }
 

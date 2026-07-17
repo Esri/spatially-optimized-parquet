@@ -9,8 +9,7 @@ use datafusion::dataframe::DataFrame;
 use datafusion::logical_expr::expr_fn::ident;
 
 use crate::geoparquet::{
-  ResolvedGeoParquetSource, ResolvedReprojection, geometry_bbox_expr, reproject_geometry_expr,
-  strip_geometry_dimensions_expr,
+  ResolvedGeoParquetSource, ResolvedReprojection, StripGeometryDimensionsUdf, geometry_bbox_expr,
 };
 use crate::optimized::COVERING_BBOX_COLUMN;
 
@@ -29,13 +28,13 @@ impl NormalizedSpatialFrame {
     strip_z: bool,
     strip_m: bool,
   ) -> Result<Self> {
-    if let Some(expression) = reproject_geometry_expr(&source.geometry.column, reprojection)? {
+    if let Some(expression) = reprojection.geometry_expr(&source.geometry.column)? {
       dataframe = dataframe.with_column(&source.geometry.column, expression)?;
     }
     if strip_z || strip_m {
       dataframe = dataframe.with_column(
         &source.geometry.column,
-        strip_geometry_dimensions_expr(&source.geometry.column, strip_z, strip_m),
+        StripGeometryDimensionsUdf::expression(&source.geometry.column, strip_z, strip_m),
       )?;
     }
 

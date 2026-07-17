@@ -13,8 +13,7 @@ use crate::output::{OutputPath, ParquetOutputWriter, ParquetWriterOptions};
 use crate::pipeline::SharedWriteReporter;
 
 use super::{
-  GeoMetadataInput, NormalizedSpatialFrame, ResolvedReprojection, geoparquet_metadata,
-  resolve_source,
+  GeoMetadata, GeoMetadataInput, NormalizedSpatialFrame, ResolvedReprojection, resolve_source,
 };
 
 pub(crate) struct GeoParquetWriter<'a> {
@@ -115,7 +114,8 @@ impl<'a> GeoParquetWriter<'a> {
       covering,
       covering_column: COVERING_BBOX_COLUMN,
     };
-    let metadata = geoparquet_metadata(source.source_metadata.passthrough_kv, geo_metadata)?;
+    let metadata =
+      GeoMetadata::parquet_entries(source.source_metadata.passthrough_kv, geo_metadata)?;
     let writer_options =
       ParquetWriterOptions::new(compression.unwrap_or("snappy"), &metadata)?.into_datafusion();
     let output_path = self

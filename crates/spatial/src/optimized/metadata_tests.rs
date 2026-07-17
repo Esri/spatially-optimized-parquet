@@ -6,11 +6,10 @@ use serde_json::{Value, json};
 use crate::geometry::{Extent2D, GeometryKind};
 use crate::geoparquet::SpatialReference;
 
-use crate::geoparquet::{GeoMetadataInput, geoparquet_metadata};
+use crate::geoparquet::{GeoMetadata, GeoMetadataInput};
 
 use super::{
-  MultiscaleLevelInput, XzClusteringIndexInput, ZClusteringIndexInput, optimized_point_metadata,
-  optimized_xz_metadata,
+  ClusteringIndexXZInput, ClusteringIndexZInput, MultiscaleLevelInput, ResolvedOptimization,
 };
 
 fn spatial_reference() -> SpatialReference {
@@ -69,7 +68,7 @@ fn geo_metadata_serializes_crs_extent_wkb_and_covering() {
   let spatial_reference = spatial_reference();
   let geometry_types = [GeometryKind::Point, GeometryKind::MultiPolygon];
   let values = metadata_values(
-    geoparquet_metadata(
+    GeoMetadata::parquet_entries(
       Vec::new(),
       geo_input(&geometry_types, &spatial_reference, true),
     )
@@ -113,7 +112,7 @@ fn geo_metadata_omits_covering_and_replaces_reserved_source_entry() {
   let spatial_reference = spatial_reference();
   let geometry_types = [GeometryKind::Point];
   let values = metadata_values(
-    geoparquet_metadata(
+    GeoMetadata::parquet_entries(
       vec![
         KeyValue::new("geo".to_string(), Some("\"stale\"".to_string())),
         KeyValue::new("source".to_string(), Some("\"census\"".to_string())),
@@ -136,11 +135,11 @@ fn point_geometry_geodisplay_metadata_serializes_z_clustering() {
   let spatial_reference = spatial_reference();
   let geometry_types = [GeometryKind::Point];
   let values = metadata_values(
-    optimized_point_metadata(
+    ResolvedOptimization::optimized_point_metadata(
       Vec::new(),
       geo_input(&geometry_types, &spatial_reference, false),
       "geodisplay",
-      ZClusteringIndexInput {
+      ClusteringIndexZInput {
         code: "zCode".to_string(),
         x_column: "x".to_string(),
         y_column: "y".to_string(),
@@ -193,11 +192,11 @@ fn xz_geodisplay_metadata_serializes_multiscale_clustering() {
   let spatial_reference = spatial_reference();
   let geometry_types = [GeometryKind::Polygon];
   let values = metadata_values(
-    optimized_xz_metadata(
+    ResolvedOptimization::optimized_xz_metadata(
       Vec::new(),
       geo_input(&geometry_types, &spatial_reference, false),
       "geodisplay",
-      XzClusteringIndexInput {
+      ClusteringIndexXZInput {
         code: "xzCode".to_string(),
         encoding: "esriPBF".to_string(),
         geometry_type: "polygon".to_string(),

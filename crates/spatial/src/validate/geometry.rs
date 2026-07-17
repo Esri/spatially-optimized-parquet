@@ -2,9 +2,9 @@ use anyhow::{Result, bail};
 use arrow_array::{Array, BinaryArray, BinaryViewArray, LargeBinaryArray};
 use geo_traits::Dimensions;
 
-use crate::geometry::WkbCoordinate;
 use crate::geometry::{Extent2D, GeometryKind};
-use crate::optimized::{GeometryPartRole, GeometryPartSink, visit_wkb_geometry};
+use crate::geometry::{WkbCoordinate, WkbHeader};
+use crate::optimized::{GeometryPartRole, GeometryPartSink};
 
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
 
@@ -25,119 +25,124 @@ pub(crate) struct GeometryInspection {
   pub(crate) rings: Vec<RingInspection>,
 }
 
-pub(crate) fn inspect_wkb_geometry(bytes: &[u8]) -> Result<GeometryInspection> {
-  let mut sink = InspectionSink::default();
-  let (kind, dimensions) = visit_wkb_geometry(bytes, &mut sink)?;
-  Ok(GeometryInspection {
-    kind,
-    dimensions,
-    extent: sink.extent,
-    finite_coordinates: sink.has_coordinate && sink.finite_coordinates,
-    rings: sink.rings,
-  })
-}
+impl GeometryInspection {
+  pub(crate) fn inspect(bytes: &[u8]) -> Result<Self> {
+    let mut sink = InspectionSink::default();
+    let header = WkbHeader::visit(bytes, &mut sink)?;
+    Ok(Self {
+      kind: header.kind,
+      dimensions: header.dimensions,
+      extent: sink.extent,
+      finite_coordinates: sink.has_coordinate && sink.finite_coordinates,
+      rings: sink.rings,
+    })
+  }
 
-pub(crate) fn validate_geometry_inspection(
-  inspection: &GeometryInspection,
-  expected_geometry_type: &str,
-  expected_has_z: bool,
-  expected_has_m: bool,
-  location: ValidationLocation,
-  report: &mut ValidationReport,
-) {
-  if !kind_matches(inspection.kind, expected_geometry_type) {
-    report.push(
-      ValidationRule::GeometryType,
-      ValidationSeverity::Error,
-      location.clone(),
-      format!(
-        "sampled WKB geometry {:?} does not match geometryType '{expected_geometry_type}'",
-        inspection.kind
-      ),
-    );
-  }
-  let expected_dimensions = match (expected_has_z, expected_has_m) {
-    (false, false) => Dimensions::Xy,
-    (true, false) => Dimensions::Xyz,
-    (false, true) => Dimensions::Xym,
-    (true, true) => Dimensions::Xyzm,
-  };
-  if inspection.dimensions != expected_dimensions {
-    report.push(
-      ValidationRule::GeometryDimension,
-      ValidationSeverity::Error,
-      location.clone(),
-      format!(
-        "sampled WKB geometry dimensions {:?} do not match metadata dimensions {:?}",
-        inspection.dimensions, expected_dimensions
-      ),
-    );
-  }
-  if !inspection.finite_coordinates || inspection.extent.is_none() {
-    report.push(
-      ValidationRule::GeometryCoordinate,
-      ValidationSeverity::Error,
-      location.clone(),
-      "sampled WKB geometry contains no finite coordinates",
-    );
-  }
-  for ring in &inspection.rings {
-    if !ring.closed {
+  pub(crate) fn validate(
+    &self,
+    expected_geometry_type: &str,
+    expected_has_z: bool,
+    expected_has_m: bool,
+    location: ValidationLocation,
+    report: &mut ValidationReport,
+  ) {
+    if !self.matches_geometry_type(expected_geometry_type) {
       report.push(
-        ValidationRule::RingClosure,
+        ValidationRule::GeometryType,
         ValidationSeverity::Error,
         location.clone(),
-        "sampled WKB polygon ring is not closed",
+        format!(
+          "sampled WKB geometry {:?} does not match geometryType '{expected_geometry_type}'",
+          self.kind
+        ),
       );
     }
-    if ring.degenerated {
-      continue;
-    }
-    let expected_positive = ring.role == GeometryPartRole::Exterior;
-    if (expected_positive && ring.signed_area < 0.0)
-      || (!expected_positive && ring.signed_area > 0.0)
-    {
-      let role = if expected_positive {
-        "exterior"
-      } else {
-        "interior"
-      };
+    let expected_dimensions = match (expected_has_z, expected_has_m) {
+      (false, false) => Dimensions::Xy,
+      (true, false) => Dimensions::Xyz,
+      (false, true) => Dimensions::Xym,
+      (true, true) => Dimensions::Xyzm,
+    };
+    if self.dimensions != expected_dimensions {
       report.push(
-        ValidationRule::WkbWinding,
-        ValidationSeverity::Warning,
+        ValidationRule::GeometryDimension,
+        ValidationSeverity::Error,
         location.clone(),
-        format!("sampled WKB {role} ring has unexpected winding"),
+        format!(
+          "sampled WKB geometry dimensions {:?} do not match metadata dimensions {:?}",
+          self.dimensions, expected_dimensions
+        ),
       );
     }
+    if !self.finite_coordinates || self.extent.is_none() {
+      report.push(
+        ValidationRule::GeometryCoordinate,
+        ValidationSeverity::Error,
+        location.clone(),
+        "sampled WKB geometry contains no finite coordinates",
+      );
+    }
+    for ring in &self.rings {
+      if !ring.closed {
+        report.push(
+          ValidationRule::RingClosure,
+          ValidationSeverity::Error,
+          location.clone(),
+          "sampled WKB polygon ring is not closed",
+        );
+      }
+      if ring.degenerated {
+        continue;
+      }
+      let expected_positive = ring.role == GeometryPartRole::Exterior;
+      if (expected_positive && ring.signed_area < 0.0)
+        || (!expected_positive && ring.signed_area > 0.0)
+      {
+        let role = if expected_positive {
+          "exterior"
+        } else {
+          "interior"
+        };
+        report.push(
+          ValidationRule::WkbWinding,
+          ValidationSeverity::Warning,
+          location.clone(),
+          format!("sampled WKB {role} ring has unexpected winding"),
+        );
+      }
+    }
   }
-}
 
-pub(crate) fn binary_value(array: &dyn Array, index: usize) -> Result<Option<Vec<u8>>> {
-  if array.is_null(index) {
-    return Ok(None);
+  pub(crate) fn binary_value(array: &dyn Array, index: usize) -> Result<Option<Vec<u8>>> {
+    if array.is_null(index) {
+      return Ok(None);
+    }
+    if let Some(array) = array.as_any().downcast_ref::<BinaryArray>() {
+      return Ok(Some(array.value(index).to_vec()));
+    }
+    if let Some(array) = array.as_any().downcast_ref::<LargeBinaryArray>() {
+      return Ok(Some(array.value(index).to_vec()));
+    }
+    if let Some(array) = array.as_any().downcast_ref::<BinaryViewArray>() {
+      return Ok(Some(array.value(index).to_vec()));
+    }
+    bail!("expected Arrow binary array, found {}", array.data_type())
   }
-  if let Some(array) = array.as_any().downcast_ref::<BinaryArray>() {
-    return Ok(Some(array.value(index).to_vec()));
-  }
-  if let Some(array) = array.as_any().downcast_ref::<LargeBinaryArray>() {
-    return Ok(Some(array.value(index).to_vec()));
-  }
-  if let Some(array) = array.as_any().downcast_ref::<BinaryViewArray>() {
-    return Ok(Some(array.value(index).to_vec()));
-  }
-  bail!("expected Arrow binary array, found {}", array.data_type())
-}
 
-fn kind_matches(kind: GeometryKind, expected: &str) -> bool {
-  match expected {
-    "point" => kind == GeometryKind::Point,
-    "multipoint" => kind == GeometryKind::MultiPoint,
-    "polyline" => matches!(
-      kind,
-      GeometryKind::LineString | GeometryKind::MultiLineString
-    ),
-    "polygon" => matches!(kind, GeometryKind::Polygon | GeometryKind::MultiPolygon),
-    _ => false,
+  fn matches_geometry_type(&self, expected: &str) -> bool {
+    match expected {
+      "point" => self.kind == GeometryKind::Point,
+      "multipoint" => self.kind == GeometryKind::MultiPoint,
+      "polyline" => matches!(
+        self.kind,
+        GeometryKind::LineString | GeometryKind::MultiLineString
+      ),
+      "polygon" => matches!(
+        self.kind,
+        GeometryKind::Polygon | GeometryKind::MultiPolygon
+      ),
+      _ => false,
+    }
   }
 }
 
@@ -160,6 +165,24 @@ impl Default for InspectionSink {
       current_coordinates: Vec::new(),
       rings: Vec::new(),
     }
+  }
+}
+
+impl InspectionSink {
+  fn signed_area(coordinates: &[(f64, f64)]) -> f64 {
+    if coordinates.len() < 3 {
+      return 0.0;
+    }
+    let mut twice_area = 0.0;
+    for pair in coordinates.windows(2) {
+      twice_area += pair[0].0 * pair[1].1 - pair[1].0 * pair[0].1;
+    }
+    if coordinates.first() != coordinates.last() {
+      let first = coordinates[0];
+      let last = coordinates[coordinates.len() - 1];
+      twice_area += last.0 * first.1 - first.0 * last.1;
+    }
+    twice_area / 2.0
   }
 }
 
@@ -203,7 +226,7 @@ impl GeometryPartSink for InspectionSink {
     }
     let closed = self.current_coordinates.len() >= 2
       && self.current_coordinates.first() == self.current_coordinates.last();
-    let signed_area = signed_area(&self.current_coordinates);
+    let signed_area = Self::signed_area(&self.current_coordinates);
     let degenerated = self.current_coordinates.len() < 4 || signed_area.abs() <= f64::EPSILON;
     self.rings.push(RingInspection {
       role,
@@ -213,22 +236,6 @@ impl GeometryPartSink for InspectionSink {
     });
     self.current_coordinates.clear();
   }
-}
-
-fn signed_area(coordinates: &[(f64, f64)]) -> f64 {
-  if coordinates.len() < 3 {
-    return 0.0;
-  }
-  let mut twice_area = 0.0;
-  for pair in coordinates.windows(2) {
-    twice_area += pair[0].0 * pair[1].1 - pair[1].0 * pair[0].1;
-  }
-  if coordinates.first() != coordinates.last() {
-    let first = coordinates[0];
-    let last = coordinates[coordinates.len() - 1];
-    twice_area += last.0 * first.1 - first.0 * last.1;
-  }
-  twice_area / 2.0
 }
 
 #[cfg(test)]
@@ -247,7 +254,7 @@ mod tests {
     ]);
     let bytes = crate::geometry::write_test_geometry(&geometry);
 
-    let inspection = inspect_wkb_geometry(&bytes).unwrap();
+    let inspection = GeometryInspection::inspect(&bytes).unwrap();
 
     assert_eq!(inspection.kind, GeometryKind::Polygon);
     assert!(inspection.rings[0].closed);

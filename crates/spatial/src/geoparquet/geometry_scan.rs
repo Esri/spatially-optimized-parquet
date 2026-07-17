@@ -3,8 +3,7 @@
 use anyhow::{Context, Result, bail};
 use futures_util::StreamExt;
 
-use crate::geometry::{Extent2D, GeometryArray, GeometryKind, geometry_kind_from_wkb};
-use crate::optimized::geometry_extent_from_wkb;
+use crate::geometry::{Extent2D, GeometryArray, GeometryKind, WkbHeader};
 
 pub(super) async fn scan_geometry_metadata(
   dataframe: datafusion::dataframe::DataFrame,
@@ -43,11 +42,11 @@ fn scan_binary_values(
     let Some(bytes) = value else {
       continue;
     };
-    let geometry_kind = geometry_kind_from_wkb(bytes)?;
+    let geometry_kind = WkbHeader::read(bytes)?.kind;
     if !geometry_types.contains(&geometry_kind) {
       geometry_types.push(geometry_kind);
     }
-    let extent = geometry_extent_from_wkb(bytes)?;
+    let extent = Extent2D::from_wkb(bytes)?;
     match full_extent {
       Some(full_extent) => {
         full_extent.xmin = full_extent.xmin.min(extent.xmin);

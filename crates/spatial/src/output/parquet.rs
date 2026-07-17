@@ -27,14 +27,14 @@ pub(crate) struct ParquetWriterOptions {
 impl ParquetWriterOptions {
   /// Build Parquet writer options from a compression name and key-value metadata.
   pub(crate) fn new(compression: &str, kv_metadata: &[KeyValue]) -> Result<Self> {
-    let compression = parse_compression(compression)?;
+    let compression = Self::parse_compression(compression)?;
     let mut options = TableParquetOptions::new();
-    options.global.compression = Some(compression_to_datafusion_string(compression));
+    options.global.compression = Some(Self::datafusion_compression_name(compression));
     options.global.dictionary_enabled = Some(true);
     options.global.writer_version = DFParquetWriterVersion::V2_0;
-    options.global.maximum_parallel_row_group_writers = available_parallelism();
-    options.global.max_row_group_size = configured_max_row_group_size();
-    options.global.write_batch_size = configured_write_batch_size();
+    options.global.maximum_parallel_row_group_writers = Self::available_parallelism();
+    options.global.max_row_group_size = Self::configured_max_row_group_size();
+    options.global.write_batch_size = Self::configured_write_batch_size();
     options.key_value_metadata = kv_metadata
       .iter()
       .map(|kv| (kv.key.clone(), kv.value.clone()))
@@ -64,69 +64,69 @@ impl ParquetWriterOptions {
     }
     self
   }
-}
 
-fn parse_compression(compression: &str) -> Result<Compression> {
-  let codec = match compression.to_ascii_lowercase().as_str() {
-    "snappy" => Compression::SNAPPY,
-    "gzip" => Compression::GZIP(GzipLevel::default()),
-    "brotli" => Compression::BROTLI(BrotliLevel::default()),
-    "lz4" => Compression::LZ4,
-    "lz4_raw" => Compression::LZ4_RAW,
-    "zstd" => Compression::ZSTD(ZstdLevel::default()),
-    "uncompressed" => Compression::UNCOMPRESSED,
-    other => {
-      return Err(std::io::Error::new(
-        std::io::ErrorKind::InvalidInput,
-        format!("invalid compression: {other}"),
-      ))
-      .context("parse compression");
-    }
-  };
-  Ok(codec)
-}
-
-fn compression_to_datafusion_string(compression: Compression) -> String {
-  match compression {
-    Compression::UNCOMPRESSED => "uncompressed".to_string(),
-    Compression::SNAPPY => "snappy".to_string(),
-    Compression::GZIP(level) => format!("gzip({})", level.compression_level()),
-    Compression::LZO => "lzo".to_string(),
-    Compression::BROTLI(level) => format!("brotli({})", level.compression_level()),
-    Compression::LZ4 => "lz4".to_string(),
-    Compression::ZSTD(level) => format!("zstd({})", level.compression_level()),
-    Compression::LZ4_RAW => "lz4_raw".to_string(),
+  fn parse_compression(compression: &str) -> Result<Compression> {
+    let codec = match compression.to_ascii_lowercase().as_str() {
+      "snappy" => Compression::SNAPPY,
+      "gzip" => Compression::GZIP(GzipLevel::default()),
+      "brotli" => Compression::BROTLI(BrotliLevel::default()),
+      "lz4" => Compression::LZ4,
+      "lz4_raw" => Compression::LZ4_RAW,
+      "zstd" => Compression::ZSTD(ZstdLevel::default()),
+      "uncompressed" => Compression::UNCOMPRESSED,
+      other => {
+        return Err(std::io::Error::new(
+          std::io::ErrorKind::InvalidInput,
+          format!("invalid compression: {other}"),
+        ))
+        .context("parse compression");
+      }
+    };
+    Ok(codec)
   }
-}
 
-fn configured_max_row_group_size() -> usize {
-  env_usize(ROW_GROUP_SIZE_ENV).unwrap_or(DEFAULT_MAX_ROW_GROUP_SIZE)
-}
+  fn datafusion_compression_name(compression: Compression) -> String {
+    match compression {
+      Compression::UNCOMPRESSED => "uncompressed".to_string(),
+      Compression::SNAPPY => "snappy".to_string(),
+      Compression::GZIP(level) => format!("gzip({})", level.compression_level()),
+      Compression::LZO => "lzo".to_string(),
+      Compression::BROTLI(level) => format!("brotli({})", level.compression_level()),
+      Compression::LZ4 => "lz4".to_string(),
+      Compression::ZSTD(level) => format!("zstd({})", level.compression_level()),
+      Compression::LZ4_RAW => "lz4_raw".to_string(),
+    }
+  }
 
-fn configured_write_batch_size() -> usize {
-  env_usize(WRITE_BATCH_SIZE_ENV).unwrap_or(DEFAULT_WRITE_BATCH_SIZE)
-}
+  fn configured_max_row_group_size() -> usize {
+    Self::env_usize(ROW_GROUP_SIZE_ENV).unwrap_or(DEFAULT_MAX_ROW_GROUP_SIZE)
+  }
 
-fn available_parallelism() -> usize {
-  std::thread::available_parallelism()
-    .map(usize::from)
-    .unwrap_or(1)
-}
+  fn configured_write_batch_size() -> usize {
+    Self::env_usize(WRITE_BATCH_SIZE_ENV).unwrap_or(DEFAULT_WRITE_BATCH_SIZE)
+  }
 
-fn env_usize(name: &str) -> Option<usize> {
-  std::env::var(name)
-    .ok()
-    .and_then(|value| value.parse::<usize>().ok())
-    .filter(|value| *value > 0)
+  fn available_parallelism() -> usize {
+    std::thread::available_parallelism()
+      .map(usize::from)
+      .unwrap_or(1)
+  }
+
+  fn env_usize(name: &str) -> Option<usize> {
+    std::env::var(name)
+      .ok()
+      .and_then(|value| value.parse::<usize>().ok())
+      .filter(|value| *value > 0)
+  }
 }
 
 #[cfg(test)]
 mod tests {
-  use super::parse_compression;
+  use super::ParquetWriterOptions;
 
   #[test]
   fn compression_parser_rejects_invalid_codec() {
-    let error = parse_compression("bogus").unwrap_err();
+    let error = ParquetWriterOptions::parse_compression("bogus").unwrap_err();
     assert!(error.to_string().contains("compression"));
   }
 }

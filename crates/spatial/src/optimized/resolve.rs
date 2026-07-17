@@ -12,7 +12,6 @@ use crate::optimized::extent_resolve::ExtentResolver;
 use crate::optimized::multiscale::MultiscaleLevel;
 use crate::pipeline::OutputExecutionOptions;
 
-use super::multiscale::create_multiscale_levels;
 use super::{ClusteringFamily, GeometryInfo};
 
 /// Stores resolved source, geometry, projection, extent, and encoding state for optimized output.
@@ -119,7 +118,7 @@ pub(crate) async fn resolve_optimized_geoparquet(
   let levels = match geometry.clustering_family {
     ClusteringFamily::PointGeometry => Vec::new(),
     ClusteringFamily::ComplexGeometry => {
-      create_multiscale_levels(options.output_wkid, geometry.ty)?
+      MultiscaleLevel::create_all(options.output_wkid, geometry.ty)?
     }
   };
   let optimization = ResolvedOptimization::new(

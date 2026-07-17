@@ -20,7 +20,7 @@ use crate::geometry::{
 };
 use crate::input::{InputOpenOptions, InputSource, RowRange, SourceFormat, open_input};
 use crate::session::DataFusionSession;
-use crate::{InputOptions, OutputMode, OutputOptions, SpatialPipelineOptions, run, validate};
+use crate::{InputOptions, OutputMode, OutputOptions, Pipeline, SpatialPipelineOptions, validate};
 
 fn runtime() -> Runtime {
   Runtime::new().unwrap()
@@ -766,7 +766,7 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
       assert_eq!(sink.coordinates[0].m, dimension_case.has_m.then_some(4.0));
 
       let output = temp.path().join("optimized.parquet");
-      let optimization_result = runtime().block_on(run(SpatialPipelineOptions::new(
+      let optimization_result = runtime().block_on(Pipeline::run(SpatialPipelineOptions::new(
         InputOptions::new(
           path.to_string_lossy(),
           None,

@@ -10,140 +10,156 @@ use crate::geometry::Extent2D;
 use crate::geometry::{GeometryEncoding, GeometryKind};
 use crate::input::{SourceCoveringMetadata, SourceGeometryMetadata};
 
-/// Parse and require consistent GeoParquet metadata across all discovered files.
-pub(super) fn load_geo_metadata(
-  metadata_items: &[ArrowReaderMetadata],
-) -> Result<Option<GeoParquetMetadata>> {
-  let mut geo_meta: Option<GeoParquetMetadata> = None;
-  let mut saw_geo = false;
-  let mut saw_missing_geo = false;
+use super::source::ParquetInputSource;
 
-  for metadata in metadata_items {
-    match parse_geo_metadata(metadata).context("parse geoparquet metadata")? {
-      Some(file_geo_meta) => {
-        saw_geo = true;
-        if let Some(existing) = geo_meta.as_mut() {
-          existing.try_update(&file_geo_meta)?;
-        } else {
-          geo_meta = Some(file_geo_meta);
+impl ParquetInputSource {
+  /// Parse and require consistent GeoParquet metadata across all discovered files.
+  pub(super) fn geo_metadata(&self) -> Result<Option<GeoParquetMetadata>> {
+    let mut geo_meta: Option<GeoParquetMetadata> = None;
+    let mut saw_geo = false;
+    let mut saw_missing_geo = false;
+    for metadata in &self.metadata {
+      match Self::parse_geo_metadata(metadata).context("parse geoparquet metadata")? {
+        Some(file_geo_meta) => {
+          saw_geo = true;
+          if let Some(existing) = geo_meta.as_mut() {
+            existing.try_update(&file_geo_meta)?;
+          } else {
+            geo_meta = Some(file_geo_meta);
+          }
         }
-      }
-      None => saw_missing_geo = true,
-    }
-  }
-
-  if saw_geo && saw_missing_geo {
-    return Err(anyhow::anyhow!(
-      "inconsistent geoparquet metadata across input files"
-    ));
-  }
-
-  Ok(geo_meta)
-}
-
-/// Decode the GeoParquet `geo` key from one Parquet footer.
-fn parse_geo_metadata(metadata: &ArrowReaderMetadata) -> Result<Option<GeoParquetMetadata>> {
-  let Some(mut json) = metadata_json(metadata, "geo")? else {
-    return Ok(None);
-  };
-  sanitize_geo_metadata_json(&mut json);
-  serde_json::from_value(json)
-    .context("deserialize geo metadata")
-    .map(Some)
-}
-
-fn metadata_json(metadata: &ArrowReaderMetadata, key: &str) -> Result<Option<Value>> {
-  let Some(value) = metadata
-    .metadata()
-    .file_metadata()
-    .key_value_metadata()
-    .and_then(|items| items.iter().find(|item| item.key == key))
-    .and_then(|item| item.value.as_ref())
-  else {
-    return Ok(None);
-  };
-  serde_json::from_str(value)
-    .with_context(|| format!("decode {key} metadata json"))
-    .map(Some)
-}
-
-pub(super) fn load_covering_metadata(
-  metadata_items: &[ArrowReaderMetadata],
-  geometry_column: &str,
-) -> Result<Option<SourceCoveringMetadata>> {
-  let mut covering = None;
-  let mut saw_missing = false;
-  for metadata in metadata_items {
-    let file_covering = metadata_json(metadata, "geo")?
-      .as_ref()
-      .and_then(|json| covering_column(json, geometry_column));
-    match file_covering {
-      Some(file_covering) => {
-        if saw_missing
-          || covering
-            .as_ref()
-            .is_some_and(|existing| existing != &file_covering)
-        {
-          return Ok(None);
-        }
-        covering = Some(file_covering);
-      }
-      None => {
-        if covering.is_some() {
-          return Ok(None);
-        }
-        saw_missing = true;
+        None => saw_missing_geo = true,
       }
     }
-  }
-  Ok(covering)
-}
-
-fn covering_column(json: &Value, geometry_column: &str) -> Option<SourceCoveringMetadata> {
-  let bbox = json
-    .get("columns")?
-    .get(geometry_column)?
-    .get("covering")?
-    .get("bbox")?;
-  let paths = [
-    ("xmin", bbox.get("xmin")?),
-    ("ymin", bbox.get("ymin")?),
-    ("xmax", bbox.get("xmax")?),
-    ("ymax", bbox.get("ymax")?),
-  ];
-  let mut covering_column = None;
-  for (expected_field, path) in paths {
-    let path = path.as_array()?;
-    if path.len() != 2 || path[1].as_str()? != expected_field {
-      return None;
+    if saw_geo && saw_missing_geo {
+      return Err(anyhow::anyhow!(
+        "inconsistent geoparquet metadata across input files"
+      ));
     }
-    let column = path[0].as_str()?;
-    match &covering_column {
-      Some(existing) if existing != column => return None,
-      Some(_) => {}
-      None => covering_column = Some(column.to_string()),
-    }
+    Ok(geo_meta)
   }
-  covering_column.map(|column| SourceCoveringMetadata { column })
-}
 
-/// Remove non-semantic metadata differences before comparing file-level GeoParquet JSON.
-fn sanitize_geo_metadata_json(json: &mut Value) {
-  let Some(columns) = json.get_mut("columns").and_then(Value::as_object_mut) else {
-    return;
-  };
+  pub(super) fn covering_metadata(
+    &self,
+    geometry_column: &str,
+  ) -> Result<Option<SourceCoveringMetadata>> {
+    let mut covering = None;
+    let mut saw_missing = false;
+    for metadata in &self.metadata {
+      let file_covering = Self::metadata_json(metadata, "geo")?
+        .as_ref()
+        .and_then(|json| Self::covering_column(json, geometry_column));
+      match file_covering {
+        Some(file_covering) => {
+          if saw_missing
+            || covering
+              .as_ref()
+              .is_some_and(|existing| existing != &file_covering)
+          {
+            return Ok(None);
+          }
+          covering = Some(file_covering);
+        }
+        None => {
+          if covering.is_some() {
+            return Ok(None);
+          }
+          saw_missing = true;
+        }
+      }
+    }
+    Ok(covering)
+  }
 
-  for column_meta in columns.values_mut() {
-    let Some(object) = column_meta.as_object_mut() else {
-      continue;
+  /// Preserve non-reserved key-value metadata exactly once across a file set.
+  pub(super) fn passthrough_metadata(&self) -> Vec<KeyValue> {
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    for metadata in &self.metadata {
+      if let Some(kv_metadata) = metadata.metadata().file_metadata().key_value_metadata() {
+        for kv in kv_metadata {
+          if kv.key == "geo" || kv.key == "geodisplay" || kv.key == "ARROW:schema" {
+            continue;
+          }
+          let identity = (kv.key.clone(), kv.value.clone());
+          if seen.insert(identity) {
+            out.push(kv.clone());
+          }
+        }
+      }
+    }
+    out
+  }
+
+  fn parse_geo_metadata(metadata: &ArrowReaderMetadata) -> Result<Option<GeoParquetMetadata>> {
+    let Some(mut json) = Self::metadata_json(metadata, "geo")? else {
+      return Ok(None);
     };
+    Self::sanitize_geo_metadata_json(&mut json);
+    serde_json::from_value(json)
+      .context("deserialize geo metadata")
+      .map(Some)
+  }
 
-    let remove_bbox = object
-      .get("bbox")
-      .and_then(Value::as_array)
-      .is_some_and(|bbox| bbox.iter().any(Value::is_null));
-    if remove_bbox {
-      object.remove("bbox");
+  fn metadata_json(metadata: &ArrowReaderMetadata, key: &str) -> Result<Option<Value>> {
+    let Some(value) = metadata
+      .metadata()
+      .file_metadata()
+      .key_value_metadata()
+      .and_then(|items| items.iter().find(|item| item.key == key))
+      .and_then(|item| item.value.as_ref())
+    else {
+      return Ok(None);
+    };
+    serde_json::from_str(value)
+      .with_context(|| format!("decode {key} metadata json"))
+      .map(Some)
+  }
+
+  fn covering_column(json: &Value, geometry_column: &str) -> Option<SourceCoveringMetadata> {
+    let bbox = json
+      .get("columns")?
+      .get(geometry_column)?
+      .get("covering")?
+      .get("bbox")?;
+    let paths = [
+      ("xmin", bbox.get("xmin")?),
+      ("ymin", bbox.get("ymin")?),
+      ("xmax", bbox.get("xmax")?),
+      ("ymax", bbox.get("ymax")?),
+    ];
+    let mut covering_column = None;
+    for (expected_field, path) in paths {
+      let path = path.as_array()?;
+      if path.len() != 2 || path[1].as_str()? != expected_field {
+        return None;
+      }
+      let column = path[0].as_str()?;
+      match &covering_column {
+        Some(existing) if existing != column => return None,
+        Some(_) => {}
+        None => covering_column = Some(column.to_string()),
+      }
+    }
+    covering_column.map(|column| SourceCoveringMetadata { column })
+  }
+
+  /// Remove non-semantic metadata differences before comparing file-level GeoParquet JSON.
+  fn sanitize_geo_metadata_json(json: &mut Value) {
+    let Some(columns) = json.get_mut("columns").and_then(Value::as_object_mut) else {
+      return;
+    };
+    for column_meta in columns.values_mut() {
+      let Some(object) = column_meta.as_object_mut() else {
+        continue;
+      };
+      let remove_bbox = object
+        .get("bbox")
+        .and_then(Value::as_array)
+        .is_some_and(|bbox| bbox.iter().any(Value::is_null));
+      if remove_bbox {
+        object.remove("bbox");
+      }
     }
   }
 }
@@ -164,86 +180,67 @@ impl SourceGeometryMetadata {
     let geometry_types = column_meta
       .geometry_types
       .iter()
-      .map(|geometry_type| map_geo_geometry_type(geometry_type.geometry_type()))
+      .map(|geometry_type| Self::from_geoparquet_geometry_type(geometry_type.geometry_type()))
       .collect();
 
     Ok(Some(SourceGeometryMetadata {
       column: geo_meta.primary_column.clone(),
       encoding: GeometryEncoding::Wkb,
       geometry_types,
-      bbox: bbox_to_extent(column_meta.bbox.as_deref()),
+      bbox: Self::bbox_from_geoparquet(column_meta.bbox.as_deref()),
       covering,
       projjson: column_meta.crs.clone(),
-      has_z: has_dimension_suffix(column_meta, "Z"),
-      has_m: has_dimension_suffix(column_meta, "M"),
+      has_z: Self::has_geoparquet_dimension(column_meta, "Z"),
+      has_m: Self::has_geoparquet_dimension(column_meta, "M"),
     }))
   }
-}
-
-pub(super) fn map_geo_geometry_type(geometry_type: GeoParquetGeometryType) -> GeometryKind {
-  match geometry_type {
-    GeoParquetGeometryType::Point => GeometryKind::Point,
-    GeoParquetGeometryType::LineString => GeometryKind::LineString,
-    GeoParquetGeometryType::MultiPoint => GeometryKind::MultiPoint,
-    GeoParquetGeometryType::MultiLineString => GeometryKind::MultiLineString,
-    GeoParquetGeometryType::Polygon => GeometryKind::Polygon,
-    GeoParquetGeometryType::MultiPolygon => GeometryKind::MultiPolygon,
-    GeoParquetGeometryType::GeometryCollection => GeometryKind::GeometryCollection,
-  }
-}
-
-fn bbox_to_extent(bbox: Option<&[f64]>) -> Option<Extent2D> {
-  let bbox = bbox?;
-  if bbox.len() < 4 {
-    return None;
-  }
-  Some(Extent2D {
-    xmin: bbox[0],
-    ymin: bbox[1],
-    xmax: bbox[bbox.len() - 2],
-    ymax: bbox[bbox.len() - 1],
-  })
-}
-
-fn has_dimension_suffix(
-  column_meta: &geoparquet::metadata::GeoParquetColumnMetadata,
-  dimension: &str,
-) -> bool {
-  column_meta.geometry_types.iter().any(|geometry_type| {
-    let value = geometry_type.to_string();
-    match dimension {
-      "Z" => value.ends_with(" Z") || value.ends_with(" ZM"),
-      "M" => value.ends_with(" M") || value.ends_with(" ZM"),
-      _ => false,
+  pub(super) fn from_geoparquet_geometry_type(
+    geometry_type: GeoParquetGeometryType,
+  ) -> GeometryKind {
+    match geometry_type {
+      GeoParquetGeometryType::Point => GeometryKind::Point,
+      GeoParquetGeometryType::LineString => GeometryKind::LineString,
+      GeoParquetGeometryType::MultiPoint => GeometryKind::MultiPoint,
+      GeoParquetGeometryType::MultiLineString => GeometryKind::MultiLineString,
+      GeoParquetGeometryType::Polygon => GeometryKind::Polygon,
+      GeoParquetGeometryType::MultiPolygon => GeometryKind::MultiPolygon,
+      GeoParquetGeometryType::GeometryCollection => GeometryKind::GeometryCollection,
     }
-  })
-}
+  }
 
-/// Preserve non-reserved key-value metadata exactly once across a file set.
-pub(super) fn passthrough_metadata(metadata_items: &[ArrowReaderMetadata]) -> Vec<KeyValue> {
-  let mut seen = BTreeSet::new();
-  let mut out = Vec::new();
-  for metadata in metadata_items {
-    if let Some(kv_metadata) = metadata.metadata().file_metadata().key_value_metadata() {
-      for kv in kv_metadata {
-        if kv.key == "geo" || kv.key == "geodisplay" || kv.key == "ARROW:schema" {
-          continue;
-        }
-        let identity = (kv.key.clone(), kv.value.clone());
-        if seen.insert(identity) {
-          out.push(kv.clone());
-        }
+  fn bbox_from_geoparquet(bbox: Option<&[f64]>) -> Option<Extent2D> {
+    let bbox = bbox?;
+    if bbox.len() < 4 {
+      return None;
+    }
+    Some(Extent2D {
+      xmin: bbox[0],
+      ymin: bbox[1],
+      xmax: bbox[bbox.len() - 2],
+      ymax: bbox[bbox.len() - 1],
+    })
+  }
+
+  fn has_geoparquet_dimension(
+    column_meta: &geoparquet::metadata::GeoParquetColumnMetadata,
+    dimension: &str,
+  ) -> bool {
+    column_meta.geometry_types.iter().any(|geometry_type| {
+      let value = geometry_type.to_string();
+      match dimension {
+        "Z" => value.ends_with(" Z") || value.ends_with(" ZM"),
+        "M" => value.ends_with(" M") || value.ends_with(" ZM"),
+        _ => false,
       }
-    }
+    })
   }
-  out
 }
 
 #[cfg(test)]
 mod tests {
   use serde_json::json;
 
-  use super::{bbox_to_extent, covering_column, has_dimension_suffix, sanitize_geo_metadata_json};
+  use super::{ParquetInputSource, SourceGeometryMetadata};
 
   #[test]
   fn metadata_sanitization_removes_null_bbox_values() {
@@ -256,14 +253,16 @@ mod tests {
       }
     });
 
-    sanitize_geo_metadata_json(&mut metadata);
+    ParquetInputSource::sanitize_geo_metadata_json(&mut metadata);
 
     assert!(metadata["columns"]["geometry"].get("bbox").is_none());
   }
 
   #[test]
   fn bbox_normalization_uses_outer_xy_values_for_dimensioned_bounds() {
-    let extent = bbox_to_extent(Some(&[-1.0, -2.0, 10.0, 20.0, 3.0, 4.0])).unwrap();
+    let extent =
+      SourceGeometryMetadata::bbox_from_geoparquet(Some(&[-1.0, -2.0, 10.0, 20.0, 3.0, 4.0]))
+        .unwrap();
 
     assert_eq!(extent.xmin, -1.0);
     assert_eq!(extent.ymin, -2.0);
@@ -273,8 +272,8 @@ mod tests {
 
   #[test]
   fn bbox_normalization_rejects_incomplete_bounds() {
-    assert!(bbox_to_extent(Some(&[-1.0, -2.0, 3.0])).is_none());
-    assert!(bbox_to_extent(None).is_none());
+    assert!(SourceGeometryMetadata::bbox_from_geoparquet(Some(&[-1.0, -2.0, 3.0])).is_none());
+    assert!(SourceGeometryMetadata::bbox_from_geoparquet(None).is_none());
   }
 
   #[test]
@@ -293,8 +292,14 @@ mod tests {
       }))
       .unwrap();
 
-      assert_eq!(has_dimension_suffix(&column, "Z"), expected_z);
-      assert_eq!(has_dimension_suffix(&column, "M"), expected_m);
+      assert_eq!(
+        SourceGeometryMetadata::has_geoparquet_dimension(&column, "Z"),
+        expected_z
+      );
+      assert_eq!(
+        SourceGeometryMetadata::has_geoparquet_dimension(&column, "M"),
+        expected_m
+      );
     }
   }
 
@@ -329,7 +334,7 @@ mod tests {
       }
     });
 
-    assert!(covering_column(&mixed, "geometry").is_none());
-    assert!(covering_column(&deep, "geometry").is_none());
+    assert!(ParquetInputSource::covering_column(&mixed, "geometry").is_none());
+    assert!(ParquetInputSource::covering_column(&deep, "geometry").is_none());
   }
 }

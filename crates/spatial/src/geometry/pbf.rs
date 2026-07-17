@@ -12,9 +12,8 @@ use std::sync::Arc;
 
 use super::{QuantizedGeometry, encode_deltas_xy};
 
-/// Reuses quantization vectors and serialization storage across geometry encodes.
 #[derive(Debug, Default)]
-pub(crate) struct GeometryEncodeScratch {
+struct GeometryEncodeScratch {
   quantized_coords: Vec<i64>,
   quantized_lengths: Vec<u32>,
   buffer: Vec<u8>,
@@ -28,40 +27,39 @@ pub(crate) struct PbfGeometry {
   pub(crate) coords: Vec<i64>,
 }
 
-/// Decode one Esri PBF geometry payload through the writer's wire schema.
-pub(crate) fn decode_pbf_geometry(bytes: &[u8]) -> Result<PbfGeometry> {
-  Ok(PbfGeometry::decode(bytes)?)
+impl PbfGeometry {
+  /// Decode one Esri PBF geometry payload through the writer's wire schema.
+  pub(crate) fn from_bytes(bytes: &[u8]) -> Result<Self> {
+    Ok(Self::decode(bytes)?)
+  }
 }
 
-/// Serialize pre-quantized absolute coordinates as a PBF payload.
-pub(crate) fn encode_quantized_geometry_with_scratch<'a>(
-  geometry: &QuantizedGeometry,
-  scratch: &'a mut GeometryEncodeScratch,
-) -> Result<&'a [u8]> {
-  scratch.quantized_coords.clear();
-  scratch
-    .quantized_coords
-    .extend_from_slice(&geometry.coordinates);
-  scratch.quantized_lengths.clear();
-  scratch
-    .quantized_lengths
-    .extend_from_slice(&geometry.lengths);
-  encode_deltas_xy(
-    &mut scratch.quantized_coords,
-    &scratch.quantized_lengths,
-    geometry.has_z,
-    geometry.has_m,
-  );
-  let message = PbfGeometry {
-    lengths: std::mem::take(&mut scratch.quantized_lengths),
-    coords: std::mem::take(&mut scratch.quantized_coords),
-  };
-  scratch.buffer.clear();
-  scratch.buffer.reserve(message.encoded_len());
-  message.encode(&mut scratch.buffer)?;
-  scratch.quantized_coords = message.coords;
-  scratch.quantized_lengths = message.lengths;
-  Ok(scratch.buffer.as_slice())
+impl GeometryEncodeScratch {
+  /// Serialize pre-quantized absolute coordinates as a PBF payload.
+  fn encode(&mut self, geometry: &QuantizedGeometry) -> Result<&[u8]> {
+    self.quantized_coords.clear();
+    self
+      .quantized_coords
+      .extend_from_slice(&geometry.coordinates);
+    self.quantized_lengths.clear();
+    self.quantized_lengths.extend_from_slice(&geometry.lengths);
+    encode_deltas_xy(
+      &mut self.quantized_coords,
+      &self.quantized_lengths,
+      geometry.has_z,
+      geometry.has_m,
+    );
+    let message = PbfGeometry {
+      lengths: std::mem::take(&mut self.quantized_lengths),
+      coords: std::mem::take(&mut self.quantized_coords),
+    };
+    self.buffer.clear();
+    self.buffer.reserve(message.encoded_len());
+    message.encode(&mut self.buffer)?;
+    self.quantized_coords = message.coords;
+    self.quantized_lengths = message.lengths;
+    Ok(self.buffer.as_slice())
+  }
 }
 
 /// Builds a BinaryArray containing one Esri PBF payload per geometry row.
@@ -81,7 +79,7 @@ impl PbfArrayBuilder {
 
   /// Append one absolute quantized geometry as a PBF payload.
   pub(crate) fn append(&mut self, geometry: &QuantizedGeometry) -> Result<()> {
-    let bytes = encode_quantized_geometry_with_scratch(geometry, &mut self.scratch)?;
+    let bytes = self.scratch.encode(geometry)?;
     self.builder.append_value(bytes);
     Ok(())
   }
@@ -121,9 +119,7 @@ mod tests {
       has_m: false,
     };
     let mut scratch = GeometryEncodeScratch::default();
-    let bytes = encode_quantized_geometry_with_scratch(&geometry, &mut scratch)
-      .unwrap()
-      .to_vec();
+    let bytes = scratch.encode(&geometry).unwrap().to_vec();
     let decoded = PbfGeometry::decode(Cursor::new(&bytes)).unwrap();
     let esri_decoded = EsriPbfGeometry::decode(Cursor::new(bytes)).unwrap();
     assert_eq!(decoded.lengths, vec![4]);

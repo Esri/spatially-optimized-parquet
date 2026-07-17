@@ -14,16 +14,6 @@ pub(crate) enum ClusteringFamily {
   ComplexGeometry,
 }
 
-/// Resolve clustering behavior from the canonical geometry type.
-pub(super) fn clustering_family(ty: GeometryType) -> ClusteringFamily {
-  match ty {
-    GeometryType::Point => ClusteringFamily::PointGeometry,
-    GeometryType::MultiPoint | GeometryType::Polyline | GeometryType::Polygon => {
-      ClusteringFamily::ComplexGeometry
-    }
-  }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 /// Stores geometry facts required by optimized clustering and encoding.
 pub(crate) struct GeometryInfo {
@@ -46,26 +36,38 @@ impl GeometryInfo {
     Ok(Self {
       geometry: source.geometry.clone(),
       ty,
-      clustering_family: clustering_family(ty),
+      clustering_family: ClusteringFamily::from_geometry_type(ty),
       has_z: source.has_z,
       has_m: source.has_m,
     })
   }
 }
 
+impl ClusteringFamily {
+  /// Resolve the clustering strategy from one canonical geometry type.
+  pub(crate) fn from_geometry_type(geometry_type: GeometryType) -> Self {
+    match geometry_type {
+      GeometryType::Point => Self::PointGeometry,
+      GeometryType::MultiPoint | GeometryType::Polyline | GeometryType::Polygon => {
+        Self::ComplexGeometry
+      }
+    }
+  }
+}
+
 #[cfg(test)]
 mod tests {
-  use super::{ClusteringFamily, clustering_family};
+  use super::ClusteringFamily;
   use crate::geometry::GeometryType;
 
   #[test]
   fn resolves_canonical_geometry_types_into_clustering_families() {
     assert_eq!(
-      clustering_family(GeometryType::Polygon),
+      ClusteringFamily::from_geometry_type(GeometryType::Polygon),
       ClusteringFamily::ComplexGeometry
     );
     assert_eq!(
-      clustering_family(GeometryType::Point),
+      ClusteringFamily::from_geometry_type(GeometryType::Point),
       ClusteringFamily::PointGeometry
     );
   }

@@ -5,7 +5,7 @@ use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
 
 use crate::geoparquet::SpatialReference;
-use crate::input::{InputOpenOptions, InputSource, RowRange, open_input, resolve_source_format};
+use crate::input::{InputOpenOptions, InputSource, RowRange, SourceFormat, open_input};
 use crate::optimized::validate_internal_projection_columns;
 use crate::output::{OutputMode, OutputPath};
 use crate::session::DataFusionSession;
@@ -15,15 +15,15 @@ use super::{
   PipelineKind, PlainPipeline, SpatialPipelineOptions, SpatialPipelineResult, SpatialPipelineState,
 };
 
-/// Execute one spatial request through durable GeoParquet output.
-pub async fn run(options: SpatialPipelineOptions) -> Result<SpatialPipelineResult> {
-  Pipeline::new(options).await?.execute().await
-}
-
 impl Pipeline {
+  /// Execute one spatial request through durable GeoParquet output.
+  pub async fn run(options: SpatialPipelineOptions) -> Result<SpatialPipelineResult> {
+    Self::new(options).await?.execute().await
+  }
+
   async fn new(options: SpatialPipelineOptions) -> Result<Self> {
     SpatialReference::validate_output_wkid(options.output.output_wkid);
-    let input_format = resolve_source_format(&options.input.location, options.input.format)?;
+    let input_format = SourceFormat::resolve(&options.input.location, options.input.format)?;
     let input = open_input(
       input_format,
       &InputOpenOptions::new(options.input.location.clone(), options.input.layer.clone()),
@@ -41,7 +41,8 @@ impl Pipeline {
 
     let session = DataFusionSession::new(options.memory_limit_bytes, options.target_partitions)?;
     let input_dataframe =
-      prepare_input_dataframe(input.as_ref(), session.context(), options.input.row_range).await?;
+      Self::prepare_input_dataframe(input.as_ref(), session.context(), options.input.row_range)
+        .await?;
     let output_mode = options.output.mode;
     let state = SpatialPipelineState {
       _session: session,
@@ -75,6 +76,19 @@ impl Pipeline {
       )),
     }
   }
+
+  async fn prepare_input_dataframe(
+    input: &dyn InputSource,
+    session: &SessionContext,
+    row_range: RowRange,
+  ) -> Result<DataFrame> {
+    let dataframe = input.to_dataframe(session, row_range).await?;
+    if row_range.num().is_none() {
+      return Ok(dataframe);
+    }
+
+    dataframe.cache().await.map_err(Into::into)
+  }
 }
 
 impl PipelineKind {
@@ -88,17 +102,4 @@ impl PipelineKind {
       (OutputMode::OptimizedGeoParquet, _) => Ok(Self::OptimizedPartitioned),
     }
   }
-}
-
-async fn prepare_input_dataframe(
-  input: &dyn InputSource,
-  session: &SessionContext,
-  row_range: RowRange,
-) -> Result<DataFrame> {
-  let dataframe = input.to_dataframe(session, row_range).await?;
-  if row_range.num().is_none() {
-    return Ok(dataframe);
-  }
-
-  dataframe.cache().await.map_err(Into::into)
 }

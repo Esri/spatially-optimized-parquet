@@ -24,11 +24,14 @@ pub(crate) use reporter::SharedWriteReporter;
 pub use reporter::{WriteProgress, WriteReporter};
 pub(crate) use result::PipelineWarningStore;
 pub use result::SpatialPipelineResult;
-pub use runner::run;
 
-enum Pipeline {
+/// Executes one configured spatial pipeline.
+pub enum Pipeline {
+  /// Runs plain GeoParquet output.
   Plain(PlainPipeline),
+  /// Runs optimized output for one file.
   OptimizedSingleFile(OptimizedSingleFilePipeline),
+  /// Runs optimized output across partition files.
   OptimizedPartitioned(OptimizedPartitionedPipeline),
 }
 
@@ -39,15 +42,18 @@ enum PipelineKind {
   OptimizedPartitioned,
 }
 
-struct PlainPipeline {
+/// Executes the plain GeoParquet output path for one prepared request.
+pub struct PlainPipeline {
   state: SpatialPipelineState,
 }
 
-struct OptimizedSingleFilePipeline {
+/// Executes the optimized single-file output path for one prepared request.
+pub struct OptimizedSingleFilePipeline {
   state: SpatialPipelineState,
 }
 
-struct OptimizedPartitionedPipeline {
+/// Executes the optimized partitioned output path for one prepared request.
+pub struct OptimizedPartitionedPipeline {
   state: SpatialPipelineState,
 }
 

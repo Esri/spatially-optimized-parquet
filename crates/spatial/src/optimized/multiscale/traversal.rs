@@ -9,59 +9,62 @@ use geo_traits::{
 };
 
 use crate::geometry::{
-  Extent2D, GeometryKind, GeometryType, PolygonRingOrder, WkbCoordinate,
+  Extent2D, GeometryKind, GeometryType, PolygonRingOrder, WkbCoordinate, WkbHeader,
   visit_wkb_geometry as decode_wkb_geometry,
 };
 
 pub(crate) use crate::geometry::{WkbPartRole as GeometryPartRole, WkbSink as GeometryPartSink};
 
-/// Decode WKB and calculate its axis-aligned extent.
-pub(crate) fn geometry_extent_from_wkb(bytes: &[u8]) -> Result<Extent2D> {
-  let mut collector = BoundsCollector::default();
-  decode_wkb_geometry(bytes, PolygonRingOrder::Preserve, &mut collector)?;
-  collector
-    .finish()
-    .context("geometry missing bounding rectangle")
-}
-
-/// Visit one decoded WKB geometry through the canonical part traversal.
-pub(crate) fn visit_wkb_geometry<S: GeometryPartSink>(
-  bytes: &[u8],
-  sink: &mut S,
-) -> Result<(GeometryKind, Dimensions)> {
-  let header = decode_wkb_geometry(bytes, PolygonRingOrder::Preserve, sink)?;
-  Ok((header.kind, header.dimensions))
-}
-
-pub(crate) fn visit_wkb_geometry_for_display<S: GeometryPartSink>(
-  bytes: &[u8],
-  geometry_type: GeometryType,
-  sink: &mut S,
-) -> Result<Dimensions> {
-  let header = decode_wkb_geometry(bytes, PolygonRingOrder::Reverse, sink)?;
-  let kind_matches = match geometry_type {
-    GeometryType::Point => header.kind == GeometryKind::Point,
-    GeometryType::MultiPoint => header.kind == GeometryKind::MultiPoint,
-    GeometryType::Polyline => {
-      matches!(
-        header.kind,
-        GeometryKind::LineString | GeometryKind::MultiLineString
-      )
-    }
-    GeometryType::Polygon => {
-      matches!(
-        header.kind,
-        GeometryKind::Polygon | GeometryKind::MultiPolygon
-      )
-    }
-  };
-  if !kind_matches {
-    bail!(
-      "WKB geometry {:?} does not match optimized type {geometry_type:?}",
-      header.kind
-    );
+impl Extent2D {
+  /// Calculate the axis-aligned extent of one decoded WKB geometry.
+  pub(crate) fn from_wkb(bytes: &[u8]) -> Result<Self> {
+    let mut collector = BoundsCollector::default();
+    decode_wkb_geometry(bytes, PolygonRingOrder::Preserve, &mut collector)?;
+    collector
+      .finish()
+      .context("geometry missing bounding rectangle")
   }
-  Ok(header.dimensions)
+}
+
+impl WkbHeader {
+  /// Visit one WKB geometry through canonical part traversal.
+  pub(crate) fn visit<S: GeometryPartSink>(bytes: &[u8], sink: &mut S) -> Result<Self> {
+    decode_wkb_geometry(bytes, PolygonRingOrder::Preserve, sink)
+  }
+}
+
+impl GeometryType {
+  /// Visit one display geometry while enforcing this optimized geometry type.
+  pub(crate) fn visit_wkb_for_display<S: GeometryPartSink>(
+    self,
+    bytes: &[u8],
+    sink: &mut S,
+  ) -> Result<Dimensions> {
+    let header = decode_wkb_geometry(bytes, PolygonRingOrder::Reverse, sink)?;
+    let kind_matches = match self {
+      Self::Point => header.kind == GeometryKind::Point,
+      Self::MultiPoint => header.kind == GeometryKind::MultiPoint,
+      Self::Polyline => {
+        matches!(
+          header.kind,
+          GeometryKind::LineString | GeometryKind::MultiLineString
+        )
+      }
+      Self::Polygon => {
+        matches!(
+          header.kind,
+          GeometryKind::Polygon | GeometryKind::MultiPolygon
+        )
+      }
+    };
+    if !kind_matches {
+      bail!(
+        "WKB geometry {:?} does not match optimized type {self:?}",
+        header.kind
+      );
+    }
+    Ok(header.dimensions)
+  }
 }
 
 #[cfg(test)]

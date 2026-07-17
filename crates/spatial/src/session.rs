@@ -49,14 +49,14 @@ impl DataFusionSession {
     let spill_dir = tempfile::Builder::new()
       .prefix("opt-parquet-datafusion-spill-")
       .tempdir()?;
-    let memory_limit_bytes = memory_limit_bytes.unwrap_or(default_memory_limit_bytes()?);
-    let runtime = Arc::new(new_runtime_env(spill_dir.path(), memory_limit_bytes)?);
+    let memory_limit_bytes = memory_limit_bytes.unwrap_or(Self::default_memory_limit_bytes()?);
+    let runtime = Arc::new(Self::new_runtime_env(spill_dir.path(), memory_limit_bytes)?);
     let mut session_config = SessionConfig::new()
       .with_collect_statistics(false)
       .with_repartition_file_scans(false)
       .with_repartition_sorts(true)
       .with_prefer_existing_sort(true)
-      .with_sort_spill_reservation_bytes(configured_sort_spill_reservation_bytes())
+      .with_sort_spill_reservation_bytes(Self::configured_sort_spill_reservation_bytes())
       .with_sort_in_place_threshold_bytes(NO_IN_PLACE_SORT_THRESHOLD_BYTES);
     if let Some(target_partitions) = target_partitions {
       session_config = session_config.with_target_partitions(target_partitions);
@@ -72,41 +72,41 @@ impl DataFusionSession {
   pub(crate) fn context(&self) -> &SessionContext {
     &self.ctx
   }
-}
 
-fn new_runtime_env(spill_dir: &std::path::Path, memory_limit_bytes: usize) -> Result<RuntimeEnv> {
-  Ok(
-    RuntimeEnvBuilder::new()
-      .with_memory_limit(memory_limit_bytes, 1.0)
-      .with_temp_file_path(spill_dir)
-      .build()?,
-  )
-}
-
-fn default_memory_limit_bytes() -> Result<usize> {
-  let mut system = System::new();
-  system.refresh_memory();
-  half_physical_memory(system.total_memory())
-}
-
-fn half_physical_memory(total_memory_bytes: u64) -> Result<usize> {
-  let memory_limit_bytes = total_memory_bytes / 2;
-  if memory_limit_bytes == 0 {
-    bail!("unable to determine total physical memory");
+  fn new_runtime_env(spill_dir: &std::path::Path, memory_limit_bytes: usize) -> Result<RuntimeEnv> {
+    Ok(
+      RuntimeEnvBuilder::new()
+        .with_memory_limit(memory_limit_bytes, 1.0)
+        .with_temp_file_path(spill_dir)
+        .build()?,
+    )
   }
-  usize::try_from(memory_limit_bytes)
-    .context("half of total physical memory exceeds this platform's address space")
-}
 
-fn configured_sort_spill_reservation_bytes() -> usize {
-  env_usize(SORT_SPILL_RESERVATION_ENV).unwrap_or(DEFAULT_SORT_SPILL_RESERVATION_BYTES)
-}
+  fn default_memory_limit_bytes() -> Result<usize> {
+    let mut system = System::new();
+    system.refresh_memory();
+    Self::half_physical_memory(system.total_memory())
+  }
 
-fn env_usize(name: &str) -> Option<usize> {
-  std::env::var(name)
-    .ok()
-    .and_then(|value| value.parse::<usize>().ok())
-    .filter(|value| *value > 0)
+  fn half_physical_memory(total_memory_bytes: u64) -> Result<usize> {
+    let memory_limit_bytes = total_memory_bytes / 2;
+    if memory_limit_bytes == 0 {
+      bail!("unable to determine total physical memory");
+    }
+    usize::try_from(memory_limit_bytes)
+      .context("half of total physical memory exceeds this platform's address space")
+  }
+
+  fn configured_sort_spill_reservation_bytes() -> usize {
+    Self::env_usize(SORT_SPILL_RESERVATION_ENV).unwrap_or(DEFAULT_SORT_SPILL_RESERVATION_BYTES)
+  }
+
+  fn env_usize(name: &str) -> Option<usize> {
+    std::env::var(name)
+      .ok()
+      .and_then(|value| value.parse::<usize>().ok())
+      .filter(|value| *value > 0)
+  }
 }
 
 #[cfg(test)]

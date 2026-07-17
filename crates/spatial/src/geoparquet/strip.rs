@@ -17,9 +17,15 @@ use crate::geometry::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct StripGeometryDimensionsUdf {
+pub(crate) struct StripGeometryDimensionsUdf {
   strip_z: bool,
   strip_m: bool,
+}
+
+impl StripGeometryDimensionsUdf {
+  pub(crate) fn expression(geometry_column: &str, strip_z: bool, strip_m: bool) -> Expr {
+    ScalarUDF::new_from_impl(Self { strip_z, strip_m }).call(vec![col(geometry_column)])
+  }
 }
 
 impl ScalarUDFImpl for StripGeometryDimensionsUdf {
@@ -56,13 +62,4 @@ impl ScalarUDFImpl for StripGeometryDimensionsUdf {
     }
     Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
   }
-}
-
-pub(crate) fn strip_geometry_dimensions_expr(
-  geometry_column: &str,
-  strip_z: bool,
-  strip_m: bool,
-) -> Expr {
-  ScalarUDF::new_from_impl(StripGeometryDimensionsUdf { strip_z, strip_m })
-    .call(vec![col(geometry_column)])
 }
