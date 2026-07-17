@@ -6,7 +6,6 @@ use arrow_schema::Schema;
 use crate::geometry::{Extent2D, GeometryColumn, GeometryEncoding, GeometryKind, GeometryType};
 use crate::geoparquet::SpatialReference;
 use crate::geoparquet::geometry_scan::scan_geometry_metadata;
-use crate::geoparquet::spatial_reference::resolve_source_spatial_reference;
 use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata};
 
 /// Stores normalized source geometry facts required by either GeoParquet output workflow.
@@ -58,19 +57,19 @@ pub(crate) async fn resolve_source(
     explicit_geometry_column,
   )?;
   let mut source_metadata = input.source_metadata()?;
-  resolve_source_spatial_reference(&mut source_metadata, &geometry.column, input_wkid)?;
-
   let source_geometry = source_metadata
     .geometry
     .as_ref()
-    .filter(|source_geometry| source_geometry.column == geometry.column)
-    .context("missing geometry metadata after input spatial-reference resolution")?;
+    .filter(|source_geometry| source_geometry.column == geometry.column);
+  let source_spatial_reference =
+    SpatialReference::try_new(source_geometry, &geometry.column, input_wkid)?;
   let requires_scan = !row_range.is_full()
-    || source_geometry.geometry_types.is_empty()
-    || source_geometry.bbox.is_none();
+    || source_geometry.is_none_or(|source_geometry| source_geometry.geometry_types.is_empty())
+    || source_geometry.is_none_or(|source_geometry| source_geometry.bbox.is_none());
   let (geometry_types, source_extent) = if requires_scan {
     scan_geometry_metadata(input_dataframe, &geometry.column).await?
   } else {
+    let source_geometry = source_geometry.context("missing source geometry metadata")?;
     (
       source_geometry.geometry_types.clone(),
       source_geometry
@@ -79,20 +78,17 @@ pub(crate) async fn resolve_source(
     )
   };
   let geometry_type = GeometryType::from_kinds(&geometry_types)?;
-  let projjson = source_geometry
-    .projjson
-    .clone()
-    .context("missing input spatial-reference metadata")?;
-  let source_spatial_reference = SpatialReference::from_projjson(&projjson)?;
-  let has_z = source_geometry.has_z;
-  let has_m = source_geometry.has_m;
+  let covering = source_geometry.and_then(|source_geometry| source_geometry.covering.clone());
+  let has_z = source_geometry.is_some_and(|source_geometry| source_geometry.has_z);
+  let has_m = source_geometry.is_some_and(|source_geometry| source_geometry.has_m);
+  let projjson = source_spatial_reference.projjson()?.clone();
 
   source_metadata.geometry = Some(SourceGeometryMetadata {
     column: geometry.column.clone(),
     encoding: GeometryEncoding::Wkb,
     geometry_types: geometry_types.clone(),
     bbox: Some(source_extent),
-    covering: source_geometry.covering.clone(),
+    covering,
     projjson: Some(projjson),
     has_z,
     has_m,

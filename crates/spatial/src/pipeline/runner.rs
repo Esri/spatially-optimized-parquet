@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
 
-use crate::geoparquet::validate_output_wkid;
+use crate::geoparquet::SpatialReference;
 use crate::input::{InputOpenOptions, InputSource, RowRange, open_input, resolve_source_format};
 use crate::optimized::validate_internal_projection_columns;
 use crate::output::{OutputMode, OutputPath};
@@ -22,7 +22,7 @@ pub async fn run(options: SpatialPipelineOptions) -> Result<SpatialPipelineResul
 
 impl Pipeline {
   async fn new(options: SpatialPipelineOptions) -> Result<Self> {
-    validate_output_wkid(options.output.output_wkid);
+    SpatialReference::validate_output_wkid(options.output.output_wkid);
     let input_format = resolve_source_format(&options.input.location, options.input.format)?;
     let input = open_input(
       input_format,
