@@ -1,4 +1,4 @@
-//! Computes XZ hierarchy codes and DataFusion expressions for non-point clustering.
+//! Computes XZ hierarchy codes and DataFusion expressions for complex geometry clustering.
 
 #![allow(dead_code)]
 
@@ -172,15 +172,15 @@ impl ScalarUDFImpl for BoundsUdf {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct XZGeometryClusterKeyUdf;
+struct ComplexGeometryClusterKeyUdf;
 
-impl ScalarUDFImpl for XZGeometryClusterKeyUdf {
+impl ScalarUDFImpl for ComplexGeometryClusterKeyUdf {
   fn as_any(&self) -> &dyn Any {
     self
   }
 
   fn name(&self) -> &str {
-    "clustering_nonpoint_xzcode"
+    "clustering_complex_geometry_xzcode"
   }
 
   fn signature(&self) -> &Signature {
@@ -213,15 +213,15 @@ impl ScalarUDFImpl for XZGeometryClusterKeyUdf {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct XZBoundsClusterKeyUdf;
+struct ComplexGeometryBoundsClusterKeyUdf;
 
-impl ScalarUDFImpl for XZBoundsClusterKeyUdf {
+impl ScalarUDFImpl for ComplexGeometryBoundsClusterKeyUdf {
   fn as_any(&self) -> &dyn Any {
     self
   }
 
   fn name(&self) -> &str {
-    "clustering_nonpoint_xzcode_from_bounds"
+    "clustering_complex_geometry_xzcode_from_bounds"
   }
 
   fn signature(&self) -> &Signature {
@@ -270,12 +270,12 @@ fn bounds_udf() -> ScalarUDF {
   ScalarUDF::new_from_impl(BoundsUdf)
 }
 
-fn non_point_xzcode_udf() -> ScalarUDF {
-  ScalarUDF::new_from_impl(XZGeometryClusterKeyUdf)
+fn complex_geometry_xzcode_udf() -> ScalarUDF {
+  ScalarUDF::new_from_impl(ComplexGeometryClusterKeyUdf)
 }
 
-fn non_point_xzcode_from_bounds_udf() -> ScalarUDF {
-  ScalarUDF::new_from_impl(XZBoundsClusterKeyUdf)
+fn complex_geometry_xzcode_from_bounds_udf() -> ScalarUDF {
+  ScalarUDF::new_from_impl(ComplexGeometryBoundsClusterKeyUdf)
 }
 
 fn bounds_struct<T>(array: &T) -> DataFusionResult<StructArray>
@@ -368,14 +368,14 @@ pub(crate) fn bounds_expr(geometry_column: &str) -> Expr {
   bounds_udf().call(vec![col(geometry_column)])
 }
 
-pub(in crate::optimized) fn non_point_xzcode_from_bounds_expr(
+pub(in crate::optimized) fn complex_geometry_xzcode_from_bounds_expr(
   xmin: Expr,
   ymin: Expr,
   xmax: Expr,
   ymax: Expr,
   full_extent: Extent2D,
 ) -> Expr {
-  non_point_xzcode_from_bounds_udf()
+  complex_geometry_xzcode_from_bounds_udf()
     .call(vec![
       xmin,
       ymin,

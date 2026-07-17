@@ -157,7 +157,7 @@ mod tests {
 
   #[test]
   fn preserves_partitioned_sort_for_multi_file_writes() {
-    let point_range_column = cluster_partition_column(ClusteringFamily::Point);
+    let point_range_column = cluster_partition_column(ClusteringFamily::PointGeometry);
     let batch = RecordBatch::try_new(
       Arc::new(Schema::new(vec![
         Field::new(POINT_Z_CODE_COLUMN, DataType::UInt64, false),

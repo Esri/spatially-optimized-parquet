@@ -10,8 +10,8 @@ use crate::optimized::multiscale::{POINT_Z_CODE_COLUMN, TEMP_XZ_CODE_COLUMN};
 
 use super::ClusterKey;
 
-const POINT_RANGE_COLUMN: &str = "z_order";
-const NON_POINT_RANGE_COLUMN: &str = "xz_order";
+const POINT_GEOMETRY_RANGE_COLUMN: &str = "z_order";
+const COMPLEX_GEOMETRY_RANGE_COLUMN: &str = "xz_order";
 
 /// Stores the minimum cluster key and percentile-derived lower range boundaries.
 pub(in crate::optimized) struct ClusterRangeBoundaries {
@@ -27,8 +27,8 @@ pub(in crate::optimized) fn cluster_key_column(
   clustering_family: ClusteringFamily,
 ) -> &'static str {
   match clustering_family {
-    ClusteringFamily::Point => POINT_Z_CODE_COLUMN,
-    ClusteringFamily::NonPoint => TEMP_XZ_CODE_COLUMN,
+    ClusteringFamily::PointGeometry => POINT_Z_CODE_COLUMN,
+    ClusteringFamily::ComplexGeometry => TEMP_XZ_CODE_COLUMN,
   }
 }
 
@@ -36,8 +36,8 @@ pub(in crate::optimized) fn cluster_partition_column(
   clustering_family: ClusteringFamily,
 ) -> &'static str {
   match clustering_family {
-    ClusteringFamily::Point => POINT_RANGE_COLUMN,
-    ClusteringFamily::NonPoint => NON_POINT_RANGE_COLUMN,
+    ClusteringFamily::PointGeometry => POINT_GEOMETRY_RANGE_COLUMN,
+    ClusteringFamily::ComplexGeometry => COMPLEX_GEOMETRY_RANGE_COLUMN,
   }
 }
 

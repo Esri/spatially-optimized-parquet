@@ -2,7 +2,7 @@
 
 use anyhow::{Result, bail};
 
-use super::GeometryEncoding;
+use super::MultiscaleLevelSpec;
 use crate::geometry::WkbCoordinate;
 
 const Z_VALID: u8 = 1;
@@ -11,6 +11,39 @@ const M_VALID: u8 = 2;
 #[derive(Default)]
 pub(super) struct OptionalComponentValidity {
   values: Vec<u8>,
+}
+
+#[derive(Default)]
+/// Stores one simplified level as absolute quantized coordinates before physical encoding.
+pub(in crate::optimized) struct QuantizedGeometryBuffer {
+  pub(super) coordinates: Vec<i64>,
+  pub(super) lengths: Vec<u32>,
+  pub(super) validity: OptionalComponentValidity,
+  pub(super) has_z: bool,
+  pub(super) has_m: bool,
+}
+
+pub(super) fn quantize_geometry_into(
+  input_coordinates: &[WkbCoordinate],
+  input_lengths: &[u32],
+  level: &MultiscaleLevelSpec,
+  has_z: bool,
+  has_m: bool,
+  geometry: &mut QuantizedGeometryBuffer,
+) -> Result<()> {
+  quantize_geometry_payload_with_validity_into(
+    input_coordinates,
+    input_lengths,
+    level,
+    has_z,
+    has_m,
+    &mut geometry.coordinates,
+    &mut geometry.lengths,
+    Some(&mut geometry.validity),
+  )?;
+  geometry.has_z = has_z;
+  geometry.has_m = has_m;
+  Ok(())
 }
 
 impl OptionalComponentValidity {
@@ -23,10 +56,11 @@ impl OptionalComponentValidity {
   }
 }
 
+#[cfg(test)]
 pub(super) fn encode_quantized_payload_into(
   input_coordinates: &[WkbCoordinate],
   input_lengths: &[u32],
-  encoding: &GeometryEncoding,
+  encoding: &MultiscaleLevelSpec,
   has_z: bool,
   has_m: bool,
   coords: &mut Vec<i64>,
@@ -50,7 +84,7 @@ pub(super) fn encode_quantized_payload_into(
 pub(super) fn quantize_geometry_payload_into(
   input_coordinates: &[WkbCoordinate],
   input_lengths: &[u32],
-  encoding: &GeometryEncoding,
+  encoding: &MultiscaleLevelSpec,
   has_z: bool,
   has_m: bool,
   coords: &mut Vec<i64>,
@@ -68,10 +102,11 @@ pub(super) fn quantize_geometry_payload_into(
   )
 }
 
+#[cfg(test)]
 pub(super) fn quantize_native_geometry_payload_into(
   input_coordinates: &[WkbCoordinate],
   input_lengths: &[u32],
-  encoding: &GeometryEncoding,
+  encoding: &MultiscaleLevelSpec,
   has_z: bool,
   has_m: bool,
   coords: &mut Vec<i64>,
@@ -94,7 +129,7 @@ pub(super) fn quantize_native_geometry_payload_into(
 fn quantize_geometry_payload_with_validity_into(
   input_coordinates: &[WkbCoordinate],
   input_lengths: &[u32],
-  encoding: &GeometryEncoding,
+  encoding: &MultiscaleLevelSpec,
   has_z: bool,
   has_m: bool,
   coords: &mut Vec<i64>,
@@ -165,7 +200,7 @@ fn quantize_geometry_payload_with_validity_into(
 
   fn encode_part_xy(
     part: &[WkbCoordinate],
-    encoding: &GeometryEncoding,
+    encoding: &MultiscaleLevelSpec,
     coords: &mut Vec<i64>,
   ) -> Result<u32> {
     let first = part.first().expect("non-empty part");
@@ -204,7 +239,7 @@ fn quantize_geometry_payload_with_validity_into(
 
   fn encode_dimensional_part(
     part: &[WkbCoordinate],
-    encoding: &GeometryEncoding,
+    encoding: &MultiscaleLevelSpec,
     has_z: bool,
     has_m: bool,
     coords: &mut Vec<i64>,
@@ -353,7 +388,7 @@ fn quantize_geometry_payload_with_validity_into(
     left.x == right.x && left.y == right.y
   }
 
-  fn quantize_axis(value: f64, encoding: &GeometryEncoding, axis: usize) -> Result<i64> {
+  fn quantize_axis(value: f64, encoding: &MultiscaleLevelSpec, axis: usize) -> Result<i64> {
     quantize(
       value,
       encoding.transform.scale[axis],
@@ -364,7 +399,7 @@ fn quantize_geometry_payload_with_validity_into(
   Ok(())
 }
 
-fn encode_deltas_xy(coords: &mut [i64], lengths: &[u32], has_z: bool, has_m: bool) {
+pub(super) fn encode_deltas_xy(coords: &mut [i64], lengths: &[u32], has_z: bool, has_m: bool) {
   let stride = coordinate_stride(has_z, has_m);
   let mut coordinate_offset = 0usize;
   for &length in lengths {
@@ -427,8 +462,8 @@ mod tests {
     WkbCoordinate { x, y, z, m }
   }
 
-  fn test_encoding(min_length: usize) -> GeometryEncoding {
-    GeometryEncoding {
+  fn test_encoding(min_length: usize) -> MultiscaleLevelSpec {
+    MultiscaleLevelSpec {
       level: 0,
       column: "level_0".to_string(),
       resolution: 1.0,

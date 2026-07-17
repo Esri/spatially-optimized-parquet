@@ -11,8 +11,8 @@ use crate::optimized::multiscale::{
 };
 use crate::optimized::{ClusteringFamily, ResolvedOptimization};
 use crate::output::{
-  ESRI_PBF_ENCODING, GeoMetadataInput, MultiscaleLevelInput, QUANTIZED_NATIVE_ENCODING,
-  XzClusteringIndexInput, ZClusteringIndexInput, optimized_point_metadata, optimized_xz_metadata,
+  GeoMetadataInput, MultiscaleLevelInput, XzClusteringIndexInput, ZClusteringIndexInput,
+  optimized_point_metadata, optimized_xz_metadata,
 };
 
 impl ResolvedOptimization {
@@ -39,7 +39,7 @@ impl ResolvedOptimization {
     };
     let source_entries = self.source_metadata().passthrough_kv.clone();
     match self.geometry().clustering_family {
-      ClusteringFamily::Point => optimized_point_metadata(
+      ClusteringFamily::PointGeometry => optimized_point_metadata(
         source_entries,
         geo_metadata,
         GEODISPLAY_COLUMN,
@@ -57,18 +57,13 @@ impl ResolvedOptimization {
           has_m: self.geometry().has_m,
         },
       ),
-      ClusteringFamily::NonPoint => optimized_xz_metadata(
+      ClusteringFamily::ComplexGeometry => optimized_xz_metadata(
         source_entries,
         geo_metadata,
         GEODISPLAY_COLUMN,
         XzClusteringIndexInput {
           code: XZ_CODE_COLUMN.to_string(),
-          encoding: match self.multiscale_encoding() {
-            crate::output::MultiscaleEncoding::Pbf => ESRI_PBF_ENCODING.to_string(),
-            crate::output::MultiscaleEncoding::QuantizedNative => {
-              QUANTIZED_NATIVE_ENCODING.to_string()
-            }
-          },
+          encoding: self.multiscale_encoding().metadata_identifier().to_string(),
           geometry_type: self.geometry().geometry_type.as_str().to_string(),
           full_extent: self.target_extent(),
           max_level: DEFAULT_XZ_MAX_LEVEL,

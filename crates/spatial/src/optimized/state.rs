@@ -2,7 +2,7 @@
 
 use crate::geometry::Extent2D;
 use crate::input::SourceDatasetMetadata;
-use crate::optimized::multiscale::GeometryEncoding;
+use crate::optimized::multiscale::MultiscaleLevelSpec;
 use crate::output::{MultiscaleEncoding, ReprojectionSpec};
 
 use super::geometry::OptimizedGeometry;
@@ -14,7 +14,7 @@ pub(super) struct ResolvedOptimization {
   geometry: OptimizedGeometry,
   reprojection: ReprojectionSpec,
   target_extent: Extent2D,
-  encodings: Vec<GeometryEncoding>,
+  encodings: Vec<MultiscaleLevelSpec>,
   multiscale_encoding: MultiscaleEncoding,
 }
 
@@ -24,7 +24,7 @@ impl ResolvedOptimization {
     geometry: OptimizedGeometry,
     reprojection: ReprojectionSpec,
     target_extent: Extent2D,
-    encodings: Vec<GeometryEncoding>,
+    encodings: Vec<MultiscaleLevelSpec>,
     multiscale_encoding: MultiscaleEncoding,
   ) -> Self {
     Self {
@@ -53,7 +53,7 @@ impl ResolvedOptimization {
     self.target_extent
   }
 
-  pub(super) fn encodings(&self) -> &[GeometryEncoding] {
+  pub(super) fn encodings(&self) -> &[MultiscaleLevelSpec] {
     &self.encodings
   }
 
@@ -62,16 +62,11 @@ impl ResolvedOptimization {
   }
 
   pub(super) fn delta_binary_packed_column_paths(&self) -> Vec<String> {
-    match self.multiscale_encoding {
-      MultiscaleEncoding::Pbf => Vec::new(),
-      MultiscaleEncoding::QuantizedNative => {
-        crate::optimized::multiscale::native_coordinate_column_paths(
-          &self.encodings,
-          self.geometry.geometry_type,
-          self.geometry.has_z,
-          self.geometry.has_m,
-        )
-      }
-    }
+    self.multiscale_encoding.delta_binary_packed_column_paths(
+      &self.encodings,
+      self.geometry.geometry_type,
+      self.geometry.has_z,
+      self.geometry.has_m,
+    )
   }
 }

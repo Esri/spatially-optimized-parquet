@@ -541,7 +541,7 @@ fn optimized_point_output_rejects_wkb_dimensions_that_disagree_with_metadata() {
 }
 
 #[test]
-fn optimized_non_point_output_zero_fills_dimensions_that_disagree_with_metadata() {
+fn optimized_complex_geometry_output_zero_fills_dimensions_that_disagree_with_metadata() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("polygon-mismatch.parquet");
   let output = temp.path().join("polygon-mismatch-output.parquet");
@@ -947,7 +947,7 @@ fn optimized_output_reprojects_selected_geoparquet_rows() {
 }
 
 #[test]
-fn optimized_output_writes_non_point_display_struct_and_metadata() {
+fn optimized_output_writes_complex_geometry_display_struct_and_metadata() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("polygons.parquet");
   let output = temp.path().join("polygons-optimized.parquet");
@@ -1214,7 +1214,7 @@ fn optimized_native_output_writes_missing_values_as_nullable_components_zm() {
 }
 
 #[test]
-fn optimized_output_writes_covering_bbox_for_non_point_geometry() {
+fn optimized_output_writes_covering_bbox_for_complex_geometry() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("polygons.parquet");
   let output = temp.path().join("polygons-covering.parquet");
@@ -1321,7 +1321,7 @@ fn optimized_output_replaces_existing_display_column() {
 }
 
 #[test]
-fn optimized_output_sorts_non_point_rows_across_input_batches() {
+fn optimized_output_sorts_complex_geometry_rows_across_input_batches() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("polygons-multi-batch.parquet");
   let output = temp.path().join("polygons-multi-batch-optimized.parquet");

@@ -1,4 +1,4 @@
-//! Plans the multiscale geometry representations emitted for non-point features.
+//! Plans the multiscale geometry representations emitted for complex geometry features.
 
 use anyhow::Result;
 
@@ -29,7 +29,7 @@ pub(in crate::optimized) struct QuantizationTransform {
 
 /// Stores the quantization and simplification settings for one output geometry column.
 #[derive(Debug, Clone, PartialEq)]
-pub(in crate::optimized) struct GeometryEncoding {
+pub(in crate::optimized) struct MultiscaleLevelSpec {
   /// Stores the multiscale level represented by the column.
   pub(in crate::optimized) level: u16,
   /// Stores the generated Parquet column name.
@@ -44,11 +44,11 @@ pub(in crate::optimized) struct GeometryEncoding {
   pub(in crate::optimized) min_length: usize,
 }
 
-/// Create the supported even-numbered multiscale encodings for the target spatial reference.
-pub(in crate::optimized) fn create_geometry_encodings(
+/// Create supported even-numbered multiscale level specifications for the target spatial reference.
+pub(in crate::optimized) fn create_multiscale_level_specs(
   output_wkid: u32,
   geometry_type: OptimizedGeometryType,
-) -> Result<Vec<GeometryEncoding>> {
+) -> Result<Vec<MultiscaleLevelSpec>> {
   let min_length = min_vertex_count(geometry_type);
   let mut resolution = match output_wkid {
     DEFAULT_OUTPUT_WKID => FIRST_LEVEL_RESOLUTION,
@@ -60,7 +60,7 @@ pub(in crate::optimized) fn create_geometry_encodings(
 
   for level in 0..=MAX_MULTISCALE_LEVEL {
     if level % 2 == 0 {
-      encodings.push(GeometryEncoding {
+      encodings.push(MultiscaleLevelSpec {
         level,
         column: format!("level_{level}"),
         resolution,
@@ -94,7 +94,7 @@ mod tests {
   #[test]
   fn creates_even_wgs84_levels() {
     let encodings =
-      create_geometry_encodings(DEFAULT_OUTPUT_WKID, OptimizedGeometryType::Polygon).unwrap();
+      create_multiscale_level_specs(DEFAULT_OUTPUT_WKID, OptimizedGeometryType::Polygon).unwrap();
     assert_eq!(encodings.first().unwrap().level, 0);
     assert_eq!(encodings.last().unwrap().level, 16);
     assert_eq!(encodings[0].min_length, 3);
@@ -112,7 +112,8 @@ mod tests {
   #[test]
   fn creates_web_mercator_levels() {
     let encodings =
-      create_geometry_encodings(WEB_MERCATOR_OUTPUT_WKID, OptimizedGeometryType::Polygon).unwrap();
+      create_multiscale_level_specs(WEB_MERCATOR_OUTPUT_WKID, OptimizedGeometryType::Polygon)
+        .unwrap();
     assert_eq!(encodings[0].resolution, FIRST_PROJECTED_LEVEL_RESOLUTION);
     assert_eq!(
       encodings[0].transform.scale,

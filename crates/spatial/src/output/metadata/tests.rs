@@ -130,7 +130,7 @@ fn geo_metadata_omits_covering_and_replaces_reserved_source_entry() {
 }
 
 #[test]
-fn point_geodisplay_metadata_serializes_z_clustering() {
+fn point_geometry_geodisplay_metadata_serializes_z_clustering() {
   let spatial_reference = spatial_reference();
   let geometry_types = [GeometryKind::Point];
   let values = metadata_values(

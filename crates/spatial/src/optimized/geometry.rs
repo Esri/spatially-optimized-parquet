@@ -9,9 +9,9 @@ use crate::geoparquet::ResolvedGeoParquetSource;
 /// Groups optimized geometry types by their clustering strategy.
 pub(super) enum ClusteringFamily {
   /// Uses scalar x/y columns and Morton Z-order indexing.
-  Point,
+  PointGeometry,
   /// Uses bounds, XZ-order indexing, and multiscale geometry payloads.
-  NonPoint,
+  ComplexGeometry,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -41,8 +41,8 @@ impl OptimizedGeometryType {
   /// Return the clustering strategy for this optimized geometry type.
   pub(super) fn clustering_family(self) -> ClusteringFamily {
     match self {
-      Self::Point => ClusteringFamily::Point,
-      Self::MultiPoint | Self::Polyline | Self::Polygon => ClusteringFamily::NonPoint,
+      Self::Point => ClusteringFamily::PointGeometry,
+      Self::MultiPoint | Self::Polyline | Self::Polygon => ClusteringFamily::ComplexGeometry,
     }
   }
 
@@ -128,7 +128,7 @@ mod tests {
       OptimizedGeometryType::from_kind(GeometryKind::MultiPolygon)
         .unwrap()
         .clustering_family(),
-      ClusteringFamily::NonPoint
+      ClusteringFamily::ComplexGeometry
     );
   }
 

@@ -3,11 +3,13 @@
 use anyhow::Result;
 use prost::Message;
 
-use super::GeometryEncoding;
-use super::payload::FlatGeometryPayload;
+#[cfg(test)]
+use super::MultiscaleLevelSpec;
 #[cfg(test)]
 use super::payload::GeometryPayload;
-use super::quantize::encode_quantized_payload_into;
+#[cfg(test)]
+use super::quantize::quantize_geometry_into;
+use super::quantize::{QuantizedGeometryBuffer, encode_deltas_xy};
 
 /// Reuses quantization vectors and serialization storage across geometry encodes.
 #[derive(Debug, Default)]
@@ -32,94 +34,49 @@ pub(crate) fn decode_pbf_geometry(bytes: &[u8]) -> Result<PbfGeometry> {
 
 /// Quantize and encode a complete geometry payload into a new byte buffer.
 #[cfg(test)]
-fn encode_geometry(payload: &GeometryPayload, encoding: &GeometryEncoding) -> Result<Vec<u8>> {
+fn encode_geometry(payload: &GeometryPayload, encoding: &MultiscaleLevelSpec) -> Result<Vec<u8>> {
   let mut scratch = GeometryEncodeScratch::default();
-  encode_geometry_owned_with_scratch_impl(
+  let mut geometry = QuantizedGeometryBuffer::default();
+  quantize_geometry_into(
     &payload.coordinates,
     &payload.lengths,
     encoding,
     payload.has_z,
     payload.has_m,
-    &mut scratch,
-  )
+    &mut geometry,
+  )?;
+  Ok(encode_quantized_geometry_with_scratch(&geometry, &mut scratch)?.to_vec())
 }
 
-/// Quantize and encode a flat payload into reusable scratch storage.
-///
-/// The returned slice remains valid until the scratch value is mutated again.
-pub(super) fn encode_flat_geometry_with_scratch<'a>(
-  payload: &FlatGeometryPayload,
-  encoding: &GeometryEncoding,
+/// Serialize pre-quantized absolute coordinates as a PBF payload.
+pub(super) fn encode_quantized_geometry_with_scratch<'a>(
+  geometry: &QuantizedGeometryBuffer,
   scratch: &'a mut GeometryEncodeScratch,
 ) -> Result<&'a [u8]> {
-  encode_geometry_with_scratch_impl(
-    &payload.coordinates,
-    &payload.lengths,
-    encoding,
-    payload.has_z,
-    payload.has_m,
-    scratch,
-  )
-}
-
-fn encode_geometry_with_scratch_impl<'a>(
-  coordinates: &[crate::geometry::WkbCoordinate],
-  lengths: &[u32],
-  encoding: &GeometryEncoding,
-  has_z: bool,
-  has_m: bool,
-  scratch: &'a mut GeometryEncodeScratch,
-) -> Result<&'a [u8]> {
-  let message =
-    quantized_message_from_slices(coordinates, lengths, encoding, has_z, has_m, scratch)?;
+  scratch.quantized_coords.clear();
+  scratch
+    .quantized_coords
+    .extend_from_slice(&geometry.coordinates);
+  scratch.quantized_lengths.clear();
+  scratch
+    .quantized_lengths
+    .extend_from_slice(&geometry.lengths);
+  encode_deltas_xy(
+    &mut scratch.quantized_coords,
+    &scratch.quantized_lengths,
+    geometry.has_z,
+    geometry.has_m,
+  );
+  let message = PbfGeometry {
+    lengths: std::mem::take(&mut scratch.quantized_lengths),
+    coords: std::mem::take(&mut scratch.quantized_coords),
+  };
   scratch.buffer.clear();
   scratch.buffer.reserve(message.encoded_len());
   message.encode(&mut scratch.buffer)?;
   scratch.quantized_coords = message.coords;
   scratch.quantized_lengths = message.lengths;
   Ok(scratch.buffer.as_slice())
-}
-
-#[cfg(test)]
-fn encode_geometry_owned_with_scratch_impl(
-  coordinates: &[crate::geometry::WkbCoordinate],
-  lengths: &[u32],
-  encoding: &GeometryEncoding,
-  has_z: bool,
-  has_m: bool,
-  scratch: &mut GeometryEncodeScratch,
-) -> Result<Vec<u8>> {
-  let message =
-    quantized_message_from_slices(coordinates, lengths, encoding, has_z, has_m, scratch)?;
-  let mut buffer = Vec::with_capacity(message.encoded_len());
-  message.encode(&mut buffer)?;
-  scratch.quantized_coords = message.coords;
-  scratch.quantized_lengths = message.lengths;
-  Ok(buffer)
-}
-
-fn quantized_message_from_slices(
-  coordinates: &[crate::geometry::WkbCoordinate],
-  lengths: &[u32],
-  encoding: &GeometryEncoding,
-  has_z: bool,
-  has_m: bool,
-  scratch: &mut GeometryEncodeScratch,
-) -> Result<PbfGeometry> {
-  let mut message = PbfGeometry {
-    lengths: std::mem::take(&mut scratch.quantized_lengths),
-    coords: std::mem::take(&mut scratch.quantized_coords),
-  };
-  encode_quantized_payload_into(
-    coordinates,
-    lengths,
-    encoding,
-    has_z,
-    has_m,
-    &mut message.coords,
-    &mut message.lengths,
-  )?;
-  Ok(message)
 }
 
 #[cfg(test)]
@@ -150,7 +107,7 @@ mod tests {
     ]);
     let payload =
       geometry_payload_from_geometry(&geometry, OptimizedGeometryType::Polygon).unwrap();
-    let encoding = GeometryEncoding {
+    let encoding = MultiscaleLevelSpec {
       level: 0,
       column: "level_0".to_string(),
       resolution: 1.0,

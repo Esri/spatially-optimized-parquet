@@ -1,4 +1,4 @@
-//! Builds nested multiscale geometry arrays with quantized integer coordinates.
+//! Writes nested multiscale geometry arrays with quantized integer coordinates.
 
 use std::sync::Arc;
 
@@ -8,15 +8,15 @@ use arrow_schema::{DataType, Field, Fields};
 
 use crate::optimized::OptimizedGeometryType;
 
-use super::quantize::OptionalComponentValidity;
-use super::{GEODISPLAY_COLUMN, GeometryEncoding};
+use super::quantize::{OptionalComponentValidity, QuantizedGeometryBuffer};
+use super::{GEODISPLAY_COLUMN, MultiscaleLevelSpec};
 
 type CoordinateBuilder = StructBuilder;
 type PointListBuilder = ListBuilder<CoordinateBuilder>;
 type PartListBuilder = ListBuilder<CoordinateBuilder>;
 type MultipartBuilder = ListBuilder<PartListBuilder>;
 
-pub(super) enum NativeGeometryArrayBuilder {
+pub(in crate::optimized) enum NativeGeometryArrayBuilder {
   MultiPoint(PointListBuilder),
   Multipart(MultipartBuilder),
 }
@@ -60,6 +60,7 @@ impl NativeGeometryArrayBuilder {
         append_coordinates(builder.values(), coordinates, has_z, has_m, validity, 0);
         builder.append(true);
       }
+
       Self::Multipart(builder) => {
         let mut coordinate_offset = 0usize;
         for &length in lengths {
@@ -78,6 +79,16 @@ impl NativeGeometryArrayBuilder {
         builder.append(true);
       }
     }
+  }
+
+  pub(super) fn append_quantized_geometry(&mut self, geometry: &QuantizedGeometryBuffer) {
+    self.append_geometry(
+      &geometry.coordinates,
+      &geometry.lengths,
+      geometry.has_z,
+      geometry.has_m,
+      &geometry.validity,
+    );
   }
 
   pub(super) fn append_null(&mut self) {
@@ -112,7 +123,7 @@ pub(crate) fn native_geometry_data_type(
 }
 
 pub(crate) fn native_coordinate_column_paths(
-  encodings: &[GeometryEncoding],
+  encodings: &[MultiscaleLevelSpec],
   geometry_type: OptimizedGeometryType,
   has_z: bool,
   has_m: bool,

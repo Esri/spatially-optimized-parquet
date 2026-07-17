@@ -13,7 +13,7 @@ pub(crate) const POINT_Y_COLUMN: &str = "y";
 pub(crate) const POINT_Z_COLUMN: &str = "z";
 /// Names the generated point m-coordinate column.
 pub(crate) const POINT_M_COLUMN: &str = "m";
-/// Names the generated non-point geodisplay struct column.
+/// Names the generated complex geometry geodisplay struct column.
 pub(crate) const GEODISPLAY_COLUMN: &str = "geodisplay";
 /// Names the XZ-order field within the geodisplay struct.
 pub(crate) const XZ_CODE_COLUMN: &str = "xzCode";

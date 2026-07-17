@@ -61,17 +61,17 @@ fn quantize_to_bits(value: f64, min: f64, max: f64, coordinate_precision: u32) -
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct PointUdf {
+struct PointGeometryUdf {
   expected_dimensions: Option<(bool, bool)>,
 }
 
-impl ScalarUDFImpl for PointUdf {
+impl ScalarUDFImpl for PointGeometryUdf {
   fn as_any(&self) -> &dyn Any {
     self
   }
 
   fn name(&self) -> &str {
-    "clustering_point"
+    "clustering_point_geometry"
   }
 
   fn signature(&self) -> &Signature {
@@ -119,15 +119,15 @@ impl ScalarUDFImpl for PointUdf {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct ZPointClusterKeyUdf;
+struct PointGeometryClusterKeyUdf;
 
-impl ScalarUDFImpl for ZPointClusterKeyUdf {
+impl ScalarUDFImpl for PointGeometryClusterKeyUdf {
   fn as_any(&self) -> &dyn Any {
     self
   }
 
   fn name(&self) -> &str {
-    "clustering_point_zcode_from_xy"
+    "clustering_point_geometry_zcode_from_xy"
   }
 
   fn signature(&self) -> &Signature {
@@ -170,13 +170,13 @@ impl ScalarUDFImpl for ZPointClusterKeyUdf {
 }
 
 fn point_udf(expected_dimensions: Option<(bool, bool)>) -> ScalarUDF {
-  ScalarUDF::new_from_impl(PointUdf {
+  ScalarUDF::new_from_impl(PointGeometryUdf {
     expected_dimensions,
   })
 }
 
-fn point_zcode_from_xy_udf() -> ScalarUDF {
-  ScalarUDF::new_from_impl(ZPointClusterKeyUdf)
+fn point_geometry_zcode_from_xy_udf() -> ScalarUDF {
+  ScalarUDF::new_from_impl(PointGeometryClusterKeyUdf)
 }
 
 fn point_coords_struct<T>(
@@ -247,7 +247,7 @@ pub(crate) fn point_expr(geometry_column: &str) -> Expr {
   point_udf(None).call(vec![col(geometry_column)])
 }
 
-pub(in crate::optimized) fn point_expr_with_dimensions(
+pub(in crate::optimized) fn point_geometry_expr_with_dimensions(
   geometry_column: &str,
   has_z: bool,
   has_m: bool,
@@ -255,12 +255,12 @@ pub(in crate::optimized) fn point_expr_with_dimensions(
   point_udf(Some((has_z, has_m))).call(vec![col(geometry_column)])
 }
 
-pub(in crate::optimized) fn point_zcode_from_xy_expr(
+pub(in crate::optimized) fn point_geometry_zcode_from_xy_expr(
   x: Expr,
   y: Expr,
   full_extent: Extent2D,
 ) -> Expr {
-  point_zcode_from_xy_udf()
+  point_geometry_zcode_from_xy_udf()
     .call(vec![
       x,
       y,

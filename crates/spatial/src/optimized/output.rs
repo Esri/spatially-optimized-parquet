@@ -11,7 +11,7 @@ use crate::optimized::clustering::{
 };
 use crate::optimized::extent::TargetExtentResolver;
 use crate::optimized::metadata::parquet_metadata;
-use crate::optimized::multiscale::create_geometry_encodings;
+use crate::optimized::multiscale::create_multiscale_level_specs;
 use crate::optimized::projection::{
   partitioned_projection, partitioned_range_source, single_file_projection,
 };
@@ -103,9 +103,9 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
       .resolve(&source, &prepared, &reprojection)
       .await?;
     let encodings = match geometry.clustering_family {
-      ClusteringFamily::Point => Vec::new(),
-      ClusteringFamily::NonPoint => {
-        create_geometry_encodings(options.output_wkid, geometry.geometry_type)?
+      ClusteringFamily::PointGeometry => Vec::new(),
+      ClusteringFamily::ComplexGeometry => {
+        create_multiscale_level_specs(options.output_wkid, geometry.geometry_type)?
       }
     };
     Ok(OptimizedOutput {
