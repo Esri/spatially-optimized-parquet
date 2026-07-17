@@ -18,7 +18,7 @@ impl OptimizedSingleFilePipeline {
     .await?;
     let rows_written = single::write(
       dataframe,
-      &state.output_layout,
+      &state.output_path,
       state.source_schema.as_ref(),
       &optimization,
       state.output_options.covering,

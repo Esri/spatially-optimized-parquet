@@ -9,7 +9,7 @@ use datafusion::logical_expr::expr_fn::ident;
 use crate::input::{InputSource, RowRange};
 use crate::optimized::COVERING_BBOX_COLUMN;
 use crate::optimized::ExtentResolver;
-use crate::output::{OutputLayout, ParquetOutputWriter, ParquetWriterOptions};
+use crate::output::{OutputPath, ParquetOutputWriter, ParquetWriterOptions};
 use crate::pipeline::SharedWriteReporter;
 
 use super::{
@@ -20,7 +20,7 @@ use super::{
 pub(crate) struct GeoParquetWriter<'a> {
   input: &'a dyn InputSource,
   input_dataframe: DataFrame,
-  output_layout: &'a OutputLayout,
+  output_path: &'a OutputPath,
   source_schema: &'a Schema,
   geometry_column: Option<&'a str>,
   input_wkid: Option<u32>,
@@ -34,7 +34,7 @@ impl<'a> GeoParquetWriter<'a> {
   pub(crate) fn new(
     input: &'a dyn InputSource,
     input_dataframe: DataFrame,
-    output_layout: &'a OutputLayout,
+    output_path: &'a OutputPath,
     source_schema: &'a Schema,
     geometry_column: Option<&'a str>,
     input_wkid: Option<u32>,
@@ -45,7 +45,7 @@ impl<'a> GeoParquetWriter<'a> {
     Self {
       input,
       input_dataframe,
-      output_layout,
+      output_path,
       source_schema,
       geometry_column,
       input_wkid,
@@ -119,7 +119,7 @@ impl<'a> GeoParquetWriter<'a> {
     let writer_options =
       ParquetWriterOptions::new(compression.unwrap_or("snappy"), &metadata)?.into_datafusion();
     let output_path = self
-      .output_layout
+      .output_path
       .paths()?
       .into_iter()
       .next()

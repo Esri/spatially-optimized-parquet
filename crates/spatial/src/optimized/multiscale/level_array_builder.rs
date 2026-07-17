@@ -3,9 +3,9 @@
 use arrow_array::ArrayRef;
 use arrow_schema::DataType;
 
+use super::MultiscaleEncoding;
 use crate::geometry::GeometryType;
 use crate::optimized::{ESRI_PBF_ENCODING, QUANTIZED_NATIVE_ENCODING};
-use crate::output::MultiscaleEncoding;
 
 use super::{GEODISPLAY_COLUMN, MultiscaleLevel};
 use crate::geometry::{

@@ -6,7 +6,7 @@ use datafusion::dataframe::DataFrame;
 use crate::optimized::ResolvedOptimization;
 use crate::optimized::clustering::cluster_key_column;
 use crate::optimized::metadata::parquet_metadata;
-use crate::output::{OutputLayout, ParquetOutputWriter, ParquetWriterOptions};
+use crate::output::{OutputPath, ParquetOutputWriter, ParquetWriterOptions};
 use crate::pipeline::{PipelineWarningStore, SharedWriteReporter};
 
 use super::dataframe;
@@ -14,7 +14,7 @@ use super::dataframe;
 /// Write one globally ordered optimized GeoParquet file.
 pub(crate) async fn write(
   input_dataframe: DataFrame,
-  output_layout: &OutputLayout,
+  output_path: &OutputPath,
   source_schema: &arrow_schema::Schema,
   optimization: &ResolvedOptimization,
   covering: bool,
@@ -34,7 +34,7 @@ pub(crate) async fn write(
   let writer_options = ParquetWriterOptions::new(compression.unwrap_or("snappy"), &metadata)?
     .with_delta_binary_packed_columns(optimization.delta_binary_packed_column_paths())
     .into_datafusion();
-  let output_path = output_layout
+  let output_path = output_path
     .paths()?
     .into_iter()
     .next()

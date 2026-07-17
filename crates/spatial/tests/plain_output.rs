@@ -76,7 +76,15 @@ fn plain_output_preserves_wkb_rows_and_passthrough_metadata() {
           None,
           None,
         ),
-        OutputOptions::new(&output, OutputMode::Plain, None, None, 4326, false, true),
+        OutputOptions::new(
+          &output,
+          OutputMode::GeoParquet,
+          None,
+          None,
+          4326,
+          false,
+          true,
+        ),
       )
       .with_write_reporter(move |update: WriteProgress| {
         reported.lock().unwrap().push(update);
@@ -166,8 +174,16 @@ fn plain_output_strips_z_and_m_independently() {
           None,
           None,
         ),
-        OutputOptions::new(&output, OutputMode::Plain, None, None, 4326, false, true)
-          .with_stripped_dimensions(strip_z, strip_m),
+        OutputOptions::new(
+          &output,
+          OutputMode::GeoParquet,
+          None,
+          None,
+          4326,
+          false,
+          true,
+        )
+        .with_stripped_dimensions(strip_z, strip_m),
       )))
       .unwrap();
 
@@ -225,7 +241,15 @@ fn plain_output_writes_covering_bbox() {
         None,
         None,
       ),
-      OutputOptions::new(&output, OutputMode::Plain, None, None, 4326, true, true),
+      OutputOptions::new(
+        &output,
+        OutputMode::GeoParquet,
+        None,
+        None,
+        4326,
+        true,
+        true,
+      ),
     )))
     .unwrap();
 
@@ -281,7 +305,15 @@ fn plain_output_reprojects_selected_rows_and_covering_extent() {
         None,
         None,
       ),
-      OutputOptions::new(&output, OutputMode::Plain, None, None, 4326, true, true),
+      OutputOptions::new(
+        &output,
+        OutputMode::GeoParquet,
+        None,
+        None,
+        4326,
+        true,
+        true,
+      ),
     )))
     .unwrap();
 
@@ -347,7 +379,7 @@ fn plain_output_rejects_non_wgs84_before_filesystem_mutation() {
         ),
         OutputOptions::new(
           &output,
-          OutputMode::Plain,
+          OutputMode::GeoParquet,
           None,
           None,
           output_wkid,
@@ -396,7 +428,15 @@ fn plain_output_rejects_partition_count() {
         None,
         None,
       ),
-      OutputOptions::new(&output, OutputMode::Plain, Some(2), None, 4326, false, true),
+      OutputOptions::new(
+        &output,
+        OutputMode::GeoParquet,
+        Some(2),
+        None,
+        4326,
+        false,
+        true,
+      ),
     )))
     .unwrap_err();
 

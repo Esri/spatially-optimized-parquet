@@ -1,4 +1,4 @@
-//! Removes selected Z/M values from WKB output geometry.
+//! Builds lazy WKB dimension-stripping expressions for normalized GeoParquet geometry.
 
 use std::any::Any;
 use std::sync::Arc;

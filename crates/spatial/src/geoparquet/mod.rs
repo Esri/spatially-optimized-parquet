@@ -7,6 +7,7 @@ mod normalized_spatial_frame;
 mod reprojection;
 mod source;
 mod source_crs;
+mod strip;
 mod writer;
 
 pub(crate) use covering::{bbox_field_expr, geometry_bbox_expr};
@@ -16,6 +17,7 @@ pub(crate) use geo_metadata::{
 pub(crate) use normalized_spatial_frame::NormalizedSpatialFrame;
 pub(crate) use reprojection::{ResolvedReprojection, reproject_geometry_expr};
 pub(crate) use source::{ResolvedGeoParquetSource, resolve_source};
+pub(crate) use strip::strip_geometry_dimensions_expr;
 pub(crate) use writer::GeoParquetWriter;
 
 #[cfg(test)]

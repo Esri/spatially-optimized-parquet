@@ -15,11 +15,11 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::col;
 
+use super::MultiscaleEncoding;
 use crate::geometry::{
   GeometryArray, GeometryType, QuantizationOptions, QuantizedGeometry, quantize_geometry_into,
   read_geometry, to_datafusion_error,
 };
-use crate::output::MultiscaleEncoding;
 use crate::pipeline::PipelineWarningStore;
 
 use super::{

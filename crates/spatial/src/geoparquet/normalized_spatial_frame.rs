@@ -10,9 +10,9 @@ use datafusion::logical_expr::expr_fn::ident;
 
 use crate::geoparquet::{
   ResolvedGeoParquetSource, ResolvedReprojection, geometry_bbox_expr, reproject_geometry_expr,
+  strip_geometry_dimensions_expr,
 };
 use crate::optimized::COVERING_BBOX_COLUMN;
-use crate::output::strip_geometry_dimensions_expr;
 
 #[derive(Clone)]
 pub(crate) struct NormalizedSpatialFrame {

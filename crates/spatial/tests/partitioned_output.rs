@@ -93,7 +93,7 @@ fn partitioned_output_writes_sorted_range_partitions() {
         ),
         OutputOptions::new(
           &output,
-          OutputMode::Optimized,
+          OutputMode::OptimizedGeoParquet,
           Some(2),
           None,
           4326,
@@ -293,7 +293,7 @@ fn assert_partitioned_multiscale_integer_leaves(
       ),
       OutputOptions::new(
         &output,
-        OutputMode::Optimized,
+        OutputMode::OptimizedGeoParquet,
         Some(2),
         None,
         4326,
@@ -349,7 +349,7 @@ fn partitioned_output_combines_row_range_covering_and_compression() {
       ),
       OutputOptions::new(
         &output,
-        OutputMode::Optimized,
+        OutputMode::OptimizedGeoParquet,
         Some(2),
         Some("zstd".to_string()),
         4326,
@@ -435,7 +435,7 @@ fn partitioned_output_requires_overwrite_for_existing_destination() {
       ),
       OutputOptions::new(
         &output,
-        OutputMode::Optimized,
+        OutputMode::OptimizedGeoParquet,
         Some(2),
         None,
         4326,
@@ -478,7 +478,7 @@ fn partitioned_output_replaces_existing_destination() {
       ),
       OutputOptions::new(
         &output,
-        OutputMode::Optimized,
+        OutputMode::OptimizedGeoParquet,
         Some(2),
         None,
         4326,

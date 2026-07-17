@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::input::{RowRange, SourceFormat};
-use crate::output::{MultiscaleEncoding, OutputMode};
+use crate::optimized::MultiscaleEncoding;
+use crate::output::OutputMode;
 
 use super::{SharedWriteReporter, WriteReporter};
 

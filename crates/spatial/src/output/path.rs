@@ -1,13 +1,13 @@
-//! Resolves a user-facing output destination into a safe, concrete Parquet file layout.
+//! Resolves a user-facing output destination into safe, concrete Parquet file paths.
 //!
 //! A path with an extension represents one file. A path without an extension represents a
-//! directory and therefore requires an explicit part count. [`OutputLayout::new`] enforces those
+//! directory and therefore requires an explicit part count. [`OutputPath::new`] enforces those
 //! rules, protects existing output unless overwrite was requested, removes only compatible
 //! directory destinations, and creates the required parent directories.
 //!
-//! The resulting [`OutputLayout`] acts as the invariant-bearing boundary for later writers.
-//! Downstream code can generate deterministic part names and distribute rows without
-//! repeating path validation or filesystem mutation policy.
+//! The resulting [`OutputPath`] acts as the invariant-bearing boundary for later writers.
+//! Downstream code can generate deterministic part names and distribute rows without repeating
+//! path validation or filesystem mutation policy.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -16,14 +16,14 @@ use anyhow::Result;
 
 #[derive(Debug)]
 /// Describes the resolved output destination and number of Parquet parts.
-pub(crate) struct OutputLayout {
+pub(crate) struct OutputPath {
   is_directory: bool,
   path: PathBuf,
   parts: usize,
 }
 
 #[derive(Debug, thiserror::Error)]
-enum OutputLayoutError {
+enum OutputPathError {
   /// Indicates that replacement was not authorized for an existing destination.
   #[error("output path already exists: {0} (pass --overwrite to replace it)")]
   Exists(PathBuf),
@@ -38,36 +38,36 @@ enum OutputLayoutError {
   FilesInvalid,
 }
 
-impl OutputLayout {
-  /// Resolve the output layout and prepare its parent directory.
+impl OutputPath {
+  /// Resolve the output path and prepare its parent directory.
   ///
   /// Existing compatible destinations are removed only when `overwrite` is true.
   pub(crate) fn new(output: &Path, output_files: Option<usize>, overwrite: bool) -> Result<Self> {
     let has_extension = output.extension().is_some();
     let is_directory = !has_extension;
     let parts = if is_directory {
-      let parts = output_files.ok_or(OutputLayoutError::FilesRequired)?;
+      let parts = output_files.ok_or(OutputPathError::FilesRequired)?;
       if parts == 0 {
-        return Err(OutputLayoutError::FilesInvalid.into());
+        return Err(OutputPathError::FilesInvalid.into());
       }
       parts
     } else {
       let parts = output_files.unwrap_or(1);
       if parts != 1 {
-        return Err(OutputLayoutError::FilesMustBeOne.into());
+        return Err(OutputPathError::FilesMustBeOne.into());
       }
       parts
     };
 
     if output.exists() {
       if !overwrite {
-        return Err(OutputLayoutError::Exists(output.to_path_buf()).into());
+        return Err(OutputPathError::Exists(output.to_path_buf()).into());
       }
       if output.is_dir() && !is_directory {
-        return Err(OutputLayoutError::Exists(output.to_path_buf()).into());
+        return Err(OutputPathError::Exists(output.to_path_buf()).into());
       }
       if output.is_file() && is_directory {
-        return Err(OutputLayoutError::Exists(output.to_path_buf()).into());
+        return Err(OutputPathError::Exists(output.to_path_buf()).into());
       }
       if output.is_dir() && is_directory {
         fs::remove_dir_all(output)?;
@@ -97,7 +97,7 @@ impl OutputLayout {
     self.parts
   }
 
-  /// Resolve the validated layout into deterministic output file paths.
+  /// Resolve the validated output path into deterministic output file paths.
   pub(crate) fn paths(&self) -> Result<Vec<PathBuf>> {
     if self.is_directory {
       let mut paths = Vec::new();
@@ -116,14 +116,14 @@ impl OutputLayout {
 mod tests {
   use tempfile::TempDir;
 
-  use super::OutputLayout;
+  use super::OutputPath;
 
   #[test]
   fn existing_path_requires_overwrite() {
     let temp = TempDir::new().unwrap();
     let output = temp.path().join("out.parquet");
     std::fs::write(&output, "data").unwrap();
-    let error = OutputLayout::new(&output, None, false).unwrap_err();
+    let error = OutputPath::new(&output, None, false).unwrap_err();
     assert!(error.to_string().contains("output path already exists"));
     assert!(error.to_string().contains("--overwrite"));
   }
@@ -135,11 +135,11 @@ mod tests {
     std::fs::create_dir_all(&out_dir).unwrap();
     std::fs::write(out_dir.join("stale.parquet"), "stale").unwrap();
 
-    let layout = OutputLayout::new(&out_dir, Some(1), true).unwrap();
+    let output_path = OutputPath::new(&out_dir, Some(1), true).unwrap();
 
-    assert!(layout.is_directory);
-    assert_eq!(layout.path(), out_dir);
-    assert_eq!(layout.part_count(), 1);
+    assert!(output_path.is_directory);
+    assert_eq!(output_path.path(), out_dir);
+    assert_eq!(output_path.part_count(), 1);
     assert!(out_dir.exists());
     assert!(out_dir.is_dir());
     assert!(!out_dir.join("stale.parquet").exists());

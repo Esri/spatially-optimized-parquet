@@ -197,7 +197,15 @@ fn optimize_fixture(input: &Path, output: &Path) {
         None,
         None,
       ),
-      OutputOptions::new(output, OutputMode::Optimized, None, None, 4326, false, true),
+      OutputOptions::new(
+        output,
+        OutputMode::OptimizedGeoParquet,
+        None,
+        None,
+        4326,
+        false,
+        true,
+      ),
     )))
     .unwrap();
 }

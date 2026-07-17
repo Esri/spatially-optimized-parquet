@@ -17,13 +17,13 @@ struct BenchmarkCase {
 
 const OPTIMIZED_SINGLE: BenchmarkCase = BenchmarkCase {
   name: "optimized_single",
-  mode: OutputMode::Optimized,
+  mode: OutputMode::OptimizedGeoParquet,
   output_files: None,
   covering: true,
 };
 const OPTIMIZED_PARTITIONED: BenchmarkCase = BenchmarkCase {
   name: "optimized_partitioned_8",
-  mode: OutputMode::Optimized,
+  mode: OutputMode::OptimizedGeoParquet,
   output_files: Some(8),
   covering: true,
 };

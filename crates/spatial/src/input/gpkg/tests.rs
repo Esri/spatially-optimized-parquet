@@ -777,7 +777,7 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
         ),
         OutputOptions::new(
           &output,
-          OutputMode::Optimized,
+          OutputMode::OptimizedGeoParquet,
           None,
           None,
           4326,

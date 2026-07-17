@@ -6,7 +6,7 @@ use datafusion::execution::context::SessionContext;
 
 use crate::input::{InputOpenOptions, InputSource, RowRange, open_input, resolve_source_format};
 use crate::optimized::validate_internal_projection_columns;
-use crate::output::{OutputLayout, OutputMode, validate_output_wkid};
+use crate::output::{OutputMode, OutputPath, validate_output_wkid};
 use crate::session::DataFusionSession;
 
 use super::{
@@ -28,7 +28,7 @@ impl Pipeline {
       &InputOpenOptions::new(options.input.location.clone(), options.input.layer.clone()),
     )
     .await?;
-    let output_layout = OutputLayout::new(
+    let output_path = OutputPath::new(
       &options.output.path,
       options.output.file_count,
       options.output.overwrite,
@@ -46,7 +46,7 @@ impl Pipeline {
       _session: session,
       input,
       input_dataframe,
-      output_layout,
+      output_path,
       source_schema,
       total_input_rows,
       row_range: options.input.row_range,
@@ -64,7 +64,7 @@ impl Pipeline {
       warning_store: Default::default(),
     };
 
-    match PipelineKind::new(output_mode, state.output_layout.part_count())? {
+    match PipelineKind::new(output_mode, state.output_path.part_count())? {
       PipelineKind::Plain => Ok(Self::Plain(PlainPipeline::new(state))),
       PipelineKind::OptimizedSingleFile => Ok(Self::OptimizedSingleFile(
         OptimizedSingleFilePipeline::new(state),
@@ -79,12 +79,12 @@ impl Pipeline {
 impl PipelineKind {
   fn new(output_mode: OutputMode, output_parts: usize) -> Result<Self> {
     match (output_mode, output_parts) {
-      (OutputMode::Plain, 1) => Ok(Self::Plain),
-      (OutputMode::Plain, _) => {
+      (OutputMode::GeoParquet, 1) => Ok(Self::Plain),
+      (OutputMode::GeoParquet, _) => {
         bail!("plain GeoParquet output does not support --output-files")
       }
-      (OutputMode::Optimized, 1) => Ok(Self::OptimizedSingleFile),
-      (OutputMode::Optimized, _) => Ok(Self::OptimizedPartitioned),
+      (OutputMode::OptimizedGeoParquet, 1) => Ok(Self::OptimizedSingleFile),
+      (OutputMode::OptimizedGeoParquet, _) => Ok(Self::OptimizedPartitioned),
     }
   }
 }

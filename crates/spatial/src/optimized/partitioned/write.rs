@@ -8,7 +8,7 @@ use crate::optimized::clustering::{
   cluster_key_column, cluster_partition_column, validate_cluster_partition_column,
 };
 use crate::optimized::metadata::parquet_metadata;
-use crate::output::{OutputLayout, ParquetOutputWriter, ParquetWriterOptions};
+use crate::output::{OutputPath, ParquetOutputWriter, ParquetWriterOptions};
 use crate::pipeline::{PipelineWarningStore, SharedWriteReporter};
 
 use super::dataframe;
@@ -18,7 +18,7 @@ use super::sort::PartitionedSortConfig;
 /// Write range-partitioned optimized GeoParquet files.
 pub(crate) async fn write(
   input_dataframe: DataFrame,
-  output_layout: &OutputLayout,
+  output_path: &OutputPath,
   source_schema: &arrow_schema::Schema,
   optimization: &ResolvedOptimization,
   covering: bool,
@@ -33,7 +33,7 @@ pub(crate) async fn write(
   let boundaries = compute_cluster_range_boundaries(
     range_source,
     cluster_key_column(optimization.geometry().clustering_family),
-    output_layout.part_count(),
+    output_path.part_count(),
   )
   .await?;
   let dataframe = dataframe::dataframe(
@@ -51,13 +51,13 @@ pub(crate) async fn write(
   let partitioned_sort = PartitionedSortConfig::new(
     partition_column,
     cluster_key_column(optimization.geometry().clustering_family),
-    output_layout.part_count(),
+    output_path.part_count(),
     true,
   );
   ParquetOutputWriter::new(total_input_rows, write_reporter)
     .write_partitioned(
       dataframe,
-      output_layout.path().to_string_lossy().into_owned(),
+      output_path.path().to_string_lossy().into_owned(),
       vec![partition_column.to_string()],
       writer_options,
       |input| partitioned_sort.insert_into(input),

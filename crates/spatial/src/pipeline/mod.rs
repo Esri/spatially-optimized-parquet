@@ -15,7 +15,8 @@ use arrow_schema::SchemaRef;
 use datafusion::dataframe::DataFrame;
 
 use crate::input::{InputSource, RowRange};
-use crate::output::{MultiscaleEncoding, OutputLayout};
+use crate::optimized::MultiscaleEncoding;
+use crate::output::OutputPath;
 use crate::session::DataFusionSession;
 
 pub use options::{InputOptions, OutputOptions, SpatialPipelineOptions};
@@ -54,7 +55,7 @@ struct SpatialPipelineState {
   _session: DataFusionSession,
   input: Arc<dyn InputSource>,
   input_dataframe: DataFrame,
-  output_layout: OutputLayout,
+  output_path: OutputPath,
   source_schema: SchemaRef,
   total_input_rows: u64,
   row_range: RowRange,

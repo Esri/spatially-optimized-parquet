@@ -33,7 +33,7 @@ fn optimized_output_rejects_non_wgs84_before_filesystem_mutation() {
         ),
         OutputOptions::new(
           &output,
-          OutputMode::Optimized,
+          OutputMode::OptimizedGeoParquet,
           None,
           None,
           output_wkid,
@@ -77,7 +77,7 @@ fn output_rejects_explicit_geometry_without_crs_metadata() {
     &[],
   );
 
-  for output_mode in [OutputMode::Plain, OutputMode::Optimized] {
+  for output_mode in [OutputMode::GeoParquet, OutputMode::OptimizedGeoParquet] {
     let output = temp.path().join(format!("{output_mode:?}.parquet"));
     let error = runtime()
       .block_on(run(SpatialPipelineOptions::new(
@@ -106,7 +106,15 @@ fn output_rejects_explicit_geometry_without_crs_metadata() {
         Some("geometry".to_string()),
         Some(3857),
       ),
-      OutputOptions::new(&output, OutputMode::Plain, None, None, 4326, false, true),
+      OutputOptions::new(
+        &output,
+        OutputMode::GeoParquet,
+        None,
+        None,
+        4326,
+        false,
+        true,
+      ),
     )))
     .unwrap();
   let geo: serde_json::Value = serde_json::from_str(kv_map(&output).get("geo").unwrap()).unwrap();
@@ -152,7 +160,7 @@ fn output_rejects_input_wkid_when_crs_metadata_exists() {
       ),
       OutputOptions::new(
         &output,
-        OutputMode::Optimized,
+        OutputMode::OptimizedGeoParquet,
         None,
         None,
         4326,

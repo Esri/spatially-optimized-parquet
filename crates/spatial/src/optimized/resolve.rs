@@ -7,9 +7,9 @@ use datafusion::dataframe::DataFrame;
 use crate::geometry::Extent2D;
 use crate::geoparquet::{NormalizedSpatialFrame, ResolvedReprojection, resolve_source};
 use crate::input::{InputSource, RowRange, SourceDatasetMetadata};
+use crate::optimized::MultiscaleEncoding;
 use crate::optimized::extent_resolve::ExtentResolver;
 use crate::optimized::multiscale::MultiscaleLevel;
-use crate::output::MultiscaleEncoding;
 use crate::pipeline::OutputExecutionOptions;
 
 use super::multiscale::create_multiscale_levels;

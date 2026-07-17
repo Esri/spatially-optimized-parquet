@@ -18,7 +18,7 @@ impl OptimizedPartitionedPipeline {
     .await?;
     let rows_written = partitioned::write(
       dataframe,
-      &state.output_layout,
+      &state.output_path,
       state.source_schema.as_ref(),
       &optimization,
       state.output_options.covering,

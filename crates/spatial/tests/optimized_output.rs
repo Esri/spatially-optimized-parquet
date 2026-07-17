@@ -72,8 +72,16 @@ fn run_optimized_multiscale(
       None,
       None,
     ),
-    OutputOptions::new(output, OutputMode::Optimized, None, None, 4326, false, true)
-      .with_multiscale_encoding(encoding),
+    OutputOptions::new(
+      output,
+      OutputMode::OptimizedGeoParquet,
+      None,
+      None,
+      4326,
+      false,
+      true,
+    )
+    .with_multiscale_encoding(encoding),
   )))
 }
 
@@ -100,7 +108,7 @@ fn run_optimized_with_stripping(
     ),
     OutputOptions::new(
       output,
-      OutputMode::Optimized,
+      OutputMode::OptimizedGeoParquet,
       None,
       None,
       4326,
@@ -156,7 +164,7 @@ fn optimized_output_sorts_points_and_writes_metadata() {
         ),
         OutputOptions::new(
           &output,
-          OutputMode::Optimized,
+          OutputMode::OptimizedGeoParquet,
           None,
           None,
           4326,

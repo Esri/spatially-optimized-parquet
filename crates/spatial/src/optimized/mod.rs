@@ -19,6 +19,7 @@ pub(crate) use geodisplay_metadata::{
   ESRI_PBF_ENCODING, GEODISPLAY_VERSION, GeodisplayIndex, GeodisplayMetadata, MultiscaleLevel,
   QUANTIZED_NATIVE_ENCODING, XzClusteringIndex, ZClusteringIndex,
 };
+pub use multiscale::MultiscaleEncoding;
 pub(crate) use multiscale::{
   COVERING_BBOX_COLUMN, GeometryPartRole, GeometryPartSink, geometry_extent_from_wkb,
   validate_internal_projection_columns, visit_wkb_geometry, visit_wkb_geometry_for_display,

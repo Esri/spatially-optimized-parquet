@@ -13,7 +13,7 @@ impl PlainPipeline {
     let rows_written = GeoParquetWriter::new(
       state.input.as_ref(),
       state.input_dataframe.clone(),
-      &state.output_layout,
+      &state.output_path,
       state.source_schema.as_ref(),
       options.geometry_column.as_deref(),
       options.input_wkid,

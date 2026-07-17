@@ -2,6 +2,7 @@
 
 mod columns;
 mod datafusion;
+mod encoding;
 mod level_array_builder;
 mod levels;
 mod traversal;
@@ -12,6 +13,7 @@ pub(crate) use columns::{
   POINT_Z_COLUMN, TEMP_XZ_CODE_COLUMN, XZ_CODE_COLUMN,
 };
 pub(crate) use datafusion::{complex_geometry_geodisplay_expr, point_geometry_geodisplay_expr};
+pub use encoding::MultiscaleEncoding;
 pub(crate) use levels::{MultiscaleLevel, create_multiscale_levels};
 pub(crate) use traversal::{
   GeometryPartRole, GeometryPartSink, geometry_extent_from_wkb, visit_wkb_geometry,
