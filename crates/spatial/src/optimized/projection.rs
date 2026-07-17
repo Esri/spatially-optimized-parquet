@@ -125,6 +125,7 @@ fn output_projection_expressions(
       context.geometry().has_z,
       context.geometry().has_m,
       context.encodings(),
+      context.multiscale_encoding(),
       warning_store,
     )),
   }

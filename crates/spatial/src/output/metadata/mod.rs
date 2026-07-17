@@ -12,7 +12,7 @@ pub(crate) use geo::GeoMetadata;
 pub(crate) use geodisplay::QuantizationTransform;
 pub(crate) use geodisplay::{
   ESRI_PBF_ENCODING, GEODISPLAY_VERSION, GeodisplayIndex, GeodisplayMetadata, MultiscaleLevel,
-  XzClusteringIndex, ZClusteringIndex,
+  QUANTIZED_NATIVE_ENCODING, XzClusteringIndex, ZClusteringIndex,
 };
 use parquet::ParquetMetadataSet;
 

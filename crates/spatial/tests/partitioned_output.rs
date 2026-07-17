@@ -18,11 +18,11 @@ use tokio::runtime::Runtime;
 use common::assertion::{
   assert_close, assert_covering_metadata, assert_json_extent, binary_value, string_value,
 };
-use common::fixture::wkb_point;
+use common::fixture::{wkb_point, wkb_polygon};
 use common::geometry::{point_xy_from_wkb, transform_point_between_epsg};
 use common::parquet::{
-  geoparquet_kv_with_epsg, kv_map, parquet_files, raw_parquet_schema, reader_metadata,
-  scan_parquet, write_parquet,
+  geoparquet_kv, geoparquet_kv_with_epsg, kv_map, parquet_files, raw_parquet_schema,
+  reader_metadata, scan_parquet, write_parquet,
 };
 
 fn runtime() -> Runtime {
@@ -233,6 +233,89 @@ fn partitioned_output_writes_sorted_range_partitions() {
         .extension()
         .is_some_and(|extension| extension == "parquet")
     }));
+  }
+}
+
+#[test]
+fn partitioned_output_writes_native_multiscale_coordinate_leaves() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("polygons.parquet");
+  let output = temp.path().join("out");
+  let schema = Arc::new(Schema::new(vec![
+    Field::new("name", DataType::Utf8, false),
+    Field::new("geometry", DataType::Binary, true),
+  ]));
+  let polygons = [
+    wkb_polygon(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 0.0)]),
+    wkb_polygon(&[(4.0, 4.0), (5.0, 4.0), (5.0, 5.0), (4.0, 4.0)]),
+    wkb_polygon(&[(8.0, 8.0), (9.0, 8.0), (9.0, 9.0), (8.0, 8.0)]),
+  ];
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![
+      Arc::new(StringArray::from(vec!["early", "middle", "late"])),
+      Arc::new(BinaryArray::from(
+        polygons
+          .iter()
+          .map(|polygon| Some(polygon.as_slice()))
+          .collect::<Vec<_>>(),
+      )),
+    ],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    Compression::SNAPPY,
+    &[geoparquet_kv("geometry", &["Polygon"])],
+  );
+
+  runtime()
+    .block_on(run(SpatialPipelineOptions::new(
+      InputOptions::new(
+        input.to_string_lossy(),
+        None,
+        RowRange::default(),
+        None,
+        None,
+        None,
+      ),
+      OutputOptions::new(
+        &output,
+        OutputMode::Optimized,
+        Some(2),
+        None,
+        4326,
+        false,
+        true,
+      )
+      .with_multiscale_encoding(spatial::MultiscaleEncoding::QuantizedNative),
+    )))
+    .unwrap();
+
+  validate(&output).unwrap().ensure_valid().unwrap();
+  let files = parquet_files(&output);
+  assert_eq!(files.len(), 2);
+  for file in files {
+    let parquet_metadata = reader_metadata(&file);
+    let coordinate_column = parquet_metadata
+      .metadata()
+      .row_group(0)
+      .columns()
+      .iter()
+      .find(|column| {
+        column
+          .column_descr()
+          .path()
+          .string()
+          .ends_with("level_16.list.element.list.element.x")
+      })
+      .expect("native x coordinate column");
+    let encodings = coordinate_column.encodings().collect::<Vec<_>>();
+    assert!(encodings.contains(&parquet::basic::Encoding::DELTA_BINARY_PACKED));
+    assert!(!encodings.contains(&parquet::basic::Encoding::RLE_DICTIONARY));
+    assert!(!encodings.contains(&parquet::basic::Encoding::PLAIN_DICTIONARY));
   }
 }
 

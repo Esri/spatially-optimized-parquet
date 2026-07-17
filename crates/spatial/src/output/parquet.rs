@@ -8,6 +8,7 @@
 //! the cost of memory, while smaller values reduce buffering and may increase file overhead.
 
 use anyhow::{Context, Result};
+use datafusion::common::config::ParquetColumnOptions;
 use datafusion::common::config::TableParquetOptions;
 use datafusion::common::parquet_config::DFParquetWriterVersion;
 use parquet::basic::{BrotliLevel, Compression, GzipLevel, ZstdLevel};
@@ -44,6 +45,24 @@ impl ParquetWriterOptions {
   /// Consume the typed options for a custom DataFusion Parquet sink.
   pub(crate) fn into_datafusion(self) -> TableParquetOptions {
     self.options
+  }
+
+  /// Apply integer delta packing to selected physical coordinate leaves.
+  pub(crate) fn with_delta_binary_packed_columns(
+    mut self,
+    columns: impl IntoIterator<Item = String>,
+  ) -> Self {
+    for column in columns {
+      self.options.column_specific_options.insert(
+        column,
+        ParquetColumnOptions {
+          encoding: Some("delta_binary_packed".to_string()),
+          dictionary_enabled: Some(false),
+          ..Default::default()
+        },
+      );
+    }
+    self
   }
 }
 

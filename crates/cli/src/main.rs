@@ -13,10 +13,10 @@ mod write_progress;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use spatial::{
-  DEFAULT_OUTPUT_WKID, InputOptions, OutputMode, OutputOptions, RowRange, SourceFormat,
-  SpatialPipelineOptions, ValidationReport,
+  DEFAULT_OUTPUT_WKID, InputOptions, MultiscaleEncoding, OutputMode, OutputOptions, RowRange,
+  SourceFormat, SpatialPipelineOptions, ValidationReport,
 };
 
 use crate::write_progress::StdoutWriteReporter;
@@ -38,6 +38,22 @@ enum Command {
   Write(WriteCommand),
   /// Validate one optimized Parquet file or recursive dataset directory.
   Validate(ValidateCommand),
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum MultiscaleEncodingValue {
+  #[default]
+  Pbf,
+  QuantizedNative,
+}
+
+impl From<MultiscaleEncodingValue> for MultiscaleEncoding {
+  fn from(value: MultiscaleEncodingValue) -> Self {
+    match value {
+      MultiscaleEncodingValue::Pbf => Self::Pbf,
+      MultiscaleEncodingValue::QuantizedNative => Self::QuantizedNative,
+    }
+  }
 }
 
 #[derive(Args, Debug)]
@@ -103,9 +119,9 @@ struct WriteCommand {
     help = "Write a root bbox struct column and GeoParquet 1.1 covering metadata"
   )]
   covering: bool,
-  #[arg(long, help = "Remove Z ordinates from output geometry and metadata")]
+  #[arg(long, help = "Remove Z values from output geometry and metadata")]
   strip_z: bool,
-  #[arg(long, help = "Remove M ordinates from output geometry and metadata")]
+  #[arg(long, help = "Remove M values from output geometry and metadata")]
   strip_m: bool,
   #[arg(
     long,
@@ -122,6 +138,13 @@ struct WriteCommand {
     help = "Pass through the selected input rows without sorting, display optimization, or geodisplay metadata changes"
   )]
   no_optimization: bool,
+  #[arg(
+    long,
+    value_enum,
+    default_value_t,
+    help = "EXPERIMENTAL: Select the optimized multiscale geometry encoding"
+  )]
+  multiscale_encoding: MultiscaleEncodingValue,
 }
 
 #[derive(Args, Debug)]
@@ -193,7 +216,8 @@ impl From<WriteCommand> for SpatialPipelineOptions {
         args.covering,
         args.overwrite,
       )
-      .with_stripped_dimensions(args.strip_z, args.strip_m),
+      .with_stripped_dimensions(args.strip_z, args.strip_m)
+      .with_multiscale_encoding(args.multiscale_encoding.into()),
     );
     if let Some(memory_limit_bytes) = memory_limit_bytes {
       options = options.with_memory_limit_bytes(memory_limit_bytes);
@@ -318,6 +342,47 @@ mod tests {
     };
     assert!(args.strip_z);
     assert!(args.strip_m);
+  }
+
+  #[test]
+  fn write_subcommand_accepts_quantized_native_multiscale_encoding() {
+    let cli = Cli::try_parse_from([
+      "sop",
+      "write",
+      "--input",
+      "input.parquet",
+      "--output",
+      "output.parquet",
+      "--multiscale-encoding",
+      "quantized-native",
+    ])
+    .unwrap();
+
+    let Command::Write(args) = cli.command else {
+      panic!("expected write command");
+    };
+    assert_eq!(
+      args.multiscale_encoding,
+      MultiscaleEncodingValue::QuantizedNative
+    );
+  }
+
+  #[test]
+  fn write_subcommand_defaults_to_pbf_multiscale_encoding() {
+    let cli = Cli::try_parse_from([
+      "sop",
+      "write",
+      "--input",
+      "input.parquet",
+      "--output",
+      "output.parquet",
+    ])
+    .unwrap();
+
+    let Command::Write(args) = cli.command else {
+      panic!("expected write command");
+    };
+    assert_eq!(args.multiscale_encoding, MultiscaleEncodingValue::Pbf);
   }
 
   #[test]

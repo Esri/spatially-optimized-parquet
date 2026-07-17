@@ -28,9 +28,11 @@ pub(super) async fn write_optimized_single_file(
   hidden_sort_column: Option<&str>,
   total_input_rows: u64,
   write_reporter: Option<SharedWriteReporter>,
+  delta_packed_columns: Vec<String>,
 ) -> Result<u64> {
-  let writer_options =
-    ParquetWriterOptions::new(compression.unwrap_or("snappy"), &metadata)?.into_datafusion();
+  let writer_options = ParquetWriterOptions::new(compression.unwrap_or("snappy"), &metadata)?
+    .with_delta_binary_packed_columns(delta_packed_columns)
+    .into_datafusion();
   let output_path = output_layout
     .paths()?
     .into_iter()
@@ -73,7 +75,9 @@ impl<'a> PartitionedOutputWriter<'a> {
     metadata: Vec<parquet::file::metadata::KeyValue>,
   ) -> Result<u64> {
     let writer_options =
-      ParquetWriterOptions::new(self.compression.unwrap_or("snappy"), &metadata)?.into_datafusion();
+      ParquetWriterOptions::new(self.compression.unwrap_or("snappy"), &metadata)?
+        .with_delta_binary_packed_columns(self.optimization.native_coordinate_column_paths())
+        .into_datafusion();
     let partition_column = cluster_partition_column(self.optimization.geometry().clustering_family);
     let partitioned_sort = PartitionedSortConfig::new(
       partition_column,

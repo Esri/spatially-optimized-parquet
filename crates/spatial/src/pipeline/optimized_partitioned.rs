@@ -18,15 +18,7 @@ impl OptimizedPartitionedPipeline {
       state.write_reporter.clone(),
       state.warning_store.clone(),
     )
-    .resolve(
-      state.geometry_column.as_deref(),
-      state.input_wkid,
-      state.output_wkid,
-      state.covering,
-      state.strip_z,
-      state.strip_m,
-      state.compression.as_deref(),
-    )
+    .resolve(&state.output_options)
     .await?;
     let rows_written = output.write_partitioned().await?;
     Ok(state.finish(rows_written))

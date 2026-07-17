@@ -6,7 +6,7 @@ use crate::geometry::Extent2D;
 use crate::optimized::DEFAULT_XZ_MAX_LEVEL;
 use crate::output::{
   ESRI_PBF_ENCODING, GEODISPLAY_VERSION, GeoMetadata, GeodisplayIndex, GeodisplayMetadata,
-  XzClusteringIndex, ZClusteringIndex,
+  QUANTIZED_NATIVE_ENCODING, XzClusteringIndex, ZClusteringIndex,
 };
 
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
@@ -418,13 +418,16 @@ fn validate_xz_metadata(
       ),
     );
   }
-  if index.encoding != ESRI_PBF_ENCODING {
+  if !matches!(
+    index.encoding.as_str(),
+    ESRI_PBF_ENCODING | QUANTIZED_NATIVE_ENCODING
+  ) {
     report.push(
       ValidationRule::XzMetadata,
       ValidationSeverity::Error,
       location.clone(),
       format!(
-        "encoding must be {ESRI_PBF_ENCODING}, found {}",
+        "encoding must be {ESRI_PBF_ENCODING} or {QUANTIZED_NATIVE_ENCODING}, found {}",
         index.encoding
       ),
     );

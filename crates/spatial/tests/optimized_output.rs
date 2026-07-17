@@ -5,13 +5,14 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use arrow_array::{
-  Array, BinaryArray, Float64Array, Int32Array, RecordBatch, StringArray, StructArray, UInt64Array,
+  Array, BinaryArray, Float64Array, Int32Array, Int64Array, ListArray, RecordBatch, StringArray,
+  StructArray, UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema};
 use gdal_sys::OGRwkbGeometryType;
 use spatial::{
-  InputOptions, OutputMode, OutputOptions, RowRange, SpatialPipelineOptions, SpatialPipelineResult,
-  ValidationRule, WriteProgress, run, validate,
+  InputOptions, MultiscaleEncoding, OutputMode, OutputOptions, RowRange, SpatialPipelineOptions,
+  SpatialPipelineResult, ValidationRule, WriteProgress, run, validate,
 };
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
@@ -24,7 +25,7 @@ use common::fixture::{wkb_dimensional_point, wkb_dimensional_polygon, wkb_point,
 use common::geometry::{point_xy_from_wkb, polygon_extent_from_wkb, transform_point_between_epsg};
 use common::gpkg::{GpkgFeature, GpkgLayerSpec, write_gpkg};
 use common::parquet::{
-  geoparquet_kv, geoparquet_kv_with_epsg, kv_map, scan_parquet, write_parquet,
+  geoparquet_kv, geoparquet_kv_with_epsg, kv_map, reader_metadata, scan_parquet, write_parquet,
 };
 
 fn runtime() -> Runtime {
@@ -51,6 +52,21 @@ fn run_optimized(
     false,
     false,
   )
+}
+
+fn run_optimized_native(input: &Path, output: &Path) -> Result<SpatialPipelineResult> {
+  runtime().block_on(run(SpatialPipelineOptions::new(
+    InputOptions::new(
+      input.to_string_lossy(),
+      None,
+      RowRange::default(),
+      None,
+      None,
+      None,
+    ),
+    OutputOptions::new(output, OutputMode::Optimized, None, None, 4326, false, true)
+      .with_multiscale_encoding(MultiscaleEncoding::QuantizedNative),
+  )))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1016,6 +1032,177 @@ fn optimized_output_writes_non_point_display_struct_and_metadata() {
   assert_eq!(levels[1]["level"], 2);
   assert_eq!(levels[1]["resolution"], 0.17578125);
   assert_eq!(levels[1]["scale"], 73957338.8636414);
+}
+
+#[test]
+fn optimized_output_writes_native_quantized_multiscale_geometry() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("polygons.parquet");
+  let output = temp.path().join("polygons-native.parquet");
+  let schema = Arc::new(Schema::new(vec![
+    Field::new("id", DataType::Int32, false),
+    Field::new("geometry", DataType::Binary, true),
+  ]));
+  let polygon = wkb_polygon(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 0.0)]);
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![
+      Arc::new(Int32Array::from(vec![1])),
+      Arc::new(BinaryArray::from(vec![Some(polygon.as_slice())])),
+    ],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv("geometry", &["Polygon"])],
+  );
+
+  run_optimized_native(&input, &output).unwrap();
+  validate(&output).unwrap().ensure_valid().unwrap();
+
+  let dataframe = runtime()
+    .block_on(scan_parquet(output.to_str().unwrap()))
+    .unwrap();
+  let batches = runtime().block_on(dataframe.collect()).unwrap();
+  let geodisplay = batches[0]
+    .column_by_name("geodisplay")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap();
+  let geometries = geodisplay
+    .column_by_name("level_16")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<ListArray>()
+    .unwrap();
+  let parts = geometries
+    .value(0)
+    .as_any()
+    .downcast_ref::<ListArray>()
+    .unwrap()
+    .clone();
+  let coordinates = parts
+    .value(0)
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap()
+    .clone();
+  let x = coordinates
+    .column_by_name("x")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<Int64Array>()
+    .unwrap();
+  assert_eq!(x.value(0), 0);
+  assert!(x.value(1) > 0);
+  assert_eq!(x.value(1), x.value(2));
+  assert_eq!(x.value(3), 0);
+
+  let parquet_metadata = reader_metadata(&output);
+  let coordinate_column = parquet_metadata
+    .metadata()
+    .row_group(0)
+    .columns()
+    .iter()
+    .find(|column| {
+      column
+        .column_descr()
+        .path()
+        .string()
+        .ends_with("level_16.list.element.list.element.x")
+    })
+    .expect("native x coordinate column");
+  let encodings = coordinate_column.encodings().collect::<Vec<_>>();
+  assert!(encodings.contains(&parquet::basic::Encoding::DELTA_BINARY_PACKED));
+  assert!(!encodings.contains(&parquet::basic::Encoding::RLE_DICTIONARY));
+  assert!(!encodings.contains(&parquet::basic::Encoding::PLAIN_DICTIONARY));
+}
+
+#[test]
+fn optimized_native_output_writes_missing_zm_as_nullable_ordinates() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("polygon-missing-zm.parquet");
+  let output = temp.path().join("polygon-missing-zm-native.parquet");
+  let schema = Arc::new(Schema::new(vec![Field::new(
+    "geometry",
+    DataType::Binary,
+    false,
+  )]));
+  let polygon = wkb_dimensional_polygon(&[
+    (0.0, 0.0, Some(f64::NAN), Some(f64::NAN)),
+    (2.0, 0.0, Some(f64::NAN), Some(f64::NAN)),
+    (2.0, 2.0, Some(f64::NAN), Some(f64::NAN)),
+    (0.0, 0.0, Some(f64::NAN), Some(f64::NAN)),
+  ]);
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![Arc::new(BinaryArray::from(vec![Some(polygon.as_slice())]))],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv("geometry", &["Polygon ZM"])],
+  );
+
+  let result = run_optimized_native(&input, &output).unwrap();
+  validate(&output).unwrap().ensure_valid().unwrap();
+  assert!(result.warnings().is_empty());
+
+  let dataframe = runtime()
+    .block_on(scan_parquet(output.to_str().unwrap()))
+    .unwrap();
+  let batches = runtime().block_on(dataframe.collect()).unwrap();
+  let geodisplay = batches[0]
+    .column_by_name("geodisplay")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap();
+  let geometries = geodisplay
+    .column_by_name("level_16")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<ListArray>()
+    .unwrap();
+  let parts = geometries
+    .value(0)
+    .as_any()
+    .downcast_ref::<ListArray>()
+    .unwrap()
+    .clone();
+  let coordinates = parts
+    .value(0)
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap()
+    .clone();
+  let z = coordinates
+    .column_by_name("z")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<Int64Array>()
+    .unwrap();
+  let m = coordinates
+    .column_by_name("m")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<Int64Array>()
+    .unwrap();
+
+  assert_eq!(z.null_count(), coordinates.len());
+  assert_eq!(m.null_count(), coordinates.len());
+  let DataType::Struct(fields) = coordinates.data_type() else {
+    panic!("native coordinates must use a struct")
+  };
+  assert!(fields.find("z").expect("z field").1.is_nullable());
+  assert!(fields.find("m").expect("m field").1.is_nullable());
 }
 
 #[test]

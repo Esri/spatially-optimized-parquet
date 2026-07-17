@@ -1,9 +1,27 @@
-//! Quantizes and simplifies flat geometry into delta-encoded coordinate vectors.
+//! Quantizes and simplifies flat geometry for multiscale encoders.
 
 use anyhow::{Result, bail};
 
 use super::GeometryEncoding;
 use crate::geometry::WkbCoordinate;
+
+const Z_VALID: u8 = 1;
+const M_VALID: u8 = 2;
+
+#[derive(Default)]
+pub(super) struct OptionalComponentValidity {
+  values: Vec<u8>,
+}
+
+impl OptionalComponentValidity {
+  pub(super) fn z_is_valid(&self, coordinate_index: usize) -> bool {
+    self.values[coordinate_index] & Z_VALID != 0
+  }
+
+  pub(super) fn m_is_valid(&self, coordinate_index: usize) -> bool {
+    self.values[coordinate_index] & M_VALID != 0
+  }
+}
 
 pub(super) fn encode_quantized_payload_into(
   input_coordinates: &[WkbCoordinate],
@@ -14,10 +32,83 @@ pub(super) fn encode_quantized_payload_into(
   coords: &mut Vec<i64>,
   lengths: &mut Vec<u32>,
 ) -> Result<()> {
+  quantize_geometry_payload_with_validity_into(
+    input_coordinates,
+    input_lengths,
+    encoding,
+    has_z,
+    has_m,
+    coords,
+    lengths,
+    None,
+  )?;
+  encode_deltas_xy(coords, lengths, has_z, has_m);
+  Ok(())
+}
+
+#[cfg(test)]
+pub(super) fn quantize_geometry_payload_into(
+  input_coordinates: &[WkbCoordinate],
+  input_lengths: &[u32],
+  encoding: &GeometryEncoding,
+  has_z: bool,
+  has_m: bool,
+  coords: &mut Vec<i64>,
+  lengths: &mut Vec<u32>,
+) -> Result<()> {
+  quantize_geometry_payload_with_validity_into(
+    input_coordinates,
+    input_lengths,
+    encoding,
+    has_z,
+    has_m,
+    coords,
+    lengths,
+    None,
+  )
+}
+
+pub(super) fn quantize_native_geometry_payload_into(
+  input_coordinates: &[WkbCoordinate],
+  input_lengths: &[u32],
+  encoding: &GeometryEncoding,
+  has_z: bool,
+  has_m: bool,
+  coords: &mut Vec<i64>,
+  lengths: &mut Vec<u32>,
+  validity: &mut OptionalComponentValidity,
+) -> Result<()> {
+  quantize_geometry_payload_with_validity_into(
+    input_coordinates,
+    input_lengths,
+    encoding,
+    has_z,
+    has_m,
+    coords,
+    lengths,
+    Some(validity),
+  )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn quantize_geometry_payload_with_validity_into(
+  input_coordinates: &[WkbCoordinate],
+  input_lengths: &[u32],
+  encoding: &GeometryEncoding,
+  has_z: bool,
+  has_m: bool,
+  coords: &mut Vec<i64>,
+  lengths: &mut Vec<u32>,
+  mut validity: Option<&mut OptionalComponentValidity>,
+) -> Result<()> {
   coords.clear();
   lengths.clear();
+  if let Some(validity) = validity.as_deref_mut() {
+    validity.values.clear();
+  }
   let mut offset = 0usize;
   let mut degenerated_coordinate = None::<Vec<i64>>;
+  let mut degenerated_validity = None::<u8>;
 
   for &length in input_lengths {
     let point_count = length as usize;
@@ -26,17 +117,33 @@ pub(super) fn encode_quantized_payload_into(
     }
 
     let part_start = coords.len();
+    let validity_start = validity
+      .as_deref()
+      .map_or(0, |validity| validity.values.len());
     let part = &input_coordinates[offset..offset + point_count];
     let output_length = if has_z || has_m {
-      encode_dimensional_part(part, encoding, has_z, has_m, coords)?
+      encode_dimensional_part(
+        part,
+        encoding,
+        has_z,
+        has_m,
+        coords,
+        validity.as_deref_mut(),
+      )?
     } else {
-      encode_xy_part(part, encoding, coords)?
+      encode_part_xy(part, encoding, coords)?
     };
 
     if output_length < encoding.min_length as u32 {
       degenerated_coordinate.get_or_insert_with(|| {
         coords[part_start..part_start + coordinate_stride(has_z, has_m)].to_vec()
       });
+      if (has_z || has_m)
+        && let Some(validity) = validity.as_deref_mut()
+      {
+        degenerated_validity.get_or_insert(validity.values[validity_start]);
+        validity.values.truncate(validity_start);
+      }
       coords.truncate(part_start);
     } else {
       lengths.push(output_length);
@@ -49,9 +156,14 @@ pub(super) fn encode_quantized_payload_into(
   {
     coords.extend(coordinate);
     lengths.push(1);
+    if let (Some(validity), Some(degenerated_validity)) =
+      (validity.as_deref_mut(), degenerated_validity)
+    {
+      validity.values.push(degenerated_validity);
+    }
   }
 
-  fn encode_xy_part(
+  fn encode_part_xy(
     part: &[WkbCoordinate],
     encoding: &GeometryEncoding,
     coords: &mut Vec<i64>,
@@ -74,12 +186,12 @@ pub(super) fn encode_quantized_payload_into(
       let dy = y - previous_y;
       if is_collinear_delta(previous_dx, previous_dy, dx, dy) {
         let coordinate_count = coords.len();
-        coords[coordinate_count - 2] += dx;
-        coords[coordinate_count - 1] += dy;
+        coords[coordinate_count - 2] = x;
+        coords[coordinate_count - 1] = y;
         previous_x = x;
         previous_y = y;
       } else {
-        coords.extend([dx, dy]);
+        coords.extend([x, y]);
         previous_x = x;
         previous_y = y;
         previous_dx = dx;
@@ -96,34 +208,37 @@ pub(super) fn encode_quantized_payload_into(
     has_z: bool,
     has_m: bool,
     coords: &mut Vec<i64>,
+    mut validity: Option<&mut OptionalComponentValidity>,
   ) -> Result<u32> {
     let retained = douglas_peucker_indices(part, encoding.resolution);
-    let mut previous_x = 0;
-    let mut previous_y = 0;
-    for (output_index, input_index) in retained.iter().copied().enumerate() {
+    for input_index in retained.iter().copied() {
       let coordinate = part[input_index];
       let x = quantize_axis(coordinate.x, encoding, 0)?;
       let y = quantize_axis(coordinate.y, encoding, 1)?;
-      if output_index == 0 {
-        coords.extend([x, y]);
-      } else {
-        coords.extend([x - previous_x, y - previous_y]);
-      }
-      previous_x = x;
-      previous_y = y;
+      coords.extend([x, y]);
       if has_z {
-        coords.push(quantize_ordinate(
+        coords.push(quantize_optional_component(
           coordinate.z,
           encoding.transform.scale[2],
           encoding.transform.translate[2],
         )?);
       }
       if has_m {
-        coords.push(quantize_ordinate(
+        coords.push(quantize_optional_component(
           coordinate.m,
           encoding.transform.scale[3],
           encoding.transform.translate[3],
         )?);
+      }
+      if let Some(validity) = validity.as_deref_mut() {
+        let mut value = 0;
+        if has_z && coordinate.z.is_some_and(f64::is_finite) {
+          value |= Z_VALID;
+        }
+        if has_m && coordinate.m.is_some_and(f64::is_finite) {
+          value |= M_VALID;
+        }
+        validity.values.push(value);
       }
     }
     Ok(retained.len() as u32)
@@ -238,10 +353,6 @@ pub(super) fn encode_quantized_payload_into(
     left.x == right.x && left.y == right.y
   }
 
-  fn coordinate_stride(has_z: bool, has_m: bool) -> usize {
-    2 + usize::from(has_z) + usize::from(has_m)
-  }
-
   fn quantize_axis(value: f64, encoding: &GeometryEncoding, axis: usize) -> Result<i64> {
     quantize(
       value,
@@ -253,6 +364,27 @@ pub(super) fn encode_quantized_payload_into(
   Ok(())
 }
 
+fn encode_deltas_xy(coords: &mut [i64], lengths: &[u32], has_z: bool, has_m: bool) {
+  let stride = coordinate_stride(has_z, has_m);
+  let mut coordinate_offset = 0usize;
+  for &length in lengths {
+    let mut previous_x = 0i64;
+    let mut previous_y = 0i64;
+    for point_index in 0..length as usize {
+      let offset = coordinate_offset + point_index * stride;
+      let x = coords[offset];
+      let y = coords[offset + 1];
+      if point_index > 0 {
+        coords[offset] = x - previous_x;
+        coords[offset + 1] = y - previous_y;
+      }
+      previous_x = x;
+      previous_y = y;
+    }
+    coordinate_offset += length as usize * stride;
+  }
+}
+
 fn quantize(value: f64, scale: f64, translate: f64) -> Result<i64> {
   let normalized = ((value - translate) / scale).round();
   if !normalized.is_finite() || normalized < i64::MIN as f64 || normalized > i64::MAX as f64 {
@@ -261,11 +393,15 @@ fn quantize(value: f64, scale: f64, translate: f64) -> Result<i64> {
   Ok(normalized as i64)
 }
 
-fn quantize_ordinate(value: Option<f64>, scale: f64, translate: f64) -> Result<i64> {
+fn quantize_optional_component(value: Option<f64>, scale: f64, translate: f64) -> Result<i64> {
   match value {
     Some(value) if value.is_finite() => quantize(value, scale, translate),
     _ => Ok(0),
   }
+}
+
+fn coordinate_stride(has_z: bool, has_m: bool) -> usize {
+  2 + usize::from(has_z) + usize::from(has_m)
 }
 
 fn is_collinear_delta(previous_dx: i64, previous_dy: i64, dx: i64, dy: i64) -> bool {
@@ -351,6 +487,26 @@ mod tests {
   }
 
   #[test]
+  fn native_quantization_keeps_absolute_coordinates_xy() {
+    let input = [coordinate(0.0, 0.0), coordinate(2.0, 0.0)];
+    let mut coords = Vec::new();
+    let mut lengths = Vec::new();
+    quantize_geometry_payload_into(
+      &input,
+      &[2],
+      &test_encoding(2),
+      false,
+      false,
+      &mut coords,
+      &mut lengths,
+    )
+    .unwrap();
+
+    assert_eq!(lengths, [2]);
+    assert_eq!(coords, [0, 0, 2, 0]);
+  }
+
+  #[test]
   fn preserves_one_coordinate_for_degenerated_geometry() {
     let mut coords = Vec::new();
     let mut lengths = Vec::new();
@@ -369,7 +525,7 @@ mod tests {
   }
 
   #[test]
-  fn dimensional_dp_uses_xy_and_preserves_original_ordinates() {
+  fn dimensional_dp_preserves_original_components_using_xy() {
     let mut coords = Vec::new();
     let mut lengths = Vec::new();
     encode_quantized_payload_into(
@@ -413,7 +569,7 @@ mod tests {
   }
 
   #[test]
-  fn dimensional_pbf_encodes_missing_or_non_finite_ordinates_as_zero() {
+  fn dimensional_pbf_encodes_missing_or_non_finite_components_as_zero() {
     let mut coords = Vec::new();
     let mut lengths = Vec::new();
     encode_quantized_payload_into(
@@ -431,5 +587,78 @@ mod tests {
     .unwrap();
 
     assert_eq!(coords, vec![0, 0, 0, 0, 2, 0, 0, 0]);
+  }
+
+  #[test]
+  fn native_quantization_preserves_component_validity() {
+    let mut coords = Vec::new();
+    let mut lengths = Vec::new();
+    let mut validity = OptionalComponentValidity::default();
+    quantize_native_geometry_payload_into(
+      &[
+        dimensional_coordinate(0.0, 0.0, Some(0.0), Some(f64::NAN)),
+        dimensional_coordinate(2.0, 0.0, None, Some(0.0)),
+      ],
+      &[2],
+      &test_encoding(2),
+      true,
+      true,
+      &mut coords,
+      &mut lengths,
+      &mut validity,
+    )
+    .unwrap();
+
+    assert_eq!(coords, vec![0, 0, 0, 0, 2, 0, 0, 0]);
+    assert!(validity.z_is_valid(0));
+    assert!(!validity.m_is_valid(0));
+    assert!(!validity.z_is_valid(1));
+    assert!(validity.m_is_valid(1));
+  }
+
+  #[test]
+  fn native_degenerated_geometry_preserves_component_validity() {
+    let mut coords = Vec::new();
+    let mut lengths = Vec::new();
+    let mut validity = OptionalComponentValidity::default();
+    quantize_native_geometry_payload_into(
+      &[
+        dimensional_coordinate(0.0, 0.0, None, Some(1.0)),
+        dimensional_coordinate(0.1, 0.0, Some(2.0), None),
+      ],
+      &[2],
+      &test_encoding(3),
+      true,
+      true,
+      &mut coords,
+      &mut lengths,
+      &mut validity,
+    )
+    .unwrap();
+
+    assert_eq!(lengths, [1]);
+    assert!(!validity.z_is_valid(0));
+    assert!(validity.m_is_valid(0));
+  }
+
+  #[test]
+  fn native_degenerated_geometry_does_not_require_component_validity_xy() {
+    let mut coords = Vec::new();
+    let mut lengths = Vec::new();
+    let mut validity = OptionalComponentValidity::default();
+    quantize_native_geometry_payload_into(
+      &[coordinate(0.0, 0.0), coordinate(0.1, 0.0)],
+      &[2],
+      &test_encoding(3),
+      false,
+      false,
+      &mut coords,
+      &mut lengths,
+      &mut validity,
+    )
+    .unwrap();
+
+    assert_eq!(lengths, [1]);
+    assert_eq!(coords, [0, 0]);
   }
 }

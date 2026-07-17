@@ -16,7 +16,7 @@ use arrow_schema::SchemaRef;
 use datafusion::dataframe::DataFrame;
 
 use crate::input::{InputSource, RowRange};
-use crate::output::OutputLayout;
+use crate::output::{MultiscaleEncoding, OutputLayout};
 use crate::session::DataFusionSession;
 
 pub use options::{InputOptions, OutputOptions, SpatialPipelineOptions};
@@ -59,15 +59,20 @@ struct SpatialPipelineState {
   source_schema: SchemaRef,
   total_input_rows: u64,
   row_range: RowRange,
-  geometry_column: Option<String>,
-  input_wkid: Option<u32>,
-  output_wkid: u32,
-  covering: bool,
-  strip_z: bool,
-  strip_m: bool,
-  compression: Option<String>,
+  output_options: OutputExecutionOptions,
   write_reporter: Option<SharedWriteReporter>,
   warning_store: PipelineWarningStore,
+}
+
+pub(crate) struct OutputExecutionOptions {
+  pub(crate) geometry_column: Option<String>,
+  pub(crate) input_wkid: Option<u32>,
+  pub(crate) output_wkid: u32,
+  pub(crate) covering: bool,
+  pub(crate) strip_z: bool,
+  pub(crate) strip_m: bool,
+  pub(crate) multiscale_encoding: MultiscaleEncoding,
+  pub(crate) compression: Option<String>,
 }
 
 impl Pipeline {

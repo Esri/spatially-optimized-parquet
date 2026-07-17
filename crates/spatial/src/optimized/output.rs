@@ -19,7 +19,7 @@ use crate::optimized::range_boundaries::compute_cluster_range_boundaries;
 use crate::optimized::write::{PartitionedOutputWriter, write_optimized_single_file};
 use crate::optimized::{ClusteringFamily, OptimizedGeometry, ResolvedOptimization};
 use crate::output::{OutputLayout, ReprojectionSpec};
-use crate::pipeline::{PipelineWarningStore, SharedWriteReporter};
+use crate::pipeline::{OutputExecutionOptions, PipelineWarningStore, SharedWriteReporter};
 
 /// Coordinates optimized resolution and output behind one crate-private product boundary.
 pub(crate) struct OptimizedOutput<'a, State> {
@@ -39,9 +39,9 @@ pub(crate) struct PendingOutputState<'a> {
 }
 
 /// Stores resolved optimization and writer policy for optimized output execution.
-pub(crate) struct ResolvedOutputState<'a> {
+pub(crate) struct ResolvedOutputState {
   covering: bool,
-  compression: Option<&'a str>,
+  compression: Option<String>,
   optimization: ResolvedOptimization,
 }
 
@@ -71,45 +71,42 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
   /// Resolve all optimized state for one prepared spatial pipeline.
   pub(crate) async fn resolve(
     self,
-    geometry_column: Option<&str>,
-    input_wkid: Option<u32>,
-    output_wkid: u32,
-    covering: bool,
-    strip_z: bool,
-    strip_m: bool,
-    compression: Option<&'a str>,
-  ) -> Result<OptimizedOutput<'a, ResolvedOutputState<'a>>> {
+    options: &OutputExecutionOptions,
+  ) -> Result<OptimizedOutput<'a, ResolvedOutputState>> {
     let mut source = resolve_source(
       self.state.input,
       self.input_dataframe.clone(),
       self.source_schema,
-      geometry_column,
-      input_wkid,
+      options.geometry_column.as_deref(),
+      options.input_wkid,
       self.state.row_range,
     )
     .await?;
-    source.strip_dimensions(strip_z, strip_m);
+    source.strip_dimensions(options.strip_z, options.strip_m);
     let geometry = OptimizedGeometry::resolve(&source)?;
     let source_projjson = source
       .source_spatial_reference
       .projjson
       .as_ref()
       .context("missing resolved source CRS PROJJSON")?;
-    let reprojection = ReprojectionSpec::from_source_projjson(source_projjson, output_wkid)?;
+    let reprojection =
+      ReprojectionSpec::from_source_projjson(source_projjson, options.output_wkid)?;
     let prepared = PreparedSpatialFrame::new(
       self.input_dataframe.clone(),
       self.source_schema,
       &source,
       &reprojection,
-      strip_z,
-      strip_m,
+      options.strip_z,
+      options.strip_m,
     )?;
     let target_extent = TargetExtentResolver::new(self.state.input, self.state.row_range)
       .resolve(&source, &prepared, &reprojection)
       .await?;
     let encodings = match geometry.clustering_family {
       ClusteringFamily::Point => Vec::new(),
-      ClusteringFamily::NonPoint => create_geometry_encodings(output_wkid, geometry.geometry_type)?,
+      ClusteringFamily::NonPoint => {
+        create_geometry_encodings(options.output_wkid, geometry.geometry_type)?
+      }
     };
     Ok(OptimizedOutput {
       input_dataframe: prepared.dataframe(),
@@ -119,21 +116,22 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
       write_reporter: self.write_reporter,
       warning_store: self.warning_store,
       state: ResolvedOutputState {
-        covering,
-        compression,
+        covering: options.covering,
+        compression: options.compression.clone(),
         optimization: ResolvedOptimization::new(
           source.source_metadata,
           geometry,
           reprojection,
           target_extent,
           encodings,
+          options.multiscale_encoding,
         ),
       },
     })
   }
 }
 
-impl<'a> OptimizedOutput<'a, ResolvedOutputState<'a>> {
+impl<'a> OptimizedOutput<'a, ResolvedOutputState> {
   /// Write globally sorted optimized rows to one Parquet file.
   pub(crate) async fn write_single_file(&self) -> Result<u64> {
     let dataframe = single_file_projection(
@@ -150,11 +148,12 @@ impl<'a> OptimizedOutput<'a, ResolvedOutputState<'a>> {
     write_optimized_single_file(
       dataframe,
       self.output_layout,
-      self.state.compression,
+      self.state.compression.as_deref(),
       metadata,
       hidden_sort_column,
       self.total_input_rows,
       self.write_reporter.clone(),
+      self.state.optimization.native_coordinate_column_paths(),
     )
     .await
   }
@@ -186,7 +185,7 @@ impl<'a> OptimizedOutput<'a, ResolvedOutputState<'a>> {
     let metadata = parquet_metadata(&self.state.optimization, self.state.covering)?;
     PartitionedOutputWriter::new(
       self.output_layout,
-      self.state.compression,
+      self.state.compression.as_deref(),
       &self.state.optimization,
       self.total_input_rows,
       self.write_reporter.clone(),

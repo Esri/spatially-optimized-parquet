@@ -5,9 +5,9 @@ use crate::geometry::Extent2D;
 use crate::geometry::WkbCoordinate;
 use crate::optimized::{
   GeometryPartRole, GeometryPartSink, OptimizedGeometryType, decode_pbf_geometry, extent_xz_code,
-  visit_wkb_geometry_for_display,
+  native_geometry_data_type, visit_wkb_geometry_for_display,
 };
-use crate::output::XzClusteringIndex;
+use crate::output::{QUANTIZED_NATIVE_ENCODING, XzClusteringIndex};
 use crate::parquet_dataset::PartitionFamily;
 
 use super::geometry::{binary_value, inspect_wkb_geometry, validate_geometry_inspection};
@@ -51,22 +51,30 @@ pub(crate) fn validate_xz_schema(
 
   let code_path = display_column_path(parent_column, &index.code);
   validate_xz_field(file, &code_path, &DataType::UInt64, Some(false), report);
+  let native_geometry_type = optimized_geometry_type(&index.geometry_type);
   for level in &index.levels {
     let level_path = display_column_path(parent_column, &level.column);
     let location =
       ValidationLocation::file(file.file.relative_path.clone()).with_column(level_path.clone());
     match field_at_path(file.metadata.schema().as_ref(), &level_path) {
       Some(field)
-        if matches!(
-          field.data_type(),
-          DataType::Binary | DataType::LargeBinary | DataType::BinaryView
-        ) => {}
+        if index.encoding == QUANTIZED_NATIVE_ENCODING
+          && native_geometry_type.is_some_and(|geometry_type| {
+            field.data_type() == &native_geometry_data_type(geometry_type, index.has_z, index.has_m)
+          }) => {}
+      Some(field)
+        if index.encoding != QUANTIZED_NATIVE_ENCODING
+          && matches!(
+            field.data_type(),
+            DataType::Binary | DataType::LargeBinary | DataType::BinaryView
+          ) => {}
       Some(field) => report.push(
         ValidationRule::XzSchema,
         ValidationSeverity::Error,
         location,
         format!(
-          "multiscale column must use an Arrow binary type, found {}",
+          "multiscale column has invalid type for encoding {}, found {}",
+          index.encoding,
           field.data_type()
         ),
       ),
@@ -140,6 +148,7 @@ pub(crate) fn validate_xz_file(
     .geometry_types()
     .iter()
     .all(|geometry_type| geometry_base_type(geometry_type) == "Polygon");
+  let native_geometry = index.encoding == QUANTIZED_NATIVE_ENCODING;
 
   let read_result = read_row_groups(file, &projected_columns, |row_group, row_offset, batch| {
     let Ok(geometry) = array_at_path(batch, contract.geometry_column()) else {
@@ -209,6 +218,25 @@ pub(crate) fn validate_xz_file(
           .with_row_group(row_group)
           .with_row(row)
           .with_column(level_paths[level_index].clone());
+        if native_geometry {
+          match (geometry_is_null, level_array.is_null(row_index)) {
+            (false, true) => report.push(
+              ValidationRule::XzSchema,
+              ValidationSeverity::Error,
+              level_location,
+              "non-null source geometry requires a non-null multiscale geometry",
+            ),
+            (true, false) => report.push(
+              ValidationRule::XzSchema,
+              ValidationSeverity::Error,
+              level_location,
+              "null source geometry requires a null multiscale geometry",
+            ),
+            (false, false) => level_found_payload[level_index] = true,
+            (true, true) => {}
+          }
+          continue;
+        }
         let payload = match binary_value(level_array, row_index) {
           Ok(payload) => payload,
           Err(error) => {
@@ -313,6 +341,30 @@ pub(crate) fn validate_xz_file(
         "polygon" => OptimizedGeometryType::Polygon,
         _ => continue,
       };
+      if native_geometry {
+        let feature_extent = match covering_extent(batch, contract, row_index) {
+          Ok(Some(extent)) => Some(extent),
+          Ok(None) => inspection.extent,
+          Err(error) => {
+            report.push(
+              ValidationRule::Extent,
+              ValidationSeverity::Error,
+              geometry_location.clone(),
+              error,
+            );
+            inspection.extent
+          }
+        };
+        validate_sampled_xz_code(
+          feature_extent,
+          code,
+          index,
+          code_location,
+          geometry_location,
+          report,
+        );
+        continue;
+      }
       for (level_index, level) in index.levels.iter().enumerate() {
         let Some(level_array) = level_values[level_index] else {
           continue;
@@ -383,6 +435,9 @@ pub(crate) fn validate_xz_file(
   }
 
   for (level_index, level) in index.levels.iter().enumerate() {
+    if native_geometry {
+      continue;
+    }
     if !level_found_payload[level_index] {
       report.push(
         ValidationRule::PbfSample,
@@ -406,6 +461,43 @@ pub(crate) fn validate_xz_file(
       partition: file.file.partition,
     }),
     _ => None,
+  }
+}
+
+fn optimized_geometry_type(value: &str) -> Option<OptimizedGeometryType> {
+  match value {
+    "multipoint" => Some(OptimizedGeometryType::MultiPoint),
+    "polyline" => Some(OptimizedGeometryType::Polyline),
+    "polygon" => Some(OptimizedGeometryType::Polygon),
+    _ => None,
+  }
+}
+
+fn validate_sampled_xz_code(
+  feature_extent: Option<Extent2D>,
+  code: u64,
+  index: &XzClusteringIndex,
+  code_location: ValidationLocation,
+  geometry_location: ValidationLocation,
+  report: &mut ValidationReport,
+) {
+  let Some(feature_extent) = feature_extent else {
+    report.push(
+      ValidationRule::Extent,
+      ValidationSeverity::Error,
+      geometry_location,
+      "unable to resolve sampled feature extent",
+    );
+    return;
+  };
+  let expected_code = extent_xz_code(index.full_extent, feature_extent, index.max_level).value();
+  if code != expected_code {
+    report.push(
+      ValidationRule::XzCode,
+      ValidationSeverity::Error,
+      code_location,
+      format!("stored XZ code {code} does not match recomputed code {expected_code}"),
+    );
   }
 }
 

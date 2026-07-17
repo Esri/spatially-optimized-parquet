@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::input::{RowRange, SourceFormat};
-use crate::output::OutputMode;
+use crate::output::{MultiscaleEncoding, OutputMode};
 
 use super::{SharedWriteReporter, WriteReporter};
 
@@ -52,6 +52,7 @@ pub struct OutputOptions {
   pub(super) overwrite: bool,
   pub(super) strip_z: bool,
   pub(super) strip_m: bool,
+  pub(super) multiscale_encoding: MultiscaleEncoding,
 }
 
 impl OutputOptions {
@@ -75,6 +76,7 @@ impl OutputOptions {
       overwrite,
       strip_z: false,
       strip_m: false,
+      multiscale_encoding: MultiscaleEncoding::default(),
     }
   }
 
@@ -82,6 +84,12 @@ impl OutputOptions {
   pub fn with_stripped_dimensions(mut self, strip_z: bool, strip_m: bool) -> Self {
     self.strip_z = strip_z;
     self.strip_m = strip_m;
+    self
+  }
+
+  /// Select the physical representation for optimized multiscale geometry.
+  pub fn with_multiscale_encoding(mut self, encoding: MultiscaleEncoding) -> Self {
+    self.multiscale_encoding = encoding;
     self
   }
 }

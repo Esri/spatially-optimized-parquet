@@ -3,7 +3,7 @@
 use crate::geometry::Extent2D;
 use crate::input::SourceDatasetMetadata;
 use crate::optimized::multiscale::GeometryEncoding;
-use crate::output::ReprojectionSpec;
+use crate::output::{MultiscaleEncoding, ReprojectionSpec};
 
 use super::geometry::OptimizedGeometry;
 
@@ -15,6 +15,7 @@ pub(super) struct ResolvedOptimization {
   reprojection: ReprojectionSpec,
   target_extent: Extent2D,
   encodings: Vec<GeometryEncoding>,
+  multiscale_encoding: MultiscaleEncoding,
 }
 
 impl ResolvedOptimization {
@@ -24,6 +25,7 @@ impl ResolvedOptimization {
     reprojection: ReprojectionSpec,
     target_extent: Extent2D,
     encodings: Vec<GeometryEncoding>,
+    multiscale_encoding: MultiscaleEncoding,
   ) -> Self {
     Self {
       source_metadata,
@@ -31,6 +33,7 @@ impl ResolvedOptimization {
       reprojection,
       target_extent,
       encodings,
+      multiscale_encoding,
     }
   }
 
@@ -52,5 +55,21 @@ impl ResolvedOptimization {
 
   pub(super) fn encodings(&self) -> &[GeometryEncoding] {
     &self.encodings
+  }
+
+  pub(super) fn multiscale_encoding(&self) -> MultiscaleEncoding {
+    self.multiscale_encoding
+  }
+
+  pub(super) fn native_coordinate_column_paths(&self) -> Vec<String> {
+    if self.multiscale_encoding != MultiscaleEncoding::QuantizedNative {
+      return Vec::new();
+    }
+    crate::optimized::multiscale::native_coordinate_column_paths(
+      &self.encodings,
+      self.geometry.geometry_type,
+      self.geometry.has_z,
+      self.geometry.has_m,
+    )
   }
 }

@@ -8,6 +8,7 @@ use super::parquet::ParquetMetadata;
 
 pub(crate) const GEODISPLAY_VERSION: &str = "0.1";
 pub(crate) const ESRI_PBF_ENCODING: &str = "esriPBF";
+pub(crate) const QUANTIZED_NATIVE_ENCODING: &str = "quantizedNative";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct GeodisplayMetadata {
@@ -107,9 +108,9 @@ pub(crate) struct ZClusteringIndexInput {
   pub(crate) wkid: Option<u32>,
   /// Stores the coordinate reference WKT.
   pub(crate) wkt: Option<String>,
-  /// Indicates whether coordinates contain Z ordinates.
+  /// Indicates whether coordinates contain Z values.
   pub(crate) has_z: bool,
-  /// Indicates whether coordinates contain M ordinates.
+  /// Indicates whether coordinates contain M values.
   pub(crate) has_m: bool,
 }
 

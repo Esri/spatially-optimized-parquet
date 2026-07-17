@@ -24,7 +24,7 @@ mod session;
 pub mod validate;
 
 pub use input::{RowRange, SourceFormat};
-pub use output::{DEFAULT_OUTPUT_WKID, OutputMode};
+pub use output::{DEFAULT_OUTPUT_WKID, MultiscaleEncoding, OutputMode};
 pub use pipeline::{
   InputOptions, OutputOptions, SpatialPipelineOptions, SpatialPipelineResult, WriteProgress,
   WriteReporter, run,

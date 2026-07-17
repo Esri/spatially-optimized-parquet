@@ -1,8 +1,10 @@
-//! Owns geodisplay columns, level planning, geometry traversal, and Esri PBF encoding.
+//! Owns geodisplay columns, level planning, geometry traversal, and multiscale encoding.
 
+mod array_builder;
 mod columns;
 mod datafusion;
 mod levels;
+mod native;
 mod payload;
 mod quantize;
 mod traversal;
@@ -15,13 +17,14 @@ pub(crate) use columns::{
 };
 pub(in crate::optimized) use datafusion::{non_point_geodisplay_expr, point_geodisplay_expr};
 pub(in crate::optimized) use levels::{GeometryEncoding, create_geometry_encodings};
+pub(crate) use native::native_coordinate_column_paths;
+pub(crate) use native::native_geometry_data_type;
 use payload::flat_geometry_payload_from_wkb;
 pub(crate) use traversal::{
   GeometryPartRole, GeometryPartSink, geometry_extent_from_wkb, visit_wkb_geometry,
   visit_wkb_geometry_for_display,
 };
 pub(crate) use wire::decode_pbf_geometry;
-use wire::{GeometryEncodeScratch, encode_flat_geometry_with_scratch};
 
 #[cfg(test)]
 use payload::geometry_payload_from_geometry;

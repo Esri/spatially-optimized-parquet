@@ -5,7 +5,6 @@ use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
-use arrow_array::builder::BinaryBuilder;
 use arrow_array::{Array, ArrayRef, Float64Array, StructArray, UInt64Array};
 use arrow_schema::{DataType, Field, FieldRef, Fields};
 use datafusion::common::cast::{
@@ -20,12 +19,14 @@ use datafusion::prelude::col;
 
 use crate::geometry::{BinaryValueAccess, to_datafusion_error};
 use crate::optimized::OptimizedGeometryType;
+use crate::output::MultiscaleEncoding;
 use crate::pipeline::PipelineWarningStore;
 
+use super::array_builder::{MultiscaleArrayBuilder, MultiscaleEncodeScratch};
+use super::native::native_geometry_data_type;
 use super::{
-  GEODISPLAY_COLUMN, GeometryEncodeScratch, GeometryEncoding, POINT_M_COLUMN, POINT_X_COLUMN,
-  POINT_Y_COLUMN, POINT_Z_CODE_COLUMN, POINT_Z_COLUMN, TEMP_XZ_CODE_COLUMN, XZ_CODE_COLUMN,
-  encode_flat_geometry_with_scratch,
+  GEODISPLAY_COLUMN, GeometryEncoding, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN,
+  POINT_Z_CODE_COLUMN, POINT_Z_COLUMN, TEMP_XZ_CODE_COLUMN, XZ_CODE_COLUMN,
   flat_geometry_payload_from_wkb as pbf_flat_geometry_payload_from_wkb,
 };
 
@@ -39,6 +40,7 @@ struct NonPointGeodisplayUdf {
   has_z: bool,
   has_m: bool,
   encodings: Vec<GeometryEncoding>,
+  multiscale_encoding: MultiscaleEncoding,
   geodisplay_fields: Fields,
   dimension_warning_emitted: Arc<AtomicBool>,
   warning_store: PipelineWarningStore,
@@ -58,6 +60,7 @@ impl NonPointGeodisplayUdf {
       has_z,
       has_m,
       encodings,
+      MultiscaleEncoding::Pbf,
       PipelineWarningStore::default(),
     )
   }
@@ -67,6 +70,7 @@ impl NonPointGeodisplayUdf {
     has_z: bool,
     has_m: bool,
     encodings: Vec<GeometryEncoding>,
+    multiscale_encoding: MultiscaleEncoding,
     warning_store: PipelineWarningStore,
   ) -> Self {
     let mut geodisplay_fields = vec![Arc::new(Field::new(
@@ -77,7 +81,12 @@ impl NonPointGeodisplayUdf {
     for encoding in &encodings {
       geodisplay_fields.push(Arc::new(Field::new(
         &encoding.column,
-        DataType::Binary,
+        match multiscale_encoding {
+          MultiscaleEncoding::Pbf => DataType::Binary,
+          MultiscaleEncoding::QuantizedNative => {
+            native_geometry_data_type(geometry_type, has_z, has_m)
+          }
+        },
         true,
       )));
     }
@@ -86,6 +95,7 @@ impl NonPointGeodisplayUdf {
       has_z,
       has_m,
       encodings,
+      multiscale_encoding,
       geodisplay_fields: Fields::from(geodisplay_fields),
       dimension_warning_emitted: Arc::new(AtomicBool::new(false)),
       warning_store,
@@ -98,12 +108,20 @@ impl NonPointGeodisplayUdf {
     geometry: &T,
     xz_code: &UInt64Array,
   ) -> DataFusionResult<StructArray> {
-    let mut pbf_builders = self
+    let mut level_builders = self
       .encodings
       .iter()
-      .map(|_| BinaryBuilder::with_capacity(geometry.len(), geometry.len() * 16))
+      .map(|_| {
+        MultiscaleArrayBuilder::new(
+          self.multiscale_encoding,
+          self.geometry_type,
+          self.has_z,
+          self.has_m,
+          geometry.len(),
+        )
+      })
       .collect::<Vec<_>>();
-    let mut scratch = GeometryEncodeScratch::default();
+    let mut scratch = MultiscaleEncodeScratch::default();
 
     for index in 0..geometry.len() {
       match geometry.value_opt(index) {
@@ -114,22 +132,29 @@ impl NonPointGeodisplayUdf {
             if !self.dimension_warning_emitted.swap(true, Ordering::Relaxed) {
               self.warning_store.record(format!(
                 "Warning: WKB dimensions do not match source metadata; \
-                 normalizing PBF from hasZ={}, hasM={} to hasZ={}, hasM={} and encoding missing \
-                 ordinates as 0",
-                payload.has_z, payload.has_m, self.has_z, self.has_m
+                 normalizing multiscale geometry from hasZ={}, hasM={} to hasZ={}, hasM={} and \
+                 encoding missing Z/M values as {}",
+                payload.has_z,
+                payload.has_m,
+                self.has_z,
+                self.has_m,
+                match self.multiscale_encoding {
+                  MultiscaleEncoding::Pbf => "0",
+                  MultiscaleEncoding::QuantizedNative => "null",
+                }
               ));
             }
             payload.has_z = self.has_z;
             payload.has_m = self.has_m;
           }
-          for (builder, encoding) in pbf_builders.iter_mut().zip(&self.encodings) {
-            let encoded = encode_flat_geometry_with_scratch(&payload, encoding, &mut scratch)
+          for (builder, encoding) in level_builders.iter_mut().zip(&self.encodings) {
+            builder
+              .append_geometry(&payload, encoding, &mut scratch)
               .map_err(to_datafusion_error)?;
-            builder.append_value(encoded);
           }
         }
         None => {
-          for builder in &mut pbf_builders {
+          for builder in &mut level_builders {
             builder.append_null();
           }
         }
@@ -137,8 +162,8 @@ impl NonPointGeodisplayUdf {
     }
 
     let mut geodisplay_columns: Vec<ArrayRef> = vec![Arc::new(xz_code.clone())];
-    for mut builder in pbf_builders {
-      geodisplay_columns.push(Arc::new(builder.finish()));
+    for builder in level_builders {
+      geodisplay_columns.push(builder.finish());
     }
 
     StructArray::try_new(self.geodisplay_fields.clone(), geodisplay_columns, None)
@@ -151,6 +176,7 @@ impl PartialEq for NonPointGeodisplayUdf {
     self.geometry_type == other.geometry_type
       && self.has_z == other.has_z
       && self.has_m == other.has_m
+      && self.multiscale_encoding == other.multiscale_encoding
       && self.encodings.len() == other.encodings.len()
       && self
         .encodings
@@ -197,6 +223,7 @@ impl Hash for NonPointGeodisplayUdf {
     .hash(state);
     self.has_z.hash(state);
     self.has_m.hash(state);
+    self.multiscale_encoding.hash(state);
     self.encodings.len().hash(state);
     for encoding in &self.encodings {
       encoding.level.hash(state);
@@ -404,6 +431,7 @@ fn non_point_geodisplay_udf(
   has_z: bool,
   has_m: bool,
   encodings: Vec<GeometryEncoding>,
+  multiscale_encoding: MultiscaleEncoding,
   warning_store: PipelineWarningStore,
 ) -> ScalarUDF {
   ScalarUDF::new_from_impl(NonPointGeodisplayUdf::new_with_warning_store(
@@ -411,6 +439,7 @@ fn non_point_geodisplay_udf(
     has_z,
     has_m,
     encodings,
+    multiscale_encoding,
     warning_store,
   ))
 }
@@ -438,6 +467,7 @@ pub(in crate::optimized) fn non_point_geodisplay_expr(
   has_z: bool,
   has_m: bool,
   encodings: &[GeometryEncoding],
+  multiscale_encoding: MultiscaleEncoding,
   warning_store: PipelineWarningStore,
 ) -> Expr {
   non_point_geodisplay_udf(
@@ -445,6 +475,7 @@ pub(in crate::optimized) fn non_point_geodisplay_expr(
     has_z,
     has_m,
     encodings.to_vec(),
+    multiscale_encoding,
     warning_store,
   )
   .call(vec![col(geometry_column), col(TEMP_XZ_CODE_COLUMN)])
@@ -473,7 +504,7 @@ mod tests {
   use std::collections::hash_map::DefaultHasher;
   use std::hash::{Hash, Hasher};
 
-  use arrow_array::BinaryArray;
+  use arrow_array::{BinaryArray, Int64Array, ListArray};
 
   use crate::optimized::multiscale::{create_geometry_encodings, decode_pbf_geometry};
 
@@ -488,8 +519,8 @@ mod tests {
     bytes.extend_from_slice(&1002_u32.to_le_bytes());
     bytes.extend_from_slice(&2_u32.to_le_bytes());
     for coordinate in [[1.0_f64, 2.0, 3.0], [4.0, 5.0, 6.0]] {
-      for ordinate in coordinate {
-        bytes.extend_from_slice(&ordinate.to_le_bytes());
+      for component in coordinate {
+        bytes.extend_from_slice(&component.to_le_bytes());
       }
     }
     bytes
@@ -597,7 +628,7 @@ mod tests {
   }
 
   #[test]
-  fn missing_m_ordinates_are_encoded_as_zero_for_zm_output() {
+  fn missing_m_values_are_encoded_as_zero_for_output_zm() {
     let encodings = create_geometry_encodings(
       crate::output::DEFAULT_OUTPUT_WKID,
       OptimizedGeometryType::Polyline,
@@ -609,6 +640,7 @@ mod tests {
       true,
       true,
       encodings,
+      MultiscaleEncoding::Pbf,
       warning_store.clone(),
     );
     let wkb = multiline_z_wkb();
@@ -629,5 +661,59 @@ mod tests {
     assert_eq!(decoded.coords[3], 0);
     assert_eq!(decoded.coords[7], 0);
     assert_eq!(warning_store.messages().len(), 1);
+  }
+
+  #[test]
+  fn missing_m_values_are_null_for_native_output_zm() {
+    let encodings = create_geometry_encodings(
+      crate::output::DEFAULT_OUTPUT_WKID,
+      OptimizedGeometryType::Polyline,
+    )
+    .expect("encodings");
+    let warning_store = PipelineWarningStore::default();
+    let udf = NonPointGeodisplayUdf::new_with_warning_store(
+      OptimizedGeometryType::Polyline,
+      true,
+      true,
+      encodings,
+      MultiscaleEncoding::QuantizedNative,
+      warning_store.clone(),
+    );
+    let wkb = multiline_z_wkb();
+    let geometry = BinaryArray::from(vec![Some(wkb.as_slice())]);
+    let xz_code = UInt64Array::from(vec![0]);
+
+    let geodisplay = udf
+      .encode_geodisplay(&geometry, &xz_code)
+      .expect("geodisplay");
+    let geometries = geodisplay
+      .column(1)
+      .as_any()
+      .downcast_ref::<ListArray>()
+      .expect("native geometries");
+    let parts = geometries
+      .value(0)
+      .as_any()
+      .downcast_ref::<ListArray>()
+      .expect("native parts")
+      .clone();
+    let coordinates = parts
+      .value(0)
+      .as_any()
+      .downcast_ref::<StructArray>()
+      .expect("native coordinates")
+      .clone();
+    let z = coordinates
+      .column_by_name("z")
+      .and_then(|column| column.as_any().downcast_ref::<Int64Array>())
+      .expect("native z");
+    let m = coordinates
+      .column_by_name("m")
+      .and_then(|column| column.as_any().downcast_ref::<Int64Array>())
+      .expect("native m");
+
+    assert_eq!(z.null_count(), 0);
+    assert_eq!(m.null_count(), 2);
+    assert!(warning_store.messages()[0].contains("encoding missing Z/M values as null"));
   }
 }

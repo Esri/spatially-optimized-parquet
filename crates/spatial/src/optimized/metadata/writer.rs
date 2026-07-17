@@ -11,8 +11,8 @@ use crate::optimized::multiscale::{
 };
 use crate::optimized::{ClusteringFamily, ResolvedOptimization};
 use crate::output::{
-  ESRI_PBF_ENCODING, GeoMetadataInput, MultiscaleLevelInput, XzClusteringIndexInput,
-  ZClusteringIndexInput, optimized_point_metadata, optimized_xz_metadata,
+  ESRI_PBF_ENCODING, GeoMetadataInput, MultiscaleLevelInput, QUANTIZED_NATIVE_ENCODING,
+  XzClusteringIndexInput, ZClusteringIndexInput, optimized_point_metadata, optimized_xz_metadata,
 };
 
 impl ResolvedOptimization {
@@ -63,7 +63,12 @@ impl ResolvedOptimization {
         GEODISPLAY_COLUMN,
         XzClusteringIndexInput {
           code: XZ_CODE_COLUMN.to_string(),
-          encoding: ESRI_PBF_ENCODING.to_string(),
+          encoding: match self.multiscale_encoding() {
+            crate::output::MultiscaleEncoding::Pbf => ESRI_PBF_ENCODING.to_string(),
+            crate::output::MultiscaleEncoding::QuantizedNative => {
+              QUANTIZED_NATIVE_ENCODING.to_string()
+            }
+          },
           geometry_type: self.geometry().geometry_type.as_str().to_string(),
           full_extent: self.target_extent(),
           max_level: DEFAULT_XZ_MAX_LEVEL,

@@ -10,8 +10,8 @@ use crate::output::{OutputLayout, OutputMode, validate_output_wkid};
 use crate::session::DataFusionSession;
 
 use super::{
-  OptimizedPartitionedPipeline, OptimizedSingleFilePipeline, Pipeline, PipelineKind, PlainPipeline,
-  SpatialPipelineOptions, SpatialPipelineResult, SpatialPipelineState,
+  OptimizedPartitionedPipeline, OptimizedSingleFilePipeline, OutputExecutionOptions, Pipeline,
+  PipelineKind, PlainPipeline, SpatialPipelineOptions, SpatialPipelineResult, SpatialPipelineState,
 };
 
 /// Execute one spatial request through durable GeoParquet output.
@@ -50,13 +50,16 @@ impl Pipeline {
       source_schema,
       total_input_rows,
       row_range: options.input.row_range,
-      geometry_column: options.input.geometry_column,
-      input_wkid: options.input.input_wkid,
-      output_wkid: options.output.output_wkid,
-      covering: options.output.covering,
-      strip_z: options.output.strip_z,
-      strip_m: options.output.strip_m,
-      compression: options.output.compression,
+      output_options: OutputExecutionOptions {
+        geometry_column: options.input.geometry_column,
+        input_wkid: options.input.input_wkid,
+        output_wkid: options.output.output_wkid,
+        covering: options.output.covering,
+        strip_z: options.output.strip_z,
+        strip_m: options.output.strip_m,
+        multiscale_encoding: options.output.multiscale_encoding,
+        compression: options.output.compression,
+      },
       write_reporter: options.write_reporter,
       warning_store: Default::default(),
     };
