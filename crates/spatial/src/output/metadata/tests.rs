@@ -6,9 +6,11 @@ use serde_json::{Value, json};
 use crate::geometry::{Extent2D, GeometryKind};
 use crate::output::SpatialReferenceInfo;
 
+use crate::geoparquet::{GeoMetadataInput, geoparquet_metadata};
+
 use super::{
-  GeoMetadataInput, MultiscaleLevelInput, XzClusteringIndexInput, ZClusteringIndexInput,
-  geoparquet_metadata, optimized_point_metadata, optimized_xz_metadata,
+  MultiscaleLevelInput, XzClusteringIndexInput, ZClusteringIndexInput, optimized_point_metadata,
+  optimized_xz_metadata,
 };
 
 fn spatial_reference() -> SpatialReferenceInfo {

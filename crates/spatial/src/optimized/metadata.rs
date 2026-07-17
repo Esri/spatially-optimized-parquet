@@ -4,6 +4,7 @@ use anyhow::Result;
 use parquet::file::metadata::KeyValue;
 
 use crate::geometry::GeometryKind;
+use crate::geoparquet::GeoMetadataInput;
 use crate::optimized::clustering::{DEFAULT_COORDINATE_PRECISION, DEFAULT_XZ_MAX_LEVEL};
 use crate::optimized::multiscale::{
   COVERING_BBOX_COLUMN, GEODISPLAY_COLUMN, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN,
@@ -11,8 +12,8 @@ use crate::optimized::multiscale::{
 };
 use crate::optimized::{ClusteringFamily, ResolvedOptimization};
 use crate::output::{
-  GeoMetadataInput, MultiscaleLevelInput, XzClusteringIndexInput, ZClusteringIndexInput,
-  optimized_point_metadata, optimized_xz_metadata,
+  MultiscaleLevelInput, XzClusteringIndexInput, ZClusteringIndexInput, optimized_point_metadata,
+  optimized_xz_metadata,
 };
 
 /// Serialize GeoParquet and Geodisplay metadata for optimized output.

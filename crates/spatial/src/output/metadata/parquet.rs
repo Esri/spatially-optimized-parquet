@@ -25,9 +25,13 @@ impl ParquetMetadataSet {
   }
 
   pub(super) fn insert<T: ParquetMetadata>(&mut self, metadata: &T) -> Result<()> {
-    self.entries.retain(|item| item.key != T::KEY);
-    self.entries.push(metadata.key_value()?);
+    self.insert_entry(metadata.key_value()?);
     Ok(())
+  }
+
+  pub(super) fn insert_entry(&mut self, entry: KeyValue) {
+    self.entries.retain(|item| item.key != entry.key);
+    self.entries.push(entry);
   }
 
   pub(super) fn into_entries(self) -> Vec<KeyValue> {

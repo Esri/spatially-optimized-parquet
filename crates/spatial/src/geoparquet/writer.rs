@@ -7,13 +7,13 @@ use datafusion::dataframe::DataFrame;
 use crate::input::{InputSource, RowRange};
 use crate::optimized::COVERING_BBOX_COLUMN;
 use crate::optimized::ExtentResolver;
-use crate::output::{
-  GeoMetadataInput, OutputLayout, ParquetOutputWriter, ParquetWriterOptions, ReprojectionSpec,
-  geoparquet_metadata,
-};
+use crate::output::{OutputLayout, ParquetOutputWriter, ParquetWriterOptions, ReprojectionSpec};
 use crate::pipeline::SharedWriteReporter;
 
-use super::{NormalizedSpatialFrame, plain_output_dataframe, resolve_source};
+use super::{
+  GeoMetadataInput, NormalizedSpatialFrame, geoparquet_metadata, plain_output_dataframe,
+  resolve_source,
+};
 
 pub(crate) struct GeoParquetWriter<'a> {
   input: &'a dyn InputSource,

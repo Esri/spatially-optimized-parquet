@@ -1,4 +1,4 @@
-//! Defines the GeoParquet JSON contract.
+//! Defines and serializes the GeoParquet JSON metadata contract.
 
 use std::collections::BTreeMap;
 
@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::geometry::{Extent2D, GeometryKind};
 use crate::output::SpatialReferenceInfo;
 
-use super::parquet::ParquetMetadata;
+use ::parquet::file::metadata::KeyValue;
 
 /// Stores values serialized into one GeoParquet geometry-column contract.
 pub(crate) struct GeoMetadataInput<'a> {
@@ -96,8 +96,22 @@ impl GeoMetadata {
   }
 }
 
-impl ParquetMetadata for GeoMetadata {
-  const KEY: &'static str = "geo";
+/// Serialize the GeoParquet metadata entry while preserving non-reserved source entries.
+pub(crate) fn geoparquet_metadata(
+  mut source_entries: Vec<KeyValue>,
+  input: GeoMetadataInput<'_>,
+) -> Result<Vec<KeyValue>> {
+  source_entries.retain(|entry| entry.key != "geo");
+  source_entries.push(geo_metadata_entry(input)?);
+  Ok(source_entries)
+}
+
+/// Serialize one GeoParquet metadata entry.
+pub(crate) fn geo_metadata_entry(input: GeoMetadataInput<'_>) -> Result<KeyValue> {
+  Ok(KeyValue::new(
+    "geo".to_string(),
+    Some(serde_json::to_string(&GeoMetadata::new(input)?)?),
+  ))
 }
 
 impl GeoCovering {

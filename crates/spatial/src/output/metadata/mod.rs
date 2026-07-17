@@ -1,31 +1,19 @@
-//! Owns the serialized GeoParquet and geodisplay metadata contracts.
+//! Owns generic Parquet metadata replacement and Geodisplay metadata contracts.
 
-mod geo;
 mod geodisplay;
 mod parquet;
 
 use ::parquet::file::metadata::KeyValue;
 use anyhow::Result;
 
-pub(crate) use geo::GeoMetadata;
+use crate::geoparquet::GeoMetadataInput;
+
 pub(crate) use geodisplay::{
   ESRI_PBF_ENCODING, GEODISPLAY_VERSION, GeodisplayIndex, GeodisplayMetadata, MultiscaleLevel,
   QUANTIZED_NATIVE_ENCODING, XzClusteringIndex, ZClusteringIndex,
 };
-use parquet::ParquetMetadataSet;
-
-pub(crate) use geo::GeoMetadataInput;
 pub(crate) use geodisplay::{MultiscaleLevelInput, XzClusteringIndexInput, ZClusteringIndexInput};
-
-/// Assemble GeoParquet metadata while preserving non-reserved source entries.
-pub(crate) fn geoparquet_metadata(
-  source_entries: Vec<KeyValue>,
-  geo_input: GeoMetadataInput<'_>,
-) -> Result<Vec<KeyValue>> {
-  let mut metadata = ParquetMetadataSet::new(source_entries);
-  metadata.insert(&GeoMetadata::new(geo_input)?)?;
-  Ok(metadata.into_entries())
-}
+use parquet::ParquetMetadataSet;
 
 /// Assemble GeoParquet and point geodisplay metadata.
 pub(crate) fn optimized_point_metadata(
@@ -61,7 +49,7 @@ fn optimized_metadata(
   geodisplay: GeodisplayMetadata,
 ) -> Result<Vec<KeyValue>> {
   let mut metadata = ParquetMetadataSet::new(source_entries);
-  metadata.insert(&GeoMetadata::new(geo_input)?)?;
+  metadata.insert_entry(crate::geoparquet::geo_metadata_entry(geo_input)?);
   metadata.insert(&geodisplay)?;
   Ok(metadata.into_entries())
 }
