@@ -7,7 +7,7 @@ use crate::geometry::{
 use crate::optimized::{
   GeometryPartRole, GeometryPartSink, extent_xz_code, visit_wkb_geometry_for_display,
 };
-use crate::output::{QUANTIZED_NATIVE_ENCODING, XzClusteringIndex};
+use crate::optimized::{QUANTIZED_NATIVE_ENCODING, XzClusteringIndex};
 use crate::parquet_dataset::PartitionFamily;
 
 use super::geometry::{binary_value, inspect_wkb_geometry, validate_geometry_inspection};
@@ -499,7 +499,7 @@ fn validate_pbf_vertex_provenance(
   geometry_type: GeometryType,
   lengths: &[u32],
   coords: &[i64],
-  level: &crate::output::MultiscaleLevel,
+  level: &crate::optimized::MultiscaleLevel,
   has_z: bool,
   has_m: bool,
   location: &ValidationLocation,
@@ -944,7 +944,7 @@ mod tests {
       wkb.extend_from_slice(&y.to_le_bytes());
       wkb.extend_from_slice(&z.to_le_bytes());
     }
-    let level = crate::output::MultiscaleLevel {
+    let level = crate::optimized::MultiscaleLevel {
       column: "level_0".to_string(),
       level: 0,
       resolution: 1.0,

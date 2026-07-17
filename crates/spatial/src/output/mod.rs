@@ -4,7 +4,6 @@
 
 mod dimensions;
 mod layout;
-mod metadata;
 mod mode;
 mod multiscale;
 mod parquet;
@@ -18,11 +17,6 @@ mod spatial_reference;
 pub(crate) use crate::geometry::QuantizationTransform;
 pub(crate) use dimensions::strip_geometry_dimensions_expr;
 pub(crate) use layout::OutputLayout;
-pub(crate) use metadata::{
-  ESRI_PBF_ENCODING, GEODISPLAY_VERSION, GeodisplayIndex, GeodisplayMetadata, MultiscaleLevel,
-  MultiscaleLevelInput, QUANTIZED_NATIVE_ENCODING, XzClusteringIndex, XzClusteringIndexInput,
-  ZClusteringIndex, ZClusteringIndexInput, optimized_point_metadata, optimized_xz_metadata,
-};
 pub use mode::OutputMode;
 pub use multiscale::MultiscaleEncoding;
 pub(crate) use parquet::ParquetWriterOptions;

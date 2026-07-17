@@ -4,17 +4,17 @@ use anyhow::Result;
 use parquet::file::metadata::KeyValue;
 
 use crate::geometry::GeometryKind;
-use crate::geoparquet::GeoMetadataInput;
+use crate::geoparquet::{GeoMetadataInput, geo_metadata_entry};
 use crate::optimized::clustering::{DEFAULT_COORDINATE_PRECISION, DEFAULT_XZ_MAX_LEVEL};
+use crate::optimized::geodisplay_metadata::{
+  GeodisplayMetadata, MultiscaleLevelInput, XzClusteringIndex, XzClusteringIndexInput,
+  ZClusteringIndex, ZClusteringIndexInput, geodisplay_metadata_entry,
+};
 use crate::optimized::multiscale::{
   COVERING_BBOX_COLUMN, GEODISPLAY_COLUMN, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN,
   POINT_Z_CODE_COLUMN, POINT_Z_COLUMN, XZ_CODE_COLUMN,
 };
 use crate::optimized::{ClusteringFamily, ResolvedOptimization};
-use crate::output::{
-  MultiscaleLevelInput, XzClusteringIndexInput, ZClusteringIndexInput, optimized_point_metadata,
-  optimized_xz_metadata,
-};
 
 /// Serialize GeoParquet and Geodisplay metadata for optimized output.
 pub(super) fn parquet_metadata(
@@ -106,3 +106,48 @@ impl ResolvedOptimization {
     }
   }
 }
+
+fn optimized_point_metadata(
+  source_entries: Vec<KeyValue>,
+  geo_input: GeoMetadataInput<'_>,
+  field: &str,
+  index_input: ZClusteringIndexInput,
+) -> Result<Vec<KeyValue>> {
+  optimized_metadata(
+    source_entries,
+    geo_input,
+    GeodisplayMetadata::point(field, ZClusteringIndex::new(index_input)),
+  )
+}
+
+fn optimized_xz_metadata(
+  source_entries: Vec<KeyValue>,
+  geo_input: GeoMetadataInput<'_>,
+  field: &str,
+  index_input: XzClusteringIndexInput,
+) -> Result<Vec<KeyValue>> {
+  optimized_metadata(
+    source_entries,
+    geo_input,
+    GeodisplayMetadata::xz(field, XzClusteringIndex::new(index_input)),
+  )
+}
+
+fn optimized_metadata(
+  mut source_entries: Vec<KeyValue>,
+  geo_input: GeoMetadataInput<'_>,
+  geodisplay: GeodisplayMetadata,
+) -> Result<Vec<KeyValue>> {
+  replace_metadata_entry(&mut source_entries, geo_metadata_entry(geo_input)?);
+  replace_metadata_entry(&mut source_entries, geodisplay_metadata_entry(&geodisplay)?);
+  Ok(source_entries)
+}
+
+fn replace_metadata_entry(entries: &mut Vec<KeyValue>, replacement: KeyValue) {
+  entries.retain(|entry| entry.key != replacement.key);
+  entries.push(replacement);
+}
+
+#[cfg(test)]
+#[path = "metadata_tests.rs"]
+mod tests;

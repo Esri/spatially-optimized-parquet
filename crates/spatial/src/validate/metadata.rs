@@ -4,9 +4,8 @@ use serde::de::DeserializeOwned;
 
 use crate::geometry::Extent2D;
 use crate::geoparquet::GeoMetadata;
-use crate::optimized::DEFAULT_XZ_MAX_LEVEL;
-use crate::output::{
-  ESRI_PBF_ENCODING, GEODISPLAY_VERSION, GeodisplayIndex, GeodisplayMetadata,
+use crate::optimized::{
+  DEFAULT_XZ_MAX_LEVEL, ESRI_PBF_ENCODING, GEODISPLAY_VERSION, GeodisplayIndex, GeodisplayMetadata,
   QUANTIZED_NATIVE_ENCODING, XzClusteringIndex, ZClusteringIndex,
 };
 

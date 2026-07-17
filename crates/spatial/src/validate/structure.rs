@@ -6,7 +6,7 @@ use arrow_schema::{DataType, Field, Schema};
 use parquet::arrow::ProjectionMask;
 use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ParquetRecordBatchReaderBuilder};
 
-use crate::output::GeodisplayIndex;
+use crate::optimized::GeodisplayIndex;
 use crate::parquet_dataset::{ParquetDatasetFile, PartitionFamily, load_parquet_metadata};
 
 use super::metadata::{ValidatedDatasetFile, ValidatedMetadata};

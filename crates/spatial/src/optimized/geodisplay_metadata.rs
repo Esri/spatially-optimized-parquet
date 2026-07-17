@@ -1,10 +1,10 @@
-//! Defines the geodisplay JSON contract.
+//! Defines and serializes the Geodisplay JSON metadata contract.
 
+use ::parquet::file::metadata::KeyValue;
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::geometry::{Extent2D, QuantizationTransform};
-
-use super::parquet::ParquetMetadata;
 
 pub(crate) const GEODISPLAY_VERSION: &str = "0.1";
 pub(crate) const ESRI_PBF_ENCODING: &str = "esriPBF";
@@ -179,8 +179,12 @@ impl GeodisplayMetadata {
   }
 }
 
-impl ParquetMetadata for GeodisplayMetadata {
-  const KEY: &'static str = "geodisplay";
+/// Serialize one Geodisplay metadata entry.
+pub(crate) fn geodisplay_metadata_entry(metadata: &GeodisplayMetadata) -> Result<KeyValue> {
+  Ok(KeyValue::new(
+    "geodisplay".to_string(),
+    Some(serde_json::to_string(metadata)?),
+  ))
 }
 
 impl ZClusteringIndex {

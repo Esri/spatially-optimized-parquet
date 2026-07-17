@@ -2,8 +2,8 @@ use arrow_array::Array;
 use arrow_schema::DataType;
 
 use crate::geometry::read_wkb_point_coordinate;
+use crate::optimized::ZClusteringIndex;
 use crate::optimized::point_z_code;
-use crate::output::ZClusteringIndex;
 use crate::parquet_dataset::PartitionFamily;
 
 use super::geometry::{binary_value, inspect_wkb_geometry, validate_geometry_inspection};
