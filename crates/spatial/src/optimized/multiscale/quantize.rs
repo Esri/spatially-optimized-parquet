@@ -15,7 +15,7 @@ pub(super) struct OptionalComponentValidity {
 
 #[derive(Default)]
 /// Stores one simplified level as absolute quantized coordinates before physical encoding.
-pub(in crate::optimized) struct QuantizedGeometryBuffer {
+pub(crate) struct QuantizedGeometryBuffer {
   pub(super) coordinates: Vec<i64>,
   pub(super) lengths: Vec<u32>,
   pub(super) validity: OptionalComponentValidity,

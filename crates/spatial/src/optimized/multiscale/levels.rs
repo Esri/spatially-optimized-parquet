@@ -20,32 +20,32 @@ const MAX_MULTISCALE_LEVEL: u16 = 16;
 
 #[derive(Debug, Clone, PartialEq)]
 /// Describes the scale and translation used to quantize four-dimensional coordinates.
-pub(in crate::optimized) struct QuantizationTransform {
+pub(crate) struct QuantizationTransform {
   /// Stores per-axis quantization scale values.
-  pub(in crate::optimized) scale: [f64; 4],
+  pub(crate) scale: [f64; 4],
   /// Stores per-axis quantization origins.
-  pub(in crate::optimized) translate: [f64; 4],
+  pub(crate) translate: [f64; 4],
 }
 
 /// Stores the quantization and simplification settings for one output geometry column.
 #[derive(Debug, Clone, PartialEq)]
-pub(in crate::optimized) struct MultiscaleLevelSpec {
+pub(crate) struct MultiscaleLevelSpec {
   /// Stores the multiscale level represented by the column.
-  pub(in crate::optimized) level: u16,
+  pub(crate) level: u16,
   /// Stores the generated Parquet column name.
-  pub(in crate::optimized) column: String,
+  pub(crate) column: String,
   /// Stores the coordinate resolution at this level.
-  pub(in crate::optimized) resolution: f64,
+  pub(crate) resolution: f64,
   /// Stores the map scale denominator at this level.
-  pub(in crate::optimized) scale: f64,
+  pub(crate) scale: f64,
   /// Stores the quantization transform applied before Esri PBF encoding.
-  pub(in crate::optimized) transform: QuantizationTransform,
+  pub(crate) transform: QuantizationTransform,
   /// Stores the minimum retained vertex count for the geometry family.
-  pub(in crate::optimized) min_length: usize,
+  pub(crate) min_length: usize,
 }
 
 /// Create supported even-numbered multiscale level specifications for the target spatial reference.
-pub(in crate::optimized) fn create_multiscale_level_specs(
+pub(crate) fn create_multiscale_level_specs(
   output_wkid: u32,
   geometry_type: OptimizedGeometryType,
 ) -> Result<Vec<MultiscaleLevelSpec>> {

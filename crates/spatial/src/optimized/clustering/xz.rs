@@ -368,7 +368,7 @@ pub(crate) fn bounds_expr(geometry_column: &str) -> Expr {
   bounds_udf().call(vec![col(geometry_column)])
 }
 
-pub(in crate::optimized) fn complex_geometry_xzcode_from_bounds_expr(
+pub(crate) fn complex_geometry_xzcode_from_bounds_expr(
   xmin: Expr,
   ymin: Expr,
   xmax: Expr,

@@ -460,7 +460,7 @@ fn multiscale_signature() -> &'static Signature {
   })
 }
 
-pub(in crate::optimized) fn complex_geometry_geodisplay_expr(
+pub(crate) fn complex_geometry_geodisplay_expr(
   geometry_column: &str,
   geometry_type: OptimizedGeometryType,
   has_z: bool,
@@ -481,7 +481,7 @@ pub(in crate::optimized) fn complex_geometry_geodisplay_expr(
   .alias(GEODISPLAY_COLUMN)
 }
 
-pub(in crate::optimized) fn point_geometry_geodisplay_expr(has_z: bool, has_m: bool) -> Expr {
+pub(crate) fn point_geometry_geodisplay_expr(has_z: bool, has_m: bool) -> Expr {
   let mut arguments = vec![
     datafusion::logical_expr::expr_fn::ident(POINT_Z_CODE_COLUMN),
     col(POINT_X_COLUMN),

@@ -247,7 +247,7 @@ pub(crate) fn point_expr(geometry_column: &str) -> Expr {
   point_udf(None).call(vec![col(geometry_column)])
 }
 
-pub(in crate::optimized) fn point_geometry_expr_with_dimensions(
+pub(crate) fn point_geometry_expr_with_dimensions(
   geometry_column: &str,
   has_z: bool,
   has_m: bool,
@@ -255,11 +255,7 @@ pub(in crate::optimized) fn point_geometry_expr_with_dimensions(
   point_udf(Some((has_z, has_m))).call(vec![col(geometry_column)])
 }
 
-pub(in crate::optimized) fn point_geometry_zcode_from_xy_expr(
-  x: Expr,
-  y: Expr,
-  full_extent: Extent2D,
-) -> Expr {
+pub(crate) fn point_geometry_zcode_from_xy_expr(x: Expr, y: Expr, full_extent: Extent2D) -> Expr {
   point_geometry_zcode_from_xy_udf()
     .call(vec![
       x,

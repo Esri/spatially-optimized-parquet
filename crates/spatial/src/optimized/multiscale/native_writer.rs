@@ -16,7 +16,7 @@ type PointListBuilder = ListBuilder<CoordinateBuilder>;
 type PartListBuilder = ListBuilder<CoordinateBuilder>;
 type MultipartBuilder = ListBuilder<PartListBuilder>;
 
-pub(in crate::optimized) enum NativeGeometryArrayBuilder {
+pub(crate) enum NativeGeometryArrayBuilder {
   MultiPoint(PointListBuilder),
   Multipart(MultipartBuilder),
 }

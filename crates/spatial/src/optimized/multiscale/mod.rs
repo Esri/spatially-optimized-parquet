@@ -16,10 +16,8 @@ pub(crate) use columns::{
   GEODISPLAY_COLUMN, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_CODE_COLUMN,
   POINT_Z_COLUMN, TEMP_XZ_CODE_COLUMN, XZ_CODE_COLUMN,
 };
-pub(in crate::optimized) use datafusion::{
-  complex_geometry_geodisplay_expr, point_geometry_geodisplay_expr,
-};
-pub(in crate::optimized) use levels::{MultiscaleLevelSpec, create_multiscale_level_specs};
+pub(crate) use datafusion::{complex_geometry_geodisplay_expr, point_geometry_geodisplay_expr};
+pub(crate) use levels::{MultiscaleLevelSpec, create_multiscale_level_specs};
 pub(crate) use native_writer::native_geometry_data_type;
 use payload::flat_geometry_payload_from_wkb;
 pub(crate) use traversal::{

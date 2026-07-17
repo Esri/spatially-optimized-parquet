@@ -8,7 +8,7 @@ use arrow_array::builder::BinaryBuilder;
 use super::quantize::QuantizedGeometryBuffer;
 use super::wire::{GeometryEncodeScratch, encode_quantized_geometry_with_scratch};
 
-pub(in crate::optimized) struct PbfGeometryWriter {
+pub(crate) struct PbfGeometryWriter {
   builder: BinaryBuilder,
   scratch: GeometryEncodeScratch,
 }

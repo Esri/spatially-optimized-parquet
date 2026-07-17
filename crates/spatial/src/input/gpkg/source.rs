@@ -36,9 +36,7 @@ struct GpkgInputSource {
 }
 
 /// Open one local GeoPackage layer through GDAL.
-pub(in crate::input) async fn open_source(
-  options: &InputOpenOptions,
-) -> Result<Arc<dyn InputSource>> {
+pub(crate) async fn open_source(options: &InputOpenOptions) -> Result<Arc<dyn InputSource>> {
   let path = options
     .local_path()
     .ok_or_else(|| anyhow::anyhow!("gpkg input does not support HTTP locations"))?;

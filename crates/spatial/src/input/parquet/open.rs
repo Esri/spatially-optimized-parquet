@@ -15,9 +15,7 @@ use crate::parquet_dataset::{DiscoveryMode, discover_parquet_dataset, load_parqu
 use super::source::{ParquetInputLocation, ParquetInputSource};
 
 /// Open a local Parquet file set or one direct HTTP Parquet object.
-pub(in crate::input) async fn open_source(
-  options: &InputOpenOptions,
-) -> Result<Arc<dyn InputSource>> {
+pub(crate) async fn open_source(options: &InputOpenOptions) -> Result<Arc<dyn InputSource>> {
   if let Some(layer) = options.layer() {
     return Err(anyhow::anyhow!(
       "parquet input does not support --layer (got '{layer}')"

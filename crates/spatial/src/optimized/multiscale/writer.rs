@@ -12,13 +12,13 @@ use super::native_writer::{native_coordinate_column_paths, native_geometry_data_
 use super::pbf_writer::PbfGeometryWriter;
 use super::quantize::QuantizedGeometryBuffer;
 
-pub(in crate::optimized) enum QuantizedGeometryWriter {
+pub(crate) enum QuantizedGeometryWriter {
   Pbf(PbfGeometryWriter),
   QuantizedNative(NativeGeometryArrayBuilder),
 }
 
 impl MultiscaleEncoding {
-  pub(in crate::optimized) fn geometry_data_type(
+  pub(crate) fn geometry_data_type(
     self,
     geometry_type: OptimizedGeometryType,
     has_z: bool,
@@ -30,21 +30,21 @@ impl MultiscaleEncoding {
     }
   }
 
-  pub(in crate::optimized) fn metadata_identifier(self) -> &'static str {
+  pub(crate) fn metadata_identifier(self) -> &'static str {
     match self {
       Self::Pbf => ESRI_PBF_ENCODING,
       Self::QuantizedNative => QUANTIZED_NATIVE_ENCODING,
     }
   }
 
-  pub(in crate::optimized) fn missing_component_value(self) -> &'static str {
+  pub(crate) fn missing_component_value(self) -> &'static str {
     match self {
       Self::Pbf => "0",
       Self::QuantizedNative => "null",
     }
   }
 
-  pub(in crate::optimized) fn delta_binary_packed_column_paths(
+  pub(crate) fn delta_binary_packed_column_paths(
     self,
     levels: &[MultiscaleLevelSpec],
     geometry_type: OptimizedGeometryType,
@@ -57,7 +57,7 @@ impl MultiscaleEncoding {
     }
   }
 
-  pub(in crate::optimized) fn resolve_writer(
+  pub(crate) fn resolve_writer(
     self,
     geometry_type: OptimizedGeometryType,
     has_z: bool,
@@ -74,10 +74,7 @@ impl MultiscaleEncoding {
 }
 
 impl QuantizedGeometryWriter {
-  pub(in crate::optimized) fn append(
-    &mut self,
-    geometry: &QuantizedGeometryBuffer,
-  ) -> anyhow::Result<()> {
+  pub(crate) fn append(&mut self, geometry: &QuantizedGeometryBuffer) -> anyhow::Result<()> {
     match self {
       Self::Pbf(writer) => writer.append(geometry),
       Self::QuantizedNative(writer) => {
@@ -87,14 +84,14 @@ impl QuantizedGeometryWriter {
     }
   }
 
-  pub(in crate::optimized) fn append_null(&mut self) {
+  pub(crate) fn append_null(&mut self) {
     match self {
       Self::Pbf(writer) => writer.append_null(),
       Self::QuantizedNative(builder) => builder.append_null(),
     }
   }
 
-  pub(in crate::optimized) fn finish(self) -> ArrayRef {
+  pub(crate) fn finish(self) -> ArrayRef {
     match self {
       Self::Pbf(writer) => writer.finish(),
       Self::QuantizedNative(mut builder) => builder.finish(),
