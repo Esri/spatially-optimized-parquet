@@ -8,7 +8,7 @@ use crate::geometry::GeometryEncoding;
 use crate::input::{SourceDatasetMetadata, SourceGeometryMetadata};
 use crate::output::SpatialReferenceInfo;
 
-pub(super) fn apply_input_wkid(
+pub(super) fn resolve_source_crs(
   source_metadata: &mut SourceDatasetMetadata,
   geometry_column: &str,
   input_wkid: Option<u32>,

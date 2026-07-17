@@ -1,4 +1,4 @@
-//! Coordinates plain GeoParquet resolution, projection, metadata, and writing.
+//! Coordinates GeoParquet resolution, projection, metadata, and writing.
 
 use anyhow::{Context, Result};
 use arrow_schema::Schema;
@@ -15,7 +15,7 @@ use crate::pipeline::SharedWriteReporter;
 
 use super::{NormalizedSpatialFrame, plain_output_dataframe, resolve_source};
 
-pub(crate) struct PlainOutput<'a> {
+pub(crate) struct GeoParquetWriter<'a> {
   input: &'a dyn InputSource,
   input_dataframe: DataFrame,
   output_layout: &'a OutputLayout,
@@ -27,8 +27,8 @@ pub(crate) struct PlainOutput<'a> {
   write_reporter: Option<SharedWriteReporter>,
 }
 
-impl<'a> PlainOutput<'a> {
-  /// Construct plain output coordination for one prepared input selection.
+impl<'a> GeoParquetWriter<'a> {
+  /// Construct one GeoParquet writer for a prepared input selection.
   pub(crate) fn new(
     input: &'a dyn InputSource,
     input_dataframe: DataFrame,
@@ -53,7 +53,7 @@ impl<'a> PlainOutput<'a> {
     }
   }
 
-  /// Write one plain GeoParquet file from a normalized input and prepared DataFrame.
+  /// Write one GeoParquet file from a normalized input and prepared DataFrame.
   pub(crate) async fn write(
     self,
     output_wkid: u32,

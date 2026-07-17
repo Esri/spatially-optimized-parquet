@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use crate::geoparquet::PlainOutput;
+use crate::geoparquet::GeoParquetWriter;
 
 use super::{PlainPipeline, SpatialPipelineResult};
 
@@ -10,7 +10,7 @@ impl PlainPipeline {
   pub(super) async fn execute(self) -> Result<SpatialPipelineResult> {
     let state = self.state;
     let options = &state.output_options;
-    let rows_written = PlainOutput::new(
+    let rows_written = GeoParquetWriter::new(
       state.input.as_ref(),
       state.input_dataframe.clone(),
       &state.output_layout,

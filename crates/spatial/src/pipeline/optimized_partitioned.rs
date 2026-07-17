@@ -2,13 +2,13 @@
 
 use anyhow::Result;
 
-use super::optimized::OptimizedOutput;
+use super::optimized::OptimizedGeoParquetWriter;
 use super::{OptimizedPartitionedPipeline, SpatialPipelineResult};
 
 impl OptimizedPartitionedPipeline {
   pub(super) async fn execute(self) -> Result<SpatialPipelineResult> {
     let state = self.state;
-    let output = OptimizedOutput::new(
+    let writer = OptimizedGeoParquetWriter::new(
       state.input.as_ref(),
       state.input_dataframe.clone(),
       &state.output_layout,
@@ -20,7 +20,7 @@ impl OptimizedPartitionedPipeline {
     )
     .resolve(&state.output_options)
     .await?;
-    let rows_written = output.write_partitioned().await?;
+    let rows_written = writer.write_partitioned().await?;
     Ok(state.finish(rows_written))
   }
 }

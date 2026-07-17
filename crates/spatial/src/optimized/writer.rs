@@ -1,4 +1,4 @@
-//! Coordinates resolved optimization state and physical output execution.
+//! Coordinates optimized GeoParquet state and physical writing.
 
 use anyhow::{Context, Result};
 use arrow_schema::Schema;
@@ -21,8 +21,8 @@ use crate::optimized::{ClusteringFamily, OptimizedGeometry, ResolvedOptimization
 use crate::output::{OutputLayout, ReprojectionSpec};
 use crate::pipeline::{OutputExecutionOptions, PipelineWarningStore, SharedWriteReporter};
 
-/// Coordinates optimized resolution and output behind one crate-private product boundary.
-pub(crate) struct OptimizedOutput<'a, State> {
+/// Coordinates optimized GeoParquet resolution and writing behind one product boundary.
+pub(crate) struct OptimizedGeoParquetWriter<'a, State> {
   input_dataframe: DataFrame,
   output_layout: &'a OutputLayout,
   source_schema: &'a Schema,
@@ -32,21 +32,21 @@ pub(crate) struct OptimizedOutput<'a, State> {
   state: State,
 }
 
-/// Stores unresolved input selection state during optimized output analysis.
-pub(crate) struct PendingOutputState<'a> {
+/// Stores unresolved input selection state during optimized GeoParquet analysis.
+pub(crate) struct PendingWriterState<'a> {
   input: &'a dyn InputSource,
   row_range: RowRange,
 }
 
-/// Stores resolved optimization and writer policy for optimized output execution.
-pub(crate) struct ResolvedOutputState {
+/// Stores resolved optimization and writer policy for optimized GeoParquet execution.
+pub(crate) struct ResolvedWriterState {
   covering: bool,
   compression: Option<String>,
   optimization: ResolvedOptimization,
 }
 
-impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
-  /// Construct optimized output resolution for one prepared input selection.
+impl<'a> OptimizedGeoParquetWriter<'a, PendingWriterState<'a>> {
+  /// Construct one optimized GeoParquet writer for a prepared input selection.
   pub(crate) fn new(
     input: &'a dyn InputSource,
     input_dataframe: DataFrame,
@@ -64,7 +64,7 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
       total_input_rows,
       write_reporter,
       warning_store,
-      state: PendingOutputState { input, row_range },
+      state: PendingWriterState { input, row_range },
     }
   }
 
@@ -72,7 +72,7 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
   pub(crate) async fn resolve(
     self,
     options: &OutputExecutionOptions,
-  ) -> Result<OptimizedOutput<'a, ResolvedOutputState>> {
+  ) -> Result<OptimizedGeoParquetWriter<'a, ResolvedWriterState>> {
     let mut source = resolve_source(
       self.state.input,
       self.input_dataframe.clone(),
@@ -108,14 +108,14 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
         create_multiscale_level_specs(options.output_wkid, geometry.ty)?
       }
     };
-    Ok(OptimizedOutput {
+    Ok(OptimizedGeoParquetWriter {
       input_dataframe: normalized.dataframe(),
       output_layout: self.output_layout,
       source_schema: self.source_schema,
       total_input_rows: self.total_input_rows,
       write_reporter: self.write_reporter,
       warning_store: self.warning_store,
-      state: ResolvedOutputState {
+      state: ResolvedWriterState {
         covering: options.covering,
         compression: options.compression.clone(),
         optimization: ResolvedOptimization::new(
@@ -131,7 +131,7 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
   }
 }
 
-impl<'a> OptimizedOutput<'a, ResolvedOutputState> {
+impl<'a> OptimizedGeoParquetWriter<'a, ResolvedWriterState> {
   /// Write globally sorted optimized rows to one Parquet file.
   pub(crate) async fn write_single_file(&self) -> Result<u64> {
     let dataframe = single_file_projection(

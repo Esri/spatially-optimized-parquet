@@ -5,7 +5,7 @@ use arrow_schema::Schema;
 
 use crate::geometry::{Extent2D, GeometryEncoding, GeometryKind, GeometrySpec, GeometryType};
 use crate::geoparquet::geometry_scan::scan_geometry_metadata;
-use crate::geoparquet::source_crs::{apply_input_wkid, spatial_reference_info};
+use crate::geoparquet::source_crs::{resolve_source_crs, spatial_reference_info};
 use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata};
 use crate::output::SpatialReferenceInfo;
 
@@ -58,7 +58,7 @@ pub(crate) async fn resolve_source(
     explicit_geometry_column,
   )?;
   let mut source_metadata = input.source_metadata()?;
-  apply_input_wkid(&mut source_metadata, &geometry_spec.column, input_wkid)?;
+  resolve_source_crs(&mut source_metadata, &geometry_spec.column, input_wkid)?;
 
   let source_geometry = source_metadata
     .geometry
