@@ -8,25 +8,27 @@ use crate::optimized::{ClusterKey, GeometryPartRole, GeometryPartSink};
 use crate::optimized::{ClusteringIndexXZ, QUANTIZED_NATIVE_ENCODING};
 use crate::parquet_dataset::PartitionFamily;
 
-use super::geometry::GeometryInspection;
-use super::metadata::ValidatedMetadata;
-use super::multifile::FileCodeRange;
+use super::dataset_validator::ClusteringRange;
+use super::file_validator::FileValidator;
+use super::geometry_validator::GeometryValidator;
+use super::metadata_validator::{MetadataValidator, ValidatedMetadata};
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
-use super::structure::LoadedDatasetFile;
 
 const PBF_SEARCH_LIMIT: usize = 512;
 
-impl ClusteringIndexXZ {
+pub(crate) struct XzValidator;
+
+impl XzValidator {
   pub(crate) fn validate_schema(
-    &self,
-    file: &LoadedDatasetFile,
+    index: &ClusteringIndexXZ,
+    file: &FileValidator,
     parent_column: Option<&str>,
     report: &mut ValidationReport,
   ) {
     if let Some(parent_column) = parent_column {
       let field_location = ValidationLocation::file(file.file.relative_path.clone())
         .with_column(parent_column.to_string());
-      match LoadedDatasetFile::field_at_path(file.metadata.schema().as_ref(), parent_column) {
+      match FileValidator::field_at_path(file.metadata.schema().as_ref(), parent_column) {
         Some(field) if matches!(field.data_type(), DataType::Struct(_)) => {}
         Some(field) => report.push(
           ValidationRule::XzSchema,
@@ -46,22 +48,22 @@ impl ClusteringIndexXZ {
       }
     }
 
-    let code_path = LoadedDatasetFile::display_column_path(parent_column, &self.code);
+    let code_path = FileValidator::display_column_path(parent_column, &index.code);
     Self::validate_field(file, &code_path, &DataType::UInt64, Some(false), report);
-    let native_geometry_type = self.optimized_geometry_type();
-    for level in &self.levels {
-      let level_path = LoadedDatasetFile::display_column_path(parent_column, &level.column);
+    let native_geometry_type = Self::optimized_geometry_type(index);
+    for level in &index.levels {
+      let level_path = FileValidator::display_column_path(parent_column, &level.column);
       let location =
         ValidationLocation::file(file.file.relative_path.clone()).with_column(level_path.clone());
-      match LoadedDatasetFile::field_at_path(file.metadata.schema().as_ref(), &level_path) {
+      match FileValidator::field_at_path(file.metadata.schema().as_ref(), &level_path) {
         Some(field)
-          if self.encoding == QUANTIZED_NATIVE_ENCODING
+          if index.encoding == QUANTIZED_NATIVE_ENCODING
             && native_geometry_type.is_some_and(|geometry_type| {
               field.data_type()
-                == &NativeGeometryArrayBuilder::data_type(geometry_type, self.has_z, self.has_m)
+                == &NativeGeometryArrayBuilder::data_type(geometry_type, index.has_z, index.has_m)
             }) => {}
         Some(field)
-          if self.encoding != QUANTIZED_NATIVE_ENCODING
+          if index.encoding != QUANTIZED_NATIVE_ENCODING
             && matches!(
               field.data_type(),
               DataType::Binary | DataType::LargeBinary | DataType::BinaryView
@@ -72,7 +74,7 @@ impl ClusteringIndexXZ {
           location,
           format!(
             "multiscale column has invalid type for encoding {}, found {}",
-            self.encoding,
+            index.encoding,
             field.data_type()
           ),
         ),
@@ -87,7 +89,7 @@ impl ClusteringIndexXZ {
   }
 
   fn validate_field(
-    file: &LoadedDatasetFile,
+    file: &FileValidator,
     path: &str,
     expected_type: &DataType,
     nullable: Option<bool>,
@@ -95,7 +97,7 @@ impl ClusteringIndexXZ {
   ) {
     let location =
       ValidationLocation::file(file.file.relative_path.clone()).with_column(path.to_string());
-    match LoadedDatasetFile::field_at_path(file.metadata.schema().as_ref(), path) {
+    match FileValidator::field_at_path(file.metadata.schema().as_ref(), path) {
       Some(field)
         if field.data_type() == expected_type
           && nullable.is_none_or(|nullable| field.is_nullable() == nullable) => {}
@@ -119,17 +121,17 @@ impl ClusteringIndexXZ {
   }
 
   pub(crate) fn validate_file(
-    &self,
-    file: &LoadedDatasetFile,
+    index: &ClusteringIndexXZ,
+    file: &FileValidator,
     contract: &ValidatedMetadata,
     parent_column: Option<&str>,
     report: &mut ValidationReport,
-  ) -> Option<FileCodeRange> {
-    let code_path = LoadedDatasetFile::display_column_path(parent_column, &self.code);
-    let level_paths = self
+  ) -> Option<ClusteringRange> {
+    let code_path = FileValidator::display_column_path(parent_column, &index.code);
+    let level_paths = index
       .levels
       .iter()
-      .map(|level| LoadedDatasetFile::display_column_path(parent_column, &level.column))
+      .map(|level| FileValidator::display_column_path(parent_column, &level.column))
       .collect::<Vec<_>>();
     let projected_columns = std::iter::once(contract.geometry_column().to_string())
       .chain(std::iter::once(code_path.clone()))
@@ -139,21 +141,21 @@ impl ClusteringIndexXZ {
     let mut minimum = None::<u64>;
     let mut maximum = None::<u64>;
     let mut sampled_geometry_count = 0usize;
-    let mut level_search_count = vec![0usize; self.levels.len()];
-    let mut level_found_payload = vec![false; self.levels.len()];
-    let mut level_winding_warned = vec![false; self.levels.len()];
+    let mut level_search_count = vec![0usize; index.levels.len()];
+    let mut level_found_payload = vec![false; index.levels.len()];
+    let mut level_winding_warned = vec![false; index.levels.len()];
     let single_polygon = contract
       .geometry_types()
       .iter()
-      .all(|geometry_type| ValidatedMetadata::geometry_base_type(geometry_type) == "Polygon");
-    let native_geometry = self.encoding == QUANTIZED_NATIVE_ENCODING;
+      .all(|geometry_type| MetadataValidator::geometry_base_type(geometry_type) == "Polygon");
+    let native_geometry = index.encoding == QUANTIZED_NATIVE_ENCODING;
 
     let read_result = file.read_row_groups(&projected_columns, |row_group, row_offset, batch| {
-      let geometry = LoadedDatasetFile::array_at_path(batch, contract.geometry_column())?;
-      let code_values = LoadedDatasetFile::uint64_array_at_path(batch, &code_path)?;
+      let geometry = FileValidator::array_at_path(batch, contract.geometry_column())?;
+      let code_values = FileValidator::uint64_array_at_path(batch, &code_path)?;
       let level_values = level_paths
         .iter()
-        .map(|path| LoadedDatasetFile::array_at_path(batch, path))
+        .map(|path| FileValidator::array_at_path(batch, path))
         .collect::<anyhow::Result<Vec<_>>>()?;
       let covering_view = CoveringExtentView::from_batch(batch, contract);
 
@@ -198,7 +200,7 @@ impl ClusteringIndexXZ {
           );
         }
 
-        for (level_index, _) in self.levels.iter().enumerate() {
+        for (level_index, _) in index.levels.iter().enumerate() {
           if level_search_count[level_index] >= PBF_SEARCH_LIMIT {
             continue;
           }
@@ -227,7 +229,7 @@ impl ClusteringIndexXZ {
             }
             continue;
           }
-          let payload = match GeometryInspection::binary_value(level_array, row_index) {
+          let payload = match GeometryValidator::binary_value(level_array, row_index) {
             Ok(payload) => payload,
             Err(error) => {
               report.push(
@@ -263,8 +265,8 @@ impl ClusteringIndexXZ {
               let non_empty = Self::validate_pbf_structure(
                 &decoded.lengths,
                 &decoded.coords,
-                self.has_z,
-                self.has_m,
+                index.has_z,
+                index.has_m,
                 source_is_null,
                 &level_location,
                 report,
@@ -274,8 +276,8 @@ impl ClusteringIndexXZ {
                 level_winding_warned[level_index] = Self::warn_pbf_winding(
                   &decoded.lengths,
                   &decoded.coords,
-                  self.has_z,
-                  self.has_m,
+                  index.has_z,
+                  index.has_m,
                   &level_location,
                   report,
                 );
@@ -292,7 +294,7 @@ impl ClusteringIndexXZ {
           .with_row_group(row_group)
           .with_row(row)
           .with_column(contract.geometry_column().to_string());
-        let bytes = match GeometryInspection::binary_value(geometry, row_index) {
+        let bytes = match GeometryValidator::binary_value(geometry, row_index) {
           Ok(Some(bytes)) => bytes,
           Ok(None) => continue,
           Err(error) => {
@@ -305,7 +307,7 @@ impl ClusteringIndexXZ {
             continue;
           }
         };
-        let inspection = match GeometryInspection::inspect(&bytes) {
+        let inspection = match GeometryValidator::inspect(&bytes) {
           Ok(inspection) => inspection,
           Err(error) => {
             report.push(
@@ -317,14 +319,15 @@ impl ClusteringIndexXZ {
             continue;
           }
         };
-        inspection.validate(
-          &self.geometry_type,
-          self.has_z,
-          self.has_m,
+        GeometryValidator::validate(
+          &inspection,
+          &index.geometry_type,
+          index.has_z,
+          index.has_m,
           geometry_location.clone(),
           report,
         );
-        let Some(optimized_geometry_type) = self.optimized_geometry_type() else {
+        let Some(optimized_geometry_type) = Self::optimized_geometry_type(index) else {
           continue;
         };
         if native_geometry {
@@ -341,7 +344,8 @@ impl ClusteringIndexXZ {
               inspection.extent
             }
           };
-          self.validate_sampled_code(
+          Self::validate_sampled_code(
+            index,
             feature_extent,
             code,
             code_location,
@@ -350,9 +354,9 @@ impl ClusteringIndexXZ {
           );
           continue;
         }
-        for (level_index, level) in self.levels.iter().enumerate() {
+        for (level_index, level) in index.levels.iter().enumerate() {
           let level_array = level_values[level_index];
-          let Ok(Some(payload)) = GeometryInspection::binary_value(level_array, row_index) else {
+          let Ok(Some(payload)) = GeometryValidator::binary_value(level_array, row_index) else {
             continue;
           };
           let Ok(decoded) = PbfGeometry::from_bytes(&payload) else {
@@ -368,8 +372,8 @@ impl ClusteringIndexXZ {
             &decoded.lengths,
             &decoded.coords,
             level,
-            self.has_z,
-            self.has_m,
+            index.has_z,
+            index.has_m,
             &level_location,
             report,
           );
@@ -397,7 +401,7 @@ impl ClusteringIndexXZ {
           continue;
         };
         let expected_code =
-          ClusterKey::from_xz_extent(self.full_extent, feature_extent, self.max_level).value();
+          ClusterKey::from_xz_extent(index.full_extent, feature_extent, index.max_level).value();
         if code != expected_code {
           report.push(
             ValidationRule::XzCode,
@@ -418,7 +422,7 @@ impl ClusteringIndexXZ {
       );
     }
 
-    for (level_index, level) in self.levels.iter().enumerate() {
+    for (level_index, level) in index.levels.iter().enumerate() {
       if native_geometry {
         continue;
       }
@@ -437,7 +441,7 @@ impl ClusteringIndexXZ {
     }
 
     match (minimum, maximum) {
-      (Some(minimum), Some(maximum)) => Some(FileCodeRange {
+      (Some(minimum), Some(maximum)) => Some(ClusteringRange {
         file: file.file.relative_path.clone(),
         family: PartitionFamily::Xz,
         minimum,
@@ -448,8 +452,8 @@ impl ClusteringIndexXZ {
     }
   }
 
-  fn optimized_geometry_type(&self) -> Option<GeometryType> {
-    match self.geometry_type.as_str() {
+  fn optimized_geometry_type(index: &ClusteringIndexXZ) -> Option<GeometryType> {
+    match index.geometry_type.as_str() {
       "multipoint" => Some(GeometryType::MultiPoint),
       "polyline" => Some(GeometryType::Polyline),
       "polygon" => Some(GeometryType::Polygon),
@@ -458,7 +462,7 @@ impl ClusteringIndexXZ {
   }
 
   fn validate_sampled_code(
-    &self,
+    index: &ClusteringIndexXZ,
     feature_extent: Option<Extent2D>,
     code: u64,
     code_location: ValidationLocation,
@@ -475,7 +479,7 @@ impl ClusteringIndexXZ {
       return;
     };
     let expected_code =
-      ClusterKey::from_xz_extent(self.full_extent, feature_extent, self.max_level).value();
+      ClusterKey::from_xz_extent(index.full_extent, feature_extent, index.max_level).value();
     if code != expected_code {
       report.push(
         ValidationRule::XzCode,
@@ -645,8 +649,7 @@ impl<'array> CoveringExtentView<'array> {
       covering.bbox.ymax.join("."),
     ];
     let fields: [Result<CoveringField<'array>, String>; 4] = paths.map(|path| {
-      let array =
-        LoadedDatasetFile::array_at_path(batch, &path).map_err(|error| error.to_string())?;
+      let array = FileValidator::array_at_path(batch, &path).map_err(|error| error.to_string())?;
       let array = array
         .as_any()
         .downcast_ref::<Float64Array>()
@@ -703,7 +706,7 @@ impl<'array> CoveringExtentView<'array> {
   }
 }
 
-impl ClusteringIndexXZ {
+impl XzValidator {
   fn validate_pbf_structure(
     lengths: &[u32],
     coords: &[i64],
@@ -855,7 +858,7 @@ mod tests {
     let location = ValidationLocation::file("data.parquet").with_column("sop.level_0");
     let mut report = ValidationReport::new(PathBuf::from("dataset"));
 
-    assert!(ClusteringIndexXZ::validate_pbf_structure(
+    assert!(XzValidator::validate_pbf_structure(
       &[1],
       &[10, 20],
       false,
@@ -864,7 +867,7 @@ mod tests {
       &location,
       &mut report
     ));
-    assert!(!ClusteringIndexXZ::validate_pbf_structure(
+    assert!(!XzValidator::validate_pbf_structure(
       &[],
       &[],
       false,
@@ -883,7 +886,7 @@ mod tests {
     let location = ValidationLocation::file("data.parquet").with_column("sop.level_0");
     let mut report = ValidationReport::new(PathBuf::from("dataset"));
 
-    let warned = ClusteringIndexXZ::warn_pbf_winding(
+    let warned = XzValidator::warn_pbf_winding(
       &[4],
       &[0, 0, 1, 0, 0, 1, -1, -1],
       false,
@@ -902,7 +905,7 @@ mod tests {
     let location = ValidationLocation::file("data.parquet").with_column("sop.level_0");
     let mut report = ValidationReport::new(PathBuf::from("dataset"));
 
-    let warned = ClusteringIndexXZ::warn_pbf_winding(
+    let warned = XzValidator::warn_pbf_winding(
       &[3],
       &[i64::MAX, 0, 1, 0, 0, 1],
       false,
@@ -921,7 +924,7 @@ mod tests {
     let location = ValidationLocation::file("data.parquet").with_column("sop.level_0");
     let mut report = ValidationReport::new(PathBuf::from("dataset"));
 
-    assert!(ClusteringIndexXZ::validate_pbf_structure(
+    assert!(XzValidator::validate_pbf_structure(
       &[2],
       &[0, 0, 10, 100, 1, 1, 20, 200],
       true,
@@ -956,7 +959,7 @@ mod tests {
     let location = ValidationLocation::file("data.parquet").with_column("sop.level_0");
     let mut report = ValidationReport::new(PathBuf::from("dataset"));
 
-    ClusteringIndexXZ::validate_pbf_vertex_provenance(
+    XzValidator::validate_pbf_vertex_provenance(
       &wkb,
       GeometryType::Polyline,
       &[2],

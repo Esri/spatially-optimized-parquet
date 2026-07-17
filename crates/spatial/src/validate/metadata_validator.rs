@@ -9,8 +9,8 @@ use crate::optimized::{
   GeodisplayIndex, GeodisplayMetadata, QUANTIZED_NATIVE_ENCODING,
 };
 
+use super::file_validator::FileValidator;
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
-use super::structure::LoadedDatasetFile;
 
 const GEO_VERSION: &str = "1.1.0";
 
@@ -37,9 +37,11 @@ pub(crate) struct ValidatedMetadata {
 }
 
 pub(crate) struct ValidatedDatasetFile<'file> {
-  pub(crate) file: &'file LoadedDatasetFile,
+  pub(crate) file: &'file FileValidator,
   pub(crate) metadata: ValidatedMetadata,
 }
+
+pub(crate) struct MetadataValidator;
 
 impl ValidatedMetadata {
   pub(crate) fn geometry_column(&self) -> &str {
@@ -55,9 +57,9 @@ impl ValidatedMetadata {
   }
 }
 
-impl ValidatedMetadata {
+impl MetadataValidator {
   pub(crate) fn validate_dataset<'file>(
-    files: &'file [LoadedDatasetFile],
+    files: &'file [FileValidator],
     report: &mut ValidationReport,
   ) -> Vec<ValidatedDatasetFile<'file>> {
     let validated_files = files
@@ -87,7 +89,7 @@ impl ValidatedMetadata {
   }
 
   fn validate_file(
-    file: &LoadedDatasetFile,
+    file: &FileValidator,
     report: &mut ValidationReport,
   ) -> Option<ValidatedMetadata> {
     let initial_error_count = report.error_count();
@@ -144,7 +146,7 @@ impl ValidatedMetadata {
   fn parse_reserved_metadata<T: DeserializeOwned>(
     key: &str,
     entries: &[parquet::file::metadata::KeyValue],
-    file: &LoadedDatasetFile,
+    file: &FileValidator,
     report: &mut ValidationReport,
   ) -> Option<T> {
     let matching = entries
@@ -193,11 +195,7 @@ impl ValidatedMetadata {
     }
   }
 
-  fn validate_geo_contract(
-    geo: &GeoMetadata,
-    file: &LoadedDatasetFile,
-    report: &mut ValidationReport,
-  ) {
+  fn validate_geo_contract(geo: &GeoMetadata, file: &FileValidator, report: &mut ValidationReport) {
     let location = ValidationLocation::file(file.file.relative_path.clone()).with_column("geo");
     if geo.version != GEO_VERSION {
       report.push(
@@ -269,7 +267,7 @@ impl ValidatedMetadata {
 
   fn validate_geodisplay_contract(
     geodisplay: &GeodisplayMetadata,
-    file: &LoadedDatasetFile,
+    file: &FileValidator,
     report: &mut ValidationReport,
   ) {
     match &geodisplay.index {
@@ -282,7 +280,7 @@ impl ValidatedMetadata {
     version: &str,
     writer: Option<(&str, &str)>,
     full_extent: Extent2D,
-    file: &LoadedDatasetFile,
+    file: &FileValidator,
     report: &mut ValidationReport,
   ) {
     let location =
@@ -315,7 +313,7 @@ impl ValidatedMetadata {
 
   fn validate_z_metadata(
     index: &ClusteringIndexZ,
-    file: &LoadedDatasetFile,
+    file: &FileValidator,
     report: &mut ValidationReport,
   ) {
     Self::validate_common_metadata(
@@ -372,7 +370,7 @@ impl ValidatedMetadata {
 
   fn validate_xz_metadata(
     index: &ClusteringIndexXZ,
-    file: &LoadedDatasetFile,
+    file: &FileValidator,
     report: &mut ValidationReport,
   ) {
     Self::validate_common_metadata(
@@ -508,7 +506,7 @@ impl ValidatedMetadata {
   fn validate_geometry_family(
     geo: &GeoMetadata,
     geodisplay: &GeodisplayMetadata,
-    file: &LoadedDatasetFile,
+    file: &FileValidator,
     report: &mut ValidationReport,
   ) {
     let Some(column) = geo.columns.get(&geo.primary_column) else {
@@ -538,7 +536,7 @@ impl ValidatedMetadata {
 
   fn resolve_geo_crs(
     geo: &GeoMetadata,
-    file: &LoadedDatasetFile,
+    file: &FileValidator,
     report: &mut ValidationReport,
   ) -> Option<ValidatedCrs> {
     let Some(column) = geo.columns.get(&geo.primary_column) else {
@@ -575,7 +573,7 @@ impl ValidatedMetadata {
 
   fn resolve_geodisplay_crs(
     geodisplay: &GeodisplayMetadata,
-    file: &LoadedDatasetFile,
+    file: &FileValidator,
     report: &mut ValidationReport,
   ) -> Option<ValidatedCrs> {
     let (wkid, wkt) = match &geodisplay.index {
@@ -629,7 +627,7 @@ impl ValidatedMetadata {
   fn validate_matching_extent(
     geo: &GeoMetadata,
     geodisplay: &GeodisplayMetadata,
-    file: &LoadedDatasetFile,
+    file: &FileValidator,
     report: &mut ValidationReport,
   ) {
     let Some(column) = geo.columns.get(&geo.primary_column) else {

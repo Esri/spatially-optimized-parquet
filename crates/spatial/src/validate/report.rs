@@ -84,7 +84,7 @@ pub enum ValidationRule {
   PbfSample,
   /// Enforces clustering partition containment.
   Partition,
-  /// Reports overlapping multifile clustering ranges.
+  /// Reports overlapping dataset clustering ranges.
   RangeOverlap,
 }
 

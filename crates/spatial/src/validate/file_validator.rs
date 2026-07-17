@@ -9,24 +9,25 @@ use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ParquetRecordBatchReader
 use crate::optimized::GeodisplayIndex;
 use crate::parquet_dataset::{ParquetDatasetFile, PartitionFamily};
 
-use super::metadata::{ValidatedDatasetFile, ValidatedMetadata};
-use super::multifile::FileCodeRange;
+use super::metadata_validator::{ValidatedDatasetFile, ValidatedMetadata};
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
+use super::xz_validator::XzValidator;
+use super::z_validator::ZValidator;
 
-pub(crate) struct LoadedDatasetFile {
+pub(crate) struct FileValidator {
   pub(crate) file: ParquetDatasetFile,
   pub(crate) metadata: ArrowReaderMetadata,
 }
 
-impl LoadedDatasetFile {
+impl FileValidator {
   pub(crate) fn load_all(
     files: &[ParquetDatasetFile],
     report: &mut ValidationReport,
-  ) -> Vec<LoadedDatasetFile> {
+  ) -> Vec<FileValidator> {
     files
       .iter()
       .filter_map(|file| match ParquetDatasetFile::load_metadata(&file.path) {
-        Ok(metadata) => Some(LoadedDatasetFile {
+        Ok(metadata) => Some(FileValidator {
           file: file.clone(),
           metadata,
         }),
@@ -44,7 +45,7 @@ impl LoadedDatasetFile {
   }
 
   pub(crate) fn validate_dataset_structure(
-    files: &[LoadedDatasetFile],
+    files: &[FileValidator],
     validated_files: &[ValidatedDatasetFile<'_>],
     report: &mut ValidationReport,
   ) {
@@ -54,12 +55,18 @@ impl LoadedDatasetFile {
       let metadata = &validated_file.metadata;
       Self::validate_geometry_schema(file, metadata, report);
       match &metadata.geodisplay.index {
-        GeodisplayIndex::Z(index) => {
-          index.validate_schema(file, metadata.geodisplay.parent_column.as_deref(), report)
-        }
-        GeodisplayIndex::Xz(index) => {
-          index.validate_schema(file, metadata.geodisplay.parent_column.as_deref(), report)
-        }
+        GeodisplayIndex::Z(index) => ZValidator::validate_schema(
+          index,
+          file,
+          metadata.geodisplay.parent_column.as_deref(),
+          report,
+        ),
+        GeodisplayIndex::Xz(index) => XzValidator::validate_schema(
+          index,
+          file,
+          metadata.geodisplay.parent_column.as_deref(),
+          report,
+        ),
       }
       Self::validate_partition_family(file, metadata, report);
       Self::validate_clustering_page_indexes(file, metadata, report);
@@ -69,19 +76,21 @@ impl LoadedDatasetFile {
   pub(crate) fn validate_file_data(
     validated_files: &[ValidatedDatasetFile<'_>],
     report: &mut ValidationReport,
-  ) -> Vec<FileCodeRange> {
+  ) -> Vec<super::dataset_validator::ClusteringRange> {
     let mut ranges = Vec::new();
     for validated_file in validated_files {
       let file = validated_file.file;
       let metadata = &validated_file.metadata;
       let range = match &metadata.geodisplay.index {
-        GeodisplayIndex::Z(index) => index.validate_file(
+        GeodisplayIndex::Z(index) => ZValidator::validate_file(
+          index,
           file,
           metadata,
           metadata.geodisplay.parent_column.as_deref(),
           report,
         ),
-        GeodisplayIndex::Xz(index) => index.validate_file(
+        GeodisplayIndex::Xz(index) => XzValidator::validate_file(
+          index,
           file,
           metadata,
           metadata.geodisplay.parent_column.as_deref(),
@@ -95,10 +104,7 @@ impl LoadedDatasetFile {
     ranges
   }
 
-  fn validate_dataset_schema_consistency(
-    files: &[LoadedDatasetFile],
-    report: &mut ValidationReport,
-  ) {
+  fn validate_dataset_schema_consistency(files: &[FileValidator], report: &mut ValidationReport) {
     let Some(baseline) = files.first() else {
       return;
     };
@@ -118,7 +124,7 @@ impl LoadedDatasetFile {
   }
 
   fn validate_geometry_schema(
-    file: &LoadedDatasetFile,
+    file: &FileValidator,
     contract: &ValidatedMetadata,
     report: &mut ValidationReport,
   ) {
@@ -215,7 +221,7 @@ impl LoadedDatasetFile {
   }
 
   fn validate_partition_family(
-    file: &LoadedDatasetFile,
+    file: &FileValidator,
     contract: &ValidatedMetadata,
     report: &mut ValidationReport,
   ) {
@@ -240,7 +246,7 @@ impl LoadedDatasetFile {
   }
 
   fn validate_clustering_page_indexes(
-    file: &LoadedDatasetFile,
+    file: &FileValidator,
     contract: &ValidatedMetadata,
     report: &mut ValidationReport,
   ) {
@@ -316,26 +322,23 @@ impl LoadedDatasetFile {
 
 #[cfg(test)]
 mod tests {
-  use super::LoadedDatasetFile;
+  use super::FileValidator;
 
   #[test]
   fn resolves_display_columns_with_any_optional_parent() {
+    assert_eq!(FileValidator::display_column_path(None, "zCode"), "zCode");
     assert_eq!(
-      LoadedDatasetFile::display_column_path(None, "zCode"),
-      "zCode"
-    );
-    assert_eq!(
-      LoadedDatasetFile::display_column_path(Some("display"), "zCode"),
+      FileValidator::display_column_path(Some("display"), "zCode"),
       "display.zCode"
     );
     assert_eq!(
-      LoadedDatasetFile::display_column_path(Some("customOptimization"), "xzCode"),
+      FileValidator::display_column_path(Some("customOptimization"), "xzCode"),
       "customOptimization.xzCode"
     );
   }
 }
 
-impl LoadedDatasetFile {
+impl FileValidator {
   pub(crate) fn field_at_path<'a>(schema: &'a Schema, path: &str) -> Option<&'a Field> {
     let mut segments = path.split('.');
     let first = segments.next()?;

@@ -6,64 +6,66 @@ use crate::optimized::ClusterKey;
 use crate::optimized::ClusteringIndexZ;
 use crate::parquet_dataset::PartitionFamily;
 
-use super::geometry::GeometryInspection;
-use super::metadata::ValidatedMetadata;
-use super::multifile::FileCodeRange;
+use super::dataset_validator::ClusteringRange;
+use super::file_validator::FileValidator;
+use super::geometry_validator::GeometryValidator;
+use super::metadata_validator::{MetadataValidator, ValidatedMetadata};
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
-use super::structure::LoadedDatasetFile;
 
-impl ClusteringIndexZ {
+pub(crate) struct ZValidator;
+
+impl ZValidator {
   pub(crate) fn validate_schema(
-    &self,
-    file: &LoadedDatasetFile,
+    index: &ClusteringIndexZ,
+    file: &FileValidator,
     parent_column: Option<&str>,
     report: &mut ValidationReport,
   ) {
     Self::validate_required_field(
       file,
-      &LoadedDatasetFile::display_column_path(parent_column, &self.code),
+      &FileValidator::display_column_path(parent_column, &index.code),
       &DataType::UInt64,
       false,
       report,
     );
     Self::validate_required_field(
       file,
-      &LoadedDatasetFile::display_column_path(parent_column, &self.x_column),
+      &FileValidator::display_column_path(parent_column, &index.x_column),
       &DataType::Float64,
       false,
       report,
     );
     Self::validate_required_field(
       file,
-      &LoadedDatasetFile::display_column_path(parent_column, &self.y_column),
+      &FileValidator::display_column_path(parent_column, &index.y_column),
       &DataType::Float64,
       false,
       report,
     );
     Self::validate_dimension_field(
       file,
-      self
+      index
         .z_column
         .as_deref()
-        .map(|column| LoadedDatasetFile::display_column_path(parent_column, column)),
-      self.has_z,
+        .map(|column| FileValidator::display_column_path(parent_column, column)),
+      index.has_z,
       "zColumn",
       report,
     );
     Self::validate_dimension_field(
       file,
-      self
+      index
         .m_column
         .as_deref()
-        .map(|column| LoadedDatasetFile::display_column_path(parent_column, column)),
-      self.has_m,
+        .map(|column| FileValidator::display_column_path(parent_column, column)),
+      index.has_m,
       "mColumn",
       report,
     );
   }
 
   fn validate_required_field(
-    file: &LoadedDatasetFile,
+    file: &FileValidator,
     path: &str,
     expected_type: &DataType,
     nullable: bool,
@@ -71,7 +73,7 @@ impl ClusteringIndexZ {
   ) {
     let location =
       ValidationLocation::file(file.file.relative_path.clone()).with_column(path.to_string());
-    match LoadedDatasetFile::field_at_path(file.metadata.schema().as_ref(), path) {
+    match FileValidator::field_at_path(file.metadata.schema().as_ref(), path) {
       Some(field) if field.data_type() == expected_type && field.is_nullable() == nullable => {}
       Some(field) => report.push(
         ValidationRule::ZSchema,
@@ -93,7 +95,7 @@ impl ClusteringIndexZ {
   }
 
   fn validate_dimension_field(
-    file: &LoadedDatasetFile,
+    file: &FileValidator,
     path: Option<String>,
     required: bool,
     metadata_name: &str,
@@ -122,23 +124,23 @@ impl ClusteringIndexZ {
   }
 
   pub(crate) fn validate_file(
-    &self,
-    file: &LoadedDatasetFile,
+    index: &ClusteringIndexZ,
+    file: &FileValidator,
     contract: &ValidatedMetadata,
     parent_column: Option<&str>,
     report: &mut ValidationReport,
-  ) -> Option<FileCodeRange> {
-    let code_path = LoadedDatasetFile::display_column_path(parent_column, &self.code);
-    let x_path = LoadedDatasetFile::display_column_path(parent_column, &self.x_column);
-    let y_path = LoadedDatasetFile::display_column_path(parent_column, &self.y_column);
-    let z_path = self
+  ) -> Option<ClusteringRange> {
+    let code_path = FileValidator::display_column_path(parent_column, &index.code);
+    let x_path = FileValidator::display_column_path(parent_column, &index.x_column);
+    let y_path = FileValidator::display_column_path(parent_column, &index.y_column);
+    let z_path = index
       .z_column
       .as_deref()
-      .map(|column| LoadedDatasetFile::display_column_path(parent_column, column));
-    let m_path = self
+      .map(|column| FileValidator::display_column_path(parent_column, column));
+    let m_path = index
       .m_column
       .as_deref()
-      .map(|column| LoadedDatasetFile::display_column_path(parent_column, column));
+      .map(|column| FileValidator::display_column_path(parent_column, column));
     let projected_columns = [
       contract.geometry_column().to_string(),
       code_path.clone(),
@@ -154,17 +156,17 @@ impl ClusteringIndexZ {
     let mut maximum = None::<u64>;
     let mut sampled_geometry_count = 0usize;
     let read_result = file.read_row_groups(&projected_columns, |row_group, row_offset, batch| {
-    let geometry = LoadedDatasetFile::array_at_path(batch, contract.geometry_column())?;
-    let x_values = LoadedDatasetFile::float64_array_at_path(batch, &x_path)?;
-    let y_values = LoadedDatasetFile::float64_array_at_path(batch, &y_path)?;
-    let code_values = LoadedDatasetFile::uint64_array_at_path(batch, &code_path)?;
+    let geometry = FileValidator::array_at_path(batch, contract.geometry_column())?;
+    let x_values = FileValidator::float64_array_at_path(batch, &x_path)?;
+    let y_values = FileValidator::float64_array_at_path(batch, &y_path)?;
+    let code_values = FileValidator::uint64_array_at_path(batch, &code_path)?;
     let z_values = z_path
       .as_deref()
-      .map(|path| LoadedDatasetFile::float64_array_at_path(batch, path))
+      .map(|path| FileValidator::float64_array_at_path(batch, path))
       .transpose()?;
     let m_values = m_path
       .as_deref()
-      .map(|path| LoadedDatasetFile::float64_array_at_path(batch, path))
+      .map(|path| FileValidator::float64_array_at_path(batch, path))
       .transpose()?;
 
     for row_index in 0..batch.num_rows() {
@@ -241,7 +243,7 @@ impl ClusteringIndexZ {
         continue;
       }
       sampled_geometry_count += 1;
-      let bytes = match GeometryInspection::binary_value(geometry, row_index) {
+      let bytes = match GeometryValidator::binary_value(geometry, row_index) {
         Ok(Some(bytes)) => bytes,
         Ok(None) => continue,
         Err(error) => {
@@ -258,7 +260,7 @@ impl ClusteringIndexZ {
         .with_row_group(row_group)
         .with_row(row)
         .with_column(contract.geometry_column().to_string());
-      let inspection = match GeometryInspection::inspect(&bytes) {
+      let inspection = match GeometryValidator::inspect(&bytes) {
         Ok(inspection) => inspection,
         Err(error) => {
           report.push(
@@ -278,10 +280,11 @@ impl ClusteringIndexZ {
           continue;
         }
       };
-      inspection.validate(
+      GeometryValidator::validate(
+        &inspection,
         "point",
-        self.has_z,
-        self.has_m,
+        index.has_z,
+        index.has_m,
         geometry_location,
         report,
       );
@@ -295,8 +298,8 @@ impl ClusteringIndexZ {
       };
       if !x.is_finite()
         || !y.is_finite()
-        || !ValidatedMetadata::float_matches(x, geometry_x)
-        || !ValidatedMetadata::float_matches(y, geometry_y)
+        || !MetadataValidator::float_matches(x, geometry_x)
+        || !MetadataValidator::float_matches(y, geometry_y)
       {
         report.push(
           ValidationRule::ZCoordinate,
@@ -326,10 +329,10 @@ impl ClusteringIndexZ {
         report,
       );
       let expected_code = ClusterKey::from_z_coordinates(
-        self.full_extent,
+        index.full_extent,
         geometry_x,
         geometry_y,
-        self.coordinate_precision,
+        index.coordinate_precision,
       )
       .value();
       if code != expected_code {
@@ -347,7 +350,7 @@ impl ClusteringIndexZ {
         column_path: Option<&str>,
         row_group: usize,
         row: u64,
-        file: &LoadedDatasetFile,
+        file: &FileValidator,
         report: &mut ValidationReport,
       ) {
         let (Some(geometry_value), Some(column_value), Some(column_path)) =
@@ -356,7 +359,7 @@ impl ClusteringIndexZ {
           return;
         };
         if (geometry_value.is_nan() && column_value.is_nan())
-          || ValidatedMetadata::float_matches(geometry_value, column_value)
+          || MetadataValidator::float_matches(geometry_value, column_value)
         {
           return;
         }
@@ -385,7 +388,7 @@ impl ClusteringIndexZ {
     }
 
     match (minimum, maximum) {
-      (Some(minimum), Some(maximum)) => Some(FileCodeRange {
+      (Some(minimum), Some(maximum)) => Some(ClusteringRange {
         file: file.file.relative_path.clone(),
         family: PartitionFamily::Z,
         minimum,

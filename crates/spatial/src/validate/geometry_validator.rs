@@ -9,7 +9,7 @@ use crate::optimized::{GeometryPartRole, GeometryPartSink};
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct RingInspection {
+pub(crate) struct RingValidationInfo {
   pub(crate) role: GeometryPartRole,
   pub(crate) closed: bool,
   pub(crate) signed_area: f64,
@@ -17,19 +17,21 @@ pub(crate) struct RingInspection {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct GeometryInspection {
+pub(crate) struct GeometryValidationInfo {
   pub(crate) kind: GeometryKind,
   pub(crate) dimensions: Dimensions,
   pub(crate) extent: Option<Extent2D>,
   pub(crate) finite_coordinates: bool,
-  pub(crate) rings: Vec<RingInspection>,
+  pub(crate) rings: Vec<RingValidationInfo>,
 }
 
-impl GeometryInspection {
-  pub(crate) fn inspect(bytes: &[u8]) -> Result<Self> {
+pub(crate) struct GeometryValidator;
+
+impl GeometryValidator {
+  pub(crate) fn inspect(bytes: &[u8]) -> Result<GeometryValidationInfo> {
     let mut sink = InspectionSink::default();
     let header = WkbHeader::visit(bytes, &mut sink)?;
-    Ok(Self {
+    Ok(GeometryValidationInfo {
       kind: header.kind,
       dimensions: header.dimensions,
       extent: sink.extent,
@@ -39,21 +41,21 @@ impl GeometryInspection {
   }
 
   pub(crate) fn validate(
-    &self,
+    inspection: &GeometryValidationInfo,
     expected_geometry_type: &str,
     expected_has_z: bool,
     expected_has_m: bool,
     location: ValidationLocation,
     report: &mut ValidationReport,
   ) {
-    if !self.matches_geometry_type(expected_geometry_type) {
+    if !Self::matches_geometry_type(inspection, expected_geometry_type) {
       report.push(
         ValidationRule::GeometryType,
         ValidationSeverity::Error,
         location.clone(),
         format!(
           "sampled WKB geometry {:?} does not match geometryType '{expected_geometry_type}'",
-          self.kind
+          inspection.kind
         ),
       );
     }
@@ -63,18 +65,18 @@ impl GeometryInspection {
       (false, true) => Dimensions::Xym,
       (true, true) => Dimensions::Xyzm,
     };
-    if self.dimensions != expected_dimensions {
+    if inspection.dimensions != expected_dimensions {
       report.push(
         ValidationRule::GeometryDimension,
         ValidationSeverity::Error,
         location.clone(),
         format!(
           "sampled WKB geometry dimensions {:?} do not match metadata dimensions {:?}",
-          self.dimensions, expected_dimensions
+          inspection.dimensions, expected_dimensions
         ),
       );
     }
-    if !self.finite_coordinates || self.extent.is_none() {
+    if !inspection.finite_coordinates || inspection.extent.is_none() {
       report.push(
         ValidationRule::GeometryCoordinate,
         ValidationSeverity::Error,
@@ -82,7 +84,7 @@ impl GeometryInspection {
         "sampled WKB geometry contains no finite coordinates",
       );
     }
-    for ring in &self.rings {
+    for ring in &inspection.rings {
       if !ring.closed {
         report.push(
           ValidationRule::RingClosure,
@@ -129,16 +131,16 @@ impl GeometryInspection {
     bail!("expected Arrow binary array, found {}", array.data_type())
   }
 
-  fn matches_geometry_type(&self, expected: &str) -> bool {
+  fn matches_geometry_type(inspection: &GeometryValidationInfo, expected: &str) -> bool {
     match expected {
-      "point" => self.kind == GeometryKind::Point,
-      "multipoint" => self.kind == GeometryKind::MultiPoint,
+      "point" => inspection.kind == GeometryKind::Point,
+      "multipoint" => inspection.kind == GeometryKind::MultiPoint,
       "polyline" => matches!(
-        self.kind,
+        inspection.kind,
         GeometryKind::LineString | GeometryKind::MultiLineString
       ),
       "polygon" => matches!(
-        self.kind,
+        inspection.kind,
         GeometryKind::Polygon | GeometryKind::MultiPolygon
       ),
       _ => false,
@@ -152,7 +154,7 @@ struct InspectionSink {
   finite_coordinates: bool,
   current_role: Option<GeometryPartRole>,
   current_coordinates: Vec<(f64, f64)>,
-  rings: Vec<RingInspection>,
+  rings: Vec<RingValidationInfo>,
 }
 
 impl Default for InspectionSink {
@@ -228,7 +230,7 @@ impl GeometryPartSink for InspectionSink {
       && self.current_coordinates.first() == self.current_coordinates.last();
     let signed_area = Self::signed_area(&self.current_coordinates);
     let degenerated = self.current_coordinates.len() < 4 || signed_area.abs() <= f64::EPSILON;
-    self.rings.push(RingInspection {
+    self.rings.push(RingValidationInfo {
       role,
       closed,
       signed_area,
@@ -254,7 +256,7 @@ mod tests {
     ]);
     let bytes = crate::geometry::write_test_geometry(&geometry);
 
-    let inspection = GeometryInspection::inspect(&bytes).unwrap();
+    let inspection = GeometryValidator::inspect(&bytes).unwrap();
 
     assert_eq!(inspection.kind, GeometryKind::Polygon);
     assert!(inspection.rings[0].closed);
