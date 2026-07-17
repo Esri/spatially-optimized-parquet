@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use arrow_schema::Schema;
 
-use crate::geometry::{Extent2D, GeometryEncoding, GeometryKind, GeometryShape, GeometrySpec};
+use crate::geometry::{Extent2D, GeometryEncoding, GeometryKind, GeometrySpec, GeometryType};
 use crate::geoparquet::geometry_scan::scan_geometry_metadata;
 use crate::geoparquet::source_crs::{apply_input_wkid, spatial_reference_info};
 use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata};
@@ -20,8 +20,8 @@ pub(crate) struct ResolvedGeoParquetSource {
   pub(crate) source_extent: Extent2D,
   /// Stores the source coordinate reference system.
   pub(crate) source_spatial_reference: SpatialReferenceInfo,
-  /// Stores the normalized geometry shape used by plain output mechanics.
-  pub(crate) geometry_shape: GeometryShape,
+  /// Stores the normalized geometry type used by plain output mechanics.
+  pub(crate) geometry_type: GeometryType,
   /// Indicates whether source metadata declares Z values.
   pub(crate) has_z: bool,
   /// Indicates whether source metadata declares M values.
@@ -78,7 +78,7 @@ pub(crate) async fn resolve_source(
         .context("missing source geometry extent")?,
     )
   };
-  let geometry_shape = GeometryShape::from_kinds(&geometry_types)?;
+  let geometry_type = GeometryType::from_kinds(&geometry_types)?;
   let projjson = source_geometry
     .projjson
     .clone()
@@ -103,7 +103,7 @@ pub(crate) async fn resolve_source(
     geometry_types,
     source_extent,
     source_spatial_reference,
-    geometry_shape,
+    geometry_type,
     has_z,
     has_m,
     source_metadata,
