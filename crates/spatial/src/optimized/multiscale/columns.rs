@@ -3,23 +3,23 @@
 use anyhow::{Result, bail};
 use arrow_schema::Schema;
 
-/// Names the generated point Z-order code column.
+/// Defines the generated point Z-order code column.
 pub(crate) const POINT_Z_CODE_COLUMN: &str = "zCode";
-/// Names the generated point x-coordinate column.
+/// Defines the generated point x-coordinate column.
 pub(crate) const POINT_X_COLUMN: &str = "x";
-/// Names the generated point y-coordinate column.
+/// Defines the generated point y-coordinate column.
 pub(crate) const POINT_Y_COLUMN: &str = "y";
-/// Names the generated point z-coordinate column.
+/// Defines the generated point z-coordinate column.
 pub(crate) const POINT_Z_COLUMN: &str = "z";
-/// Names the generated point m-coordinate column.
+/// Defines the generated point m-coordinate column.
 pub(crate) const POINT_M_COLUMN: &str = "m";
-/// Names the generated complex geometry geodisplay struct column.
+/// Defines the generated complex-geometry Geodisplay struct column.
 pub(crate) const GEODISPLAY_COLUMN: &str = "geodisplay";
-/// Names the XZ-order field within the geodisplay struct.
+/// Defines the XZ-order field within the Geodisplay struct.
 pub(crate) const XZ_CODE_COLUMN: &str = "xzCode";
-/// Names the optional GeoParquet 1.1 covering bbox column.
+/// Defines the optional GeoParquet 1.1 covering bbox column.
 pub(crate) const COVERING_BBOX_COLUMN: &str = "bbox";
-/// Names the temporary XZ-order scalar column.
+/// Defines the temporary XZ-order scalar column.
 pub(crate) const TEMP_XZ_CODE_COLUMN: &str = "__clustering_xzcode";
 
 const INTERNAL_PROJECTION_COLUMNS: [&str; 1] = [TEMP_XZ_CODE_COLUMN];

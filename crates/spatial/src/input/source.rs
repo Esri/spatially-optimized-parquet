@@ -19,9 +19,9 @@ use crate::geometry::GeometryColumn;
 /// Selects a zero-based contiguous range of source rows.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RowRange {
-  /// Stores the number of leading rows to skip.
+  /// Defines the number of leading rows to skip.
   start: usize,
-  /// Stores the maximum rows to read after `start`, or no limit.
+  /// Limits rows read after `start`, or leaves them unbounded.
   num: Option<usize>,
 }
 
@@ -59,9 +59,9 @@ impl RowRange {
 /// Carries source location and optional vector-layer selection.
 #[derive(Debug, Clone)]
 pub(crate) struct InputOpenOptions {
-  /// Stores a local path or HTTP URL.
+  /// Identifies a local path or HTTP URL.
   location: String,
-  /// Stores the requested vector layer for a multi-layer format.
+  /// Identifies the requested vector layer for a multi-layer format.
   layer: Option<String>,
 }
 

@@ -11,15 +11,15 @@ use crate::geoparquet::SpatialReference;
 
 use ::parquet::file::metadata::KeyValue;
 
-/// Stores values serialized into one GeoParquet geometry-column contract.
+/// Represents values serialized into one GeoParquet geometry-column contract.
 pub(crate) struct GeoMetadataInput<'a> {
-  /// Names the primary geometry column.
+  /// Identifies the primary geometry column.
   pub(crate) geometry_column: &'a str,
-  /// Stores exact geometry kinds present in the output.
+  /// Defines exact geometry kinds present in the output.
   pub(crate) geometry_types: &'a [GeometryKind],
-  /// Stores the geometry extent in output coordinates.
+  /// Defines the geometry extent in output coordinates.
   pub(crate) output_extent: Extent2D,
-  /// Stores the output coordinate reference system.
+  /// Provides the output coordinate reference system.
   pub(crate) output_spatial_reference: &'a SpatialReference,
   /// Indicates whether geometry values contain Z components.
   pub(crate) has_z: bool,
@@ -27,7 +27,7 @@ pub(crate) struct GeoMetadataInput<'a> {
   pub(crate) has_m: bool,
   /// Enables GeoParquet covering metadata.
   pub(crate) covering: bool,
-  /// Names the covering struct column.
+  /// Identifies the covering struct column.
   pub(crate) covering_column: &'a str,
 }
 

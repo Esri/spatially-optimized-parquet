@@ -12,13 +12,13 @@ pub const DEFAULT_OUTPUT_WKID: u32 = 4326;
 pub(crate) const WEB_MERCATOR_OUTPUT_WKID: u32 = 3857;
 
 #[derive(Debug, Clone, PartialEq, Default)]
-/// Stores equivalent identifiers and definitions for one coordinate reference system.
+/// Represents equivalent identifiers and definitions for one coordinate reference system.
 pub(crate) struct SpatialReference {
-  /// Stores an EPSG well-known identifier when one can be inferred.
+  /// Provides an inferred EPSG well-known identifier when available.
   pub(crate) wkid: Option<u32>,
-  /// Stores a WKT definition when available.
+  /// Provides a WKT definition when available.
   pub(crate) wkt: Option<String>,
-  /// Stores the authoritative PROJJSON definition.
+  /// Provides the authoritative PROJJSON definition.
   pub(crate) projjson: Option<Value>,
 }
 

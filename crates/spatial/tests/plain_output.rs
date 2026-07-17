@@ -66,30 +66,23 @@ fn plain_output_preserves_wkb_rows_and_passthrough_metadata() {
   let progress = Arc::new(Mutex::new(Vec::new()));
   let reported = Arc::clone(&progress);
   let result = runtime()
-    .block_on(Pipeline::run(
-      SpatialPipelineOptions::new(
-        InputOptions::new(
-          input.to_string_lossy(),
-          None,
-          RowRange::new(0, Some(2)),
-          None,
-          None,
-          None,
-        ),
-        OutputOptions::new(
-          &output,
-          OutputMode::GeoParquet,
-          None,
-          None,
-          4326,
-          false,
-          true,
-        ),
-      )
-      .with_write_reporter(move |update: WriteProgress| {
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        row_range: RowRange::new(0, Some(2)),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::GeoParquet,
+        overwrite: true,
+        ..Default::default()
+      },
+      write_reporter: Some(Arc::new(move |update: WriteProgress| {
         reported.lock().unwrap().push(update);
-      }),
-    ))
+      })),
+      ..Default::default()
+    }))
     .unwrap();
 
   assert_eq!(result.rows_expected(), 2);
@@ -165,26 +158,21 @@ fn plain_output_strips_z_and_m_independently() {
   ] {
     let output = temp.path().join(format!("{name}.parquet"));
     runtime()
-      .block_on(Pipeline::run(SpatialPipelineOptions::new(
-        InputOptions::new(
-          input.to_string_lossy(),
-          None,
-          RowRange::default(),
-          None,
-          None,
-          None,
-        ),
-        OutputOptions::new(
-          &output,
-          OutputMode::GeoParquet,
-          None,
-          None,
-          4326,
-          false,
-          true,
-        )
-        .with_stripped_dimensions(strip_z, strip_m),
-      )))
+      .block_on(Pipeline::run(SpatialPipelineOptions {
+        input: InputOptions {
+          location: input.to_string_lossy().into_owned(),
+          ..Default::default()
+        },
+        output: OutputOptions {
+          path: output.clone(),
+          mode: OutputMode::GeoParquet,
+          overwrite: true,
+          strip_z,
+          strip_m,
+          ..Default::default()
+        },
+        ..Default::default()
+      }))
       .unwrap();
 
     let dataframe = runtime()
@@ -232,25 +220,20 @@ fn plain_output_writes_covering_bbox() {
   );
 
   runtime()
-    .block_on(Pipeline::run(SpatialPipelineOptions::new(
-      InputOptions::new(
-        input.to_string_lossy(),
-        None,
-        RowRange::default(),
-        None,
-        None,
-        None,
-      ),
-      OutputOptions::new(
-        &output,
-        OutputMode::GeoParquet,
-        None,
-        None,
-        4326,
-        true,
-        true,
-      ),
-    )))
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::GeoParquet,
+        covering: true,
+        overwrite: true,
+        ..Default::default()
+      },
+      ..Default::default()
+    }))
     .unwrap();
 
   let dataframe = runtime()
@@ -296,25 +279,21 @@ fn plain_output_reprojects_selected_rows_and_covering_extent() {
   );
 
   runtime()
-    .block_on(Pipeline::run(SpatialPipelineOptions::new(
-      InputOptions::new(
-        input.to_string_lossy(),
-        None,
-        RowRange::new(1, Some(2)),
-        None,
-        None,
-        None,
-      ),
-      OutputOptions::new(
-        &output,
-        OutputMode::GeoParquet,
-        None,
-        None,
-        4326,
-        true,
-        true,
-      ),
-    )))
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        row_range: RowRange::new(1, Some(2)),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::GeoParquet,
+        covering: true,
+        overwrite: true,
+        ..Default::default()
+      },
+      ..Default::default()
+    }))
     .unwrap();
 
   let dataframe = runtime()
@@ -368,25 +347,20 @@ fn plain_output_rejects_non_wgs84_before_filesystem_mutation() {
     let input = temp.path().join("missing-input.parquet");
     let output = temp.path().join("must-not-exist.parquet");
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-      runtime().block_on(Pipeline::run(SpatialPipelineOptions::new(
-        InputOptions::new(
-          input.to_string_lossy(),
-          None,
-          RowRange::default(),
-          None,
-          None,
-          None,
-        ),
-        OutputOptions::new(
-          &output,
-          OutputMode::GeoParquet,
-          None,
-          None,
+      runtime().block_on(Pipeline::run(SpatialPipelineOptions {
+        input: InputOptions {
+          location: input.to_string_lossy().into_owned(),
+          ..Default::default()
+        },
+        output: OutputOptions {
+          path: output.clone(),
+          mode: OutputMode::GeoParquet,
           output_wkid,
-          false,
-          true,
-        ),
-      )))
+          overwrite: true,
+          ..Default::default()
+        },
+        ..Default::default()
+      }))
     }));
     assert!(panic.is_err());
     assert!(!output.exists());
@@ -419,25 +393,20 @@ fn plain_output_rejects_partition_count() {
   );
 
   let error = runtime()
-    .block_on(Pipeline::run(SpatialPipelineOptions::new(
-      InputOptions::new(
-        input.to_string_lossy(),
-        None,
-        RowRange::default(),
-        None,
-        None,
-        None,
-      ),
-      OutputOptions::new(
-        &output,
-        OutputMode::GeoParquet,
-        Some(2),
-        None,
-        4326,
-        false,
-        true,
-      ),
-    )))
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::GeoParquet,
+        file_count: Some(2),
+        overwrite: true,
+        ..Default::default()
+      },
+      ..Default::default()
+    }))
     .unwrap_err();
 
   assert!(

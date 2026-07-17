@@ -9,29 +9,29 @@ const WGS84_SEMI_MAJOR_AXIS: f64 = 6_378_137.0;
 const ROOT_GRID_SIZE: f64 = 512.0;
 const DISPLAY_DPI: f64 = 96.0;
 const WGS84_EQUATORIAL_CIRCUMFERENCE: f64 = WGS84_SEMI_MAJOR_AXIS * std::f64::consts::TAU;
-/// Stores the WGS84 angular resolution used for the first multiscale level.
+/// Defines the WGS84 angular resolution used for the first multiscale level.
 const FIRST_LEVEL_RESOLUTION: f64 = 360.0 / ROOT_GRID_SIZE;
-/// Stores the Web Mercator resolution equivalent to the first WGS84 level.
+/// Defines the Web Mercator resolution equivalent to the first WGS84 level.
 const FIRST_PROJECTED_LEVEL_RESOLUTION: f64 = WGS84_EQUATORIAL_CIRCUMFERENCE / ROOT_GRID_SIZE;
-/// Stores the WGS84 map scale denominator used for the first multiscale level.
+/// Defines the WGS84 map scale denominator used for the first multiscale level.
 const FIRST_LEVEL_SCALE: f64 =
   WGS84_EQUATORIAL_CIRCUMFERENCE * DISPLAY_DPI * 10_000.0 / (254.0 * ROOT_GRID_SIZE);
 const MAX_MULTISCALE_LEVEL: u16 = 16;
 
-/// Stores the quantization and simplification settings for one output geometry column.
+/// Defines the quantization and simplification settings for one output geometry column.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct MultiscaleLevel {
-  /// Stores the multiscale level represented by the column.
+  /// Defines the multiscale level represented by the column.
   pub(crate) level: u16,
-  /// Stores the generated Parquet column name.
+  /// Identifies the generated Parquet column.
   pub(crate) column: String,
-  /// Stores the coordinate resolution at this level.
+  /// Defines the coordinate resolution at this level.
   pub(crate) resolution: f64,
-  /// Stores the map scale denominator at this level.
+  /// Defines the map scale denominator at this level.
   pub(crate) scale: f64,
-  /// Stores the quantization transform applied before Esri PBF encoding.
+  /// Provides the quantization transform applied before Esri PBF encoding.
   pub(crate) transform: QuantizationTransform,
-  /// Stores the minimum retained vertex count for the geometry family.
+  /// Defines the minimum retained vertex count for the geometry family.
   pub(crate) min_length: usize,
 }
 

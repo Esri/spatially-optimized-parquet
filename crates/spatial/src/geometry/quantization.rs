@@ -8,12 +8,12 @@ use serde::{Deserialize, Serialize};
 
 use super::{Coord, Geometry};
 
-/// Stores per-axis scale and translation values for integer coordinate quantization.
+/// Defines per-axis scale and translation values for integer coordinate quantization.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct QuantizationTransform {
-  /// Stores the distance represented by one integer unit for x, y, z, and m.
+  /// Defines the distance represented by one integer unit for x, y, z, and m.
   pub(crate) scale: [f64; 4],
-  /// Stores the coordinate origin for x, y, z, and m.
+  /// Defines the coordinate origin for x, y, z, and m.
   pub(crate) translate: [f64; 4],
 }
 
@@ -61,7 +61,7 @@ impl ComponentValidity {
 }
 
 #[derive(Default)]
-/// Stores one simplified geometry as absolute quantized coordinates before codec encoding.
+/// Represents one simplified geometry as absolute quantized coordinates before codec encoding.
 pub(crate) struct QuantizedGeometry {
   pub(crate) coordinates: Vec<i64>,
   pub(crate) lengths: Vec<u32>,
@@ -73,11 +73,11 @@ pub(crate) struct QuantizedGeometry {
 #[derive(Debug, Clone, PartialEq)]
 /// Configures coordinate snapping and simplification before geometry codecs consume a geometry.
 pub(crate) struct QuantizationOptions {
-  /// Stores the transform that maps source coordinates onto the integer grid.
+  /// Provides the transform that maps source coordinates onto the integer grid.
   pub(crate) transform: QuantizationTransform,
-  /// Stores the maximum perpendicular XY distance removed by dimensional simplification.
+  /// Defines the maximum perpendicular XY distance removed by dimensional simplification.
   pub(crate) tolerance: f64,
-  /// Stores the minimum retained coordinate count required for a non-degenerate part.
+  /// Defines the minimum coordinate count required for a non-degenerate part.
   pub(crate) min_length: usize,
   /// Records whether output coordinates include the expected z component.
   pub(crate) has_z: bool,

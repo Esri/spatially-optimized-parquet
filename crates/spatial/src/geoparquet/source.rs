@@ -8,24 +8,24 @@ use crate::geoparquet::SpatialReference;
 use crate::geoparquet::geometry_scan::scan_geometry_metadata;
 use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata};
 
-/// Stores normalized source geometry facts required by either GeoParquet output workflow.
+/// Represents normalized source geometry facts required by either GeoParquet output workflow.
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedGeoParquetSource {
-  /// Stores the selected WKB geometry column.
+  /// Identifies the selected WKB geometry column.
   pub(crate) geometry: GeometryColumn,
-  /// Stores the exact source geometry kinds.
+  /// Defines the exact source geometry kinds.
   pub(crate) geometry_types: Vec<GeometryKind>,
-  /// Stores the selected-row extent in source coordinates.
+  /// Defines the selected-row extent in source coordinates.
   pub(crate) source_extent: Extent2D,
-  /// Stores the source coordinate reference system.
+  /// Provides the source coordinate reference system.
   pub(crate) source_spatial_reference: SpatialReference,
-  /// Stores the normalized geometry type used by plain output mechanics.
+  /// Defines the normalized geometry type used by plain output mechanics.
   pub(crate) geometry_type: GeometryType,
   /// Indicates whether source metadata declares Z values.
   pub(crate) has_z: bool,
   /// Indicates whether source metadata declares M values.
   pub(crate) has_m: bool,
-  /// Stores normalized metadata with completed geometry facts.
+  /// Represents normalized metadata with completed geometry facts.
   pub(crate) source_metadata: SourceDatasetMetadata,
 }
 

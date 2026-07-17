@@ -20,7 +20,7 @@ use crate::optimized::multiscale::TEMP_XZ_CODE_COLUMN;
 
 use super::ClusterKey;
 
-/// Stores the default maximum depth of the XZ hierarchy.
+/// Defines the default maximum depth of the XZ hierarchy.
 pub(crate) const DEFAULT_XZ_MAX_LEVEL: u32 = 20;
 
 impl ClusterKey {

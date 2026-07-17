@@ -24,7 +24,7 @@ use crate::input::{
 };
 
 #[derive(Debug, Clone)]
-/// Stores normalized GeoPackage metadata and constructs GDAL-backed batch streams.
+/// Represents normalized GeoPackage metadata and constructs GDAL-backed batch streams.
 pub(crate) struct GpkgInputSource {
   input_path: PathBuf,
   layer_name: String,

@@ -9,6 +9,8 @@ use crate::geometry::{Extent2D, QuantizationTransform};
 pub(crate) const GEODISPLAY_VERSION: &str = "0.1";
 pub(crate) const ESRI_PBF_ENCODING: &str = "esriPBF";
 pub(crate) const QUANTIZED_NATIVE_ENCODING: &str = "quantizedNative";
+const SOP_WRITER_NAME: &str = "sop";
+const SOP_WRITER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct GeodisplayMetadata {
@@ -88,25 +90,25 @@ pub(crate) struct WriterMetadata {
   pub(crate) version: String,
 }
 
-/// Stores point index values before fixed metadata fields are applied.
+/// Collects point-index inputs before fixed metadata fields are applied.
 pub(crate) struct ClusteringIndexZInput {
-  /// Names the Z-order code column.
+  /// Identifies the column containing Z-order codes.
   pub(crate) code: String,
-  /// Names the x-coordinate column.
+  /// Identifies the column containing x coordinates.
   pub(crate) x_column: String,
-  /// Names the y-coordinate column.
+  /// Identifies the column containing y coordinates.
   pub(crate) y_column: String,
-  /// Names the z-coordinate column when present.
+  /// Identifies the column containing z coordinates when present.
   pub(crate) z_column: Option<String>,
-  /// Names the m-coordinate column when present.
+  /// Identifies the column containing m coordinates when present.
   pub(crate) m_column: Option<String>,
-  /// Stores coordinate quantization precision.
+  /// Specifies the coordinate quantization precision.
   pub(crate) coordinate_precision: u32,
-  /// Stores the indexed dataset extent.
+  /// Defines the indexed dataset extent.
   pub(crate) full_extent: Extent2D,
-  /// Stores the coordinate reference authority code.
+  /// Provides the coordinate reference authority code.
   pub(crate) wkid: Option<u32>,
-  /// Stores the coordinate reference WKT.
+  /// Provides the coordinate reference WKT.
   pub(crate) wkt: Option<String>,
   /// Indicates whether coordinates contain Z values.
   pub(crate) has_z: bool,
@@ -114,21 +116,21 @@ pub(crate) struct ClusteringIndexZInput {
   pub(crate) has_m: bool,
 }
 
-/// Stores non-point index values before fixed metadata fields are applied.
+/// Collects non-point index inputs before fixed metadata fields are applied.
 pub(crate) struct ClusteringIndexXZInput {
-  /// Names the XZ-order code field.
+  /// Identifies the field containing XZ-order codes.
   pub(crate) code: String,
-  /// Names the geometry payload encoding.
+  /// Defines the geometry payload encoding.
   pub(crate) encoding: String,
-  /// Names the geodisplay geometry category.
+  /// Defines the Geodisplay geometry category.
   pub(crate) geometry_type: String,
-  /// Stores the indexed dataset extent.
+  /// Defines the indexed dataset extent.
   pub(crate) full_extent: Extent2D,
-  /// Stores the maximum XZ hierarchy depth.
+  /// Limits the XZ hierarchy depth.
   pub(crate) max_level: u32,
-  /// Stores the coordinate reference authority code.
+  /// Provides the coordinate reference authority code.
   pub(crate) wkid: Option<u32>,
-  /// Stores the coordinate reference WKT.
+  /// Provides the coordinate reference WKT.
   pub(crate) wkt: Option<String>,
   /// Indicates whether coordinates contain Z values.
   pub(crate) has_z: bool,
@@ -138,19 +140,19 @@ pub(crate) struct ClusteringIndexXZInput {
   pub(crate) levels: Vec<MultiscaleLevelInput>,
 }
 
-/// Stores one multiscale level before serialization fields are assembled.
+/// Collects one multiscale level before serialization fields are assembled.
 pub(crate) struct MultiscaleLevelInput {
-  /// Names the generated payload column.
+  /// Identifies the generated payload column.
   pub(crate) column: String,
-  /// Stores the multiscale level.
+  /// Defines the multiscale level.
   pub(crate) level: u16,
-  /// Stores the coordinate resolution.
+  /// Defines the coordinate resolution.
   pub(crate) resolution: f64,
-  /// Stores the map scale denominator.
+  /// Defines the map scale denominator.
   pub(crate) scale: f64,
-  /// Stores per-axis quantization scale values.
+  /// Defines per-axis quantization scale values.
   pub(crate) transform_scale: [f64; 4],
-  /// Stores per-axis quantization origins.
+  /// Defines per-axis quantization origins.
   pub(crate) transform_translate: [f64; 4],
 }
 
@@ -194,7 +196,7 @@ impl ClusteringIndexZ {
     Self {
       index_type: "z".to_string(),
       version: GEODISPLAY_VERSION.to_string(),
-      writer: None,
+      writer: Some(sop_writer_metadata()),
       code: input.code,
       wkid: input.wkid,
       wkt: input.wkt,
@@ -216,7 +218,7 @@ impl ClusteringIndexXZ {
     Self {
       index_type: "xz".to_string(),
       version: GEODISPLAY_VERSION.to_string(),
-      writer: None,
+      writer: Some(sop_writer_metadata()),
       code: input.code,
       wkid: input.wkid,
       wkt: input.wkt,
@@ -241,5 +243,12 @@ impl ClusteringIndexXZ {
         })
         .collect(),
     }
+  }
+}
+
+fn sop_writer_metadata() -> WriterMetadata {
+  WriterMetadata {
+    name: SOP_WRITER_NAME.to_string(),
+    version: SOP_WRITER_VERSION.to_string(),
   }
 }

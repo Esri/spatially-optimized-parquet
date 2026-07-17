@@ -21,7 +21,7 @@ use crate::optimized::multiscale::{
 
 use super::ClusterKey;
 
-/// Stores the default number of quantization bits per point coordinate axis.
+/// Defines the default number of quantization bits per point coordinate axis.
 pub(crate) const DEFAULT_COORDINATE_PRECISION: u32 = 20;
 
 impl ClusterKey {

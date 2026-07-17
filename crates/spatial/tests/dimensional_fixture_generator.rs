@@ -9,7 +9,7 @@ use arrow_schema::{DataType, Field, Schema};
 use parquet::basic::Compression;
 use prost::Message;
 use spatial::{
-  InputOptions, OutputMode, OutputOptions, Pipeline, RowRange, SpatialPipelineOptions, validate,
+  InputOptions, OutputMode, OutputOptions, Pipeline, SpatialPipelineOptions, validate,
 };
 use tokio::runtime::Runtime;
 
@@ -188,25 +188,19 @@ fn write_input_fixture(path: &Path, geometry: FixtureGeometry, layout: Coordinat
 fn optimize_fixture(input: &Path, output: &Path) {
   Runtime::new()
     .unwrap()
-    .block_on(Pipeline::run(SpatialPipelineOptions::new(
-      InputOptions::new(
-        input.to_string_lossy(),
-        None,
-        RowRange::default(),
-        None,
-        None,
-        None,
-      ),
-      OutputOptions::new(
-        output,
-        OutputMode::OptimizedGeoParquet,
-        None,
-        None,
-        4326,
-        false,
-        true,
-      ),
-    )))
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.to_path_buf(),
+        mode: OutputMode::OptimizedGeoParquet,
+        overwrite: true,
+        ..Default::default()
+      },
+      ..Default::default()
+    }))
     .unwrap();
 }
 

@@ -63,26 +63,20 @@ fn run_optimized_multiscale(
   output: &Path,
   encoding: MultiscaleEncoding,
 ) -> Result<SpatialPipelineResult> {
-  runtime().block_on(Pipeline::run(SpatialPipelineOptions::new(
-    InputOptions::new(
-      input.to_string_lossy(),
-      None,
-      RowRange::default(),
-      None,
-      None,
-      None,
-    ),
-    OutputOptions::new(
-      output,
-      OutputMode::OptimizedGeoParquet,
-      None,
-      None,
-      4326,
-      false,
-      true,
-    )
-    .with_multiscale_encoding(encoding),
-  )))
+  runtime().block_on(Pipeline::run(SpatialPipelineOptions {
+    input: InputOptions {
+      location: input.to_string_lossy().into_owned(),
+      ..Default::default()
+    },
+    output: OutputOptions {
+      path: output.to_path_buf(),
+      mode: OutputMode::OptimizedGeoParquet,
+      overwrite: true,
+      multiscale_encoding: encoding,
+      ..Default::default()
+    },
+    ..Default::default()
+  }))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -97,26 +91,26 @@ fn run_optimized_with_stripping(
   strip_z: bool,
   strip_m: bool,
 ) -> Result<SpatialPipelineResult> {
-  runtime().block_on(Pipeline::run(SpatialPipelineOptions::new(
-    InputOptions::new(
-      input.to_string_lossy(),
-      None,
+  runtime().block_on(Pipeline::run(SpatialPipelineOptions {
+    input: InputOptions {
+      location: input.to_string_lossy().into_owned(),
       row_range,
       layer,
       geometry_column,
       input_wkid,
-    ),
-    OutputOptions::new(
-      output,
-      OutputMode::OptimizedGeoParquet,
-      None,
-      None,
-      4326,
+      ..Default::default()
+    },
+    output: OutputOptions {
+      path: output.to_path_buf(),
+      mode: OutputMode::OptimizedGeoParquet,
       covering,
-      true,
-    )
-    .with_stripped_dimensions(strip_z, strip_m),
-  )))
+      overwrite: true,
+      strip_z,
+      strip_m,
+      ..Default::default()
+    },
+    ..Default::default()
+  }))
 }
 
 #[test]
@@ -152,30 +146,22 @@ fn optimized_output_sorts_points_and_writes_metadata() {
   let progress = Arc::new(Mutex::new(Vec::new()));
   let reported = Arc::clone(&progress);
   let result = runtime()
-    .block_on(Pipeline::run(
-      SpatialPipelineOptions::new(
-        InputOptions::new(
-          input.to_string_lossy(),
-          None,
-          RowRange::default(),
-          None,
-          None,
-          None,
-        ),
-        OutputOptions::new(
-          &output,
-          OutputMode::OptimizedGeoParquet,
-          None,
-          None,
-          4326,
-          false,
-          true,
-        ),
-      )
-      .with_write_reporter(move |update: WriteProgress| {
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::OptimizedGeoParquet,
+        overwrite: true,
+        ..Default::default()
+      },
+      write_reporter: Some(Arc::new(move |update: WriteProgress| {
         reported.lock().unwrap().push(update);
-      }),
-    ))
+      })),
+      ..Default::default()
+    }))
     .unwrap();
 
   assert_eq!(result.rows_expected(), 2);

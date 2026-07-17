@@ -15,13 +15,13 @@ pub(crate) enum ClusteringFamily {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-/// Stores geometry facts required by optimized clustering and encoding.
+/// Represents geometry facts required by optimized clustering and encoding.
 pub(crate) struct GeometryInfo {
-  /// Stores the selected source geometry column.
+  /// Identifies the selected source geometry column.
   pub(crate) geometry: GeometryColumn,
-  /// Stores the geometry type used by metadata and encoders.
+  /// Defines the geometry type used by metadata and encoders.
   pub(crate) ty: GeometryType,
-  /// Stores the clustering strategy family.
+  /// Defines the clustering strategy family.
   pub(crate) clustering_family: ClusteringFamily,
   /// Indicates whether source metadata declares Z values.
   pub(crate) has_z: bool,

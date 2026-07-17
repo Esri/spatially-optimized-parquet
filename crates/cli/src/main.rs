@@ -11,6 +11,7 @@
 mod write_progress;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -171,7 +172,8 @@ async fn run(cli: Cli) -> Result<()> {
   match cli.command {
     Command::Write(args) => {
       let reporter = StdoutWriteReporter::new(!args.no_progress);
-      let options = SpatialPipelineOptions::from(args).with_write_reporter(reporter.clone());
+      let mut options = SpatialPipelineOptions::from(args);
+      options.write_reporter = Some(Arc::new(reporter.clone()));
       let result = spatial::Pipeline::run(options).await?;
       reporter.finish(result.rows_written(), result.rows_expected());
       for warning in result.warnings() {
@@ -191,41 +193,36 @@ async fn run(cli: Cli) -> Result<()> {
 
 impl From<WriteCommand> for SpatialPipelineOptions {
   fn from(args: WriteCommand) -> Self {
-    let memory_limit_bytes = args.memory_limit_bytes;
-    let sort_concurrency = args.sort_concurrency;
     let output_mode = if args.no_optimization {
       OutputMode::GeoParquet
     } else {
       OutputMode::OptimizedGeoParquet
     };
-    let mut options = Self::new(
-      InputOptions::new(
-        args.input,
-        args.input_format,
-        RowRange::new(args.start.unwrap_or(0), args.num),
-        args.layer,
-        args.geometry_column,
-        args.in_sr,
-      ),
-      OutputOptions::new(
-        args.output,
-        output_mode,
-        args.output_files,
-        args.compression,
-        args.out_sr,
-        args.covering,
-        args.overwrite,
-      )
-      .with_stripped_dimensions(args.strip_z, args.strip_m)
-      .with_multiscale_encoding(args.multiscale_encoding.into()),
-    );
-    if let Some(memory_limit_bytes) = memory_limit_bytes {
-      options = options.with_memory_limit_bytes(memory_limit_bytes);
+    Self {
+      input: InputOptions {
+        location: args.input,
+        format: args.input_format,
+        row_range: RowRange::new(args.start.unwrap_or(0), args.num),
+        layer: args.layer,
+        geometry_column: args.geometry_column,
+        input_wkid: args.in_sr,
+      },
+      output: OutputOptions {
+        path: args.output,
+        mode: output_mode,
+        file_count: args.output_files,
+        compression: args.compression,
+        output_wkid: args.out_sr,
+        covering: args.covering,
+        overwrite: args.overwrite,
+        strip_z: args.strip_z,
+        strip_m: args.strip_m,
+        multiscale_encoding: args.multiscale_encoding.into(),
+      },
+      memory_limit_bytes: args.memory_limit_bytes,
+      target_partitions: args.sort_concurrency,
+      write_reporter: None,
     }
-    if let Some(sort_concurrency) = sort_concurrency {
-      options = options.with_target_partitions(sort_concurrency);
-    }
-    options
   }
 }
 

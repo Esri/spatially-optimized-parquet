@@ -81,30 +81,23 @@ fn partitioned_output_writes_sorted_range_partitions() {
   let progress = Arc::new(Mutex::new(Vec::new()));
   let reported = Arc::clone(&progress);
   let result = runtime()
-    .block_on(Pipeline::run(
-      SpatialPipelineOptions::new(
-        InputOptions::new(
-          input.to_string_lossy(),
-          None,
-          RowRange::default(),
-          None,
-          None,
-          None,
-        ),
-        OutputOptions::new(
-          &output,
-          OutputMode::OptimizedGeoParquet,
-          Some(2),
-          None,
-          4326,
-          false,
-          true,
-        ),
-      )
-      .with_write_reporter(move |update: WriteProgress| {
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::OptimizedGeoParquet,
+        file_count: Some(2),
+        overwrite: true,
+        ..Default::default()
+      },
+      write_reporter: Some(Arc::new(move |update: WriteProgress| {
         reported.lock().unwrap().push(update);
-      }),
-    ))
+      })),
+      ..Default::default()
+    }))
     .unwrap();
 
   assert_eq!(result.rows_expected(), 3);
@@ -282,26 +275,21 @@ fn assert_partitioned_multiscale_integer_leaves(
   );
 
   runtime()
-    .block_on(Pipeline::run(SpatialPipelineOptions::new(
-      InputOptions::new(
-        input.to_string_lossy(),
-        None,
-        RowRange::default(),
-        None,
-        None,
-        None,
-      ),
-      OutputOptions::new(
-        &output,
-        OutputMode::OptimizedGeoParquet,
-        Some(2),
-        None,
-        4326,
-        false,
-        true,
-      )
-      .with_multiscale_encoding(encoding),
-    )))
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::OptimizedGeoParquet,
+        file_count: Some(2),
+        overwrite: true,
+        multiscale_encoding: encoding,
+        ..Default::default()
+      },
+      ..Default::default()
+    }))
     .unwrap();
 
   validate(&output).unwrap().ensure_valid().unwrap();
@@ -338,25 +326,23 @@ fn partitioned_output_combines_row_range_covering_and_compression() {
   );
 
   let result = runtime()
-    .block_on(Pipeline::run(SpatialPipelineOptions::new(
-      InputOptions::new(
-        input.to_string_lossy(),
-        None,
-        RowRange::new(1, Some(3)),
-        None,
-        None,
-        None,
-      ),
-      OutputOptions::new(
-        &output,
-        OutputMode::OptimizedGeoParquet,
-        Some(2),
-        Some("zstd".to_string()),
-        4326,
-        true,
-        true,
-      ),
-    )))
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        row_range: RowRange::new(1, Some(3)),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::OptimizedGeoParquet,
+        file_count: Some(2),
+        compression: Some("zstd".to_string()),
+        covering: true,
+        overwrite: true,
+        ..Default::default()
+      },
+      ..Default::default()
+    }))
     .unwrap();
   assert_eq!(result.rows_expected(), 3);
   assert_eq!(result.rows_written(), 3);
@@ -424,25 +410,19 @@ fn partitioned_output_requires_overwrite_for_existing_destination() {
   std::fs::write(&stale, "stale-parquet").unwrap();
 
   let error = runtime()
-    .block_on(Pipeline::run(SpatialPipelineOptions::new(
-      InputOptions::new(
-        input.to_string_lossy(),
-        None,
-        RowRange::default(),
-        None,
-        None,
-        None,
-      ),
-      OutputOptions::new(
-        &output,
-        OutputMode::OptimizedGeoParquet,
-        Some(2),
-        None,
-        4326,
-        false,
-        false,
-      ),
-    )))
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::OptimizedGeoParquet,
+        file_count: Some(2),
+        ..Default::default()
+      },
+      ..Default::default()
+    }))
     .unwrap_err();
 
   assert!(error.to_string().contains("output path already exists"));
@@ -467,25 +447,20 @@ fn partitioned_output_replaces_existing_destination() {
   std::fs::write(output.join("stale-directory/marker.txt"), "stale").unwrap();
 
   let result = runtime()
-    .block_on(Pipeline::run(SpatialPipelineOptions::new(
-      InputOptions::new(
-        input.to_string_lossy(),
-        None,
-        RowRange::default(),
-        None,
-        None,
-        None,
-      ),
-      OutputOptions::new(
-        &output,
-        OutputMode::OptimizedGeoParquet,
-        Some(2),
-        None,
-        4326,
-        false,
-        true,
-      ),
-    )))
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::OptimizedGeoParquet,
+        file_count: Some(2),
+        overwrite: true,
+        ..Default::default()
+      },
+      ..Default::default()
+    }))
     .unwrap();
 
   assert_eq!(result.rows_written(), 3);

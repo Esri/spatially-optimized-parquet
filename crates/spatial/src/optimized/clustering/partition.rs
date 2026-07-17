@@ -13,7 +13,7 @@ use super::ClusterKey;
 const POINT_GEOMETRY_RANGE_COLUMN: &str = "z_order";
 const COMPLEX_GEOMETRY_RANGE_COLUMN: &str = "xz_order";
 
-/// Stores the minimum cluster key and percentile-derived lower range boundaries.
+/// Defines the minimum cluster key and percentile-derived lower range boundaries.
 pub(crate) struct ClusterRangeBoundaries {
   min_value: ClusterKey,
   boundaries: Vec<ClusterKey>,

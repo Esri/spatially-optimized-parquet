@@ -263,7 +263,7 @@ impl ValidationFinding {
   }
 }
 
-/// Stores the complete deterministic validation result for one dataset.
+/// Represents the complete deterministic validation result for one dataset.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidationReport {
   dataset_path: PathBuf,

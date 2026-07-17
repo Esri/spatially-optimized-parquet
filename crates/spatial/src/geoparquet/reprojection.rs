@@ -23,7 +23,7 @@ use crate::geometry::{GeometryArray, geometry_signature, to_datafusion_error};
 use crate::geoparquet::SpatialReference;
 
 #[derive(Debug, Clone)]
-/// Stores target spatial-reference metadata and the source definition for deferred reprojection.
+/// Represents target spatial-reference metadata and the source definition for deferred reprojection.
 pub(crate) struct ResolvedReprojection {
   source_definition: Option<String>,
   target_spatial_reference: SpatialReference,

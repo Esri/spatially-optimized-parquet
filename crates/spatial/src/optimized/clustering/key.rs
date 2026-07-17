@@ -1,6 +1,6 @@
 //! Defines the sortable value produced by Z and XZ clustering algorithms.
 
-/// Stores a sortable Z or XZ clustering key.
+/// Represents a sortable Z or XZ clustering key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct ClusterKey(u64);
 

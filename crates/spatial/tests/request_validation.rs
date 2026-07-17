@@ -4,9 +4,7 @@ use std::sync::Arc;
 
 use arrow_array::{BinaryArray, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema};
-use spatial::{
-  InputOptions, OutputMode, OutputOptions, Pipeline, RowRange, SpatialPipelineOptions,
-};
+use spatial::{InputOptions, OutputMode, OutputOptions, Pipeline, SpatialPipelineOptions};
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
@@ -24,25 +22,20 @@ fn optimized_output_rejects_non_wgs84_before_filesystem_mutation() {
     let input = temp.path().join("missing-input.parquet");
     let output = temp.path().join("must-not-exist.parquet");
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-      runtime().block_on(Pipeline::run(SpatialPipelineOptions::new(
-        InputOptions::new(
-          input.to_string_lossy(),
-          None,
-          RowRange::default(),
-          None,
-          None,
-          None,
-        ),
-        OutputOptions::new(
-          &output,
-          OutputMode::OptimizedGeoParquet,
-          None,
-          None,
+      runtime().block_on(Pipeline::run(SpatialPipelineOptions {
+        input: InputOptions {
+          location: input.to_string_lossy().into_owned(),
+          ..Default::default()
+        },
+        output: OutputOptions {
+          path: output.clone(),
+          mode: OutputMode::OptimizedGeoParquet,
           output_wkid,
-          false,
-          true,
-        ),
-      )))
+          overwrite: true,
+          ..Default::default()
+        },
+        ..Default::default()
+      }))
     }));
     assert!(panic.is_err());
     assert!(!output.exists());
@@ -82,42 +75,41 @@ fn output_rejects_explicit_geometry_without_crs_metadata() {
   for output_mode in [OutputMode::GeoParquet, OutputMode::OptimizedGeoParquet] {
     let output = temp.path().join(format!("{output_mode:?}.parquet"));
     let error = runtime()
-      .block_on(Pipeline::run(SpatialPipelineOptions::new(
-        InputOptions::new(
-          input.to_string_lossy(),
-          None,
-          RowRange::default(),
-          None,
-          Some("geometry".to_string()),
-          None,
-        ),
-        OutputOptions::new(&output, output_mode, None, None, 4326, false, true),
-      )))
+      .block_on(Pipeline::run(SpatialPipelineOptions {
+        input: InputOptions {
+          location: input.to_string_lossy().into_owned(),
+          geometry_column: Some("geometry".to_string()),
+          ..Default::default()
+        },
+        output: OutputOptions {
+          path: output.clone(),
+          mode: output_mode,
+          overwrite: true,
+          ..Default::default()
+        },
+        ..Default::default()
+      }))
       .unwrap_err();
     assert!(error.to_string().contains("pass --in-sr"), "{error:#}");
   }
 
   let output = temp.path().join("plain-with-crs.parquet");
   runtime()
-    .block_on(Pipeline::run(SpatialPipelineOptions::new(
-      InputOptions::new(
-        input.to_string_lossy(),
-        None,
-        RowRange::default(),
-        None,
-        Some("geometry".to_string()),
-        Some(3857),
-      ),
-      OutputOptions::new(
-        &output,
-        OutputMode::GeoParquet,
-        None,
-        None,
-        4326,
-        false,
-        true,
-      ),
-    )))
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        geometry_column: Some("geometry".to_string()),
+        input_wkid: Some(3857),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::GeoParquet,
+        overwrite: true,
+        ..Default::default()
+      },
+      ..Default::default()
+    }))
     .unwrap();
   let geo: serde_json::Value = serde_json::from_str(kv_map(&output).get("geo").unwrap()).unwrap();
   assert_eq!(
@@ -151,25 +143,25 @@ fn output_rejects_input_wkid_when_crs_metadata_exists() {
   );
 
   let error = runtime()
-    .block_on(Pipeline::run(SpatialPipelineOptions::new(
-      InputOptions::new(
-        input.to_string_lossy(),
-        None,
-        RowRange::default(),
-        None,
-        None,
-        Some(3857),
-      ),
-      OutputOptions::new(
-        &output,
-        OutputMode::OptimizedGeoParquet,
-        None,
-        None,
-        4326,
-        false,
-        true,
-      ),
-    )))
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        input_wkid: Some(3857),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::OptimizedGeoParquet,
+        overwrite: true,
+        ..Default::default()
+      },
+      ..Default::default()
+    }))
     .unwrap_err();
-  assert!(error.to_string().contains("already has CRS metadata"));
+  assert!(
+    error
+      .to_string()
+      .contains("already has spatial-reference metadata"),
+    "{error:#}"
+  );
 }

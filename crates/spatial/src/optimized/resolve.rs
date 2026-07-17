@@ -14,7 +14,7 @@ use crate::pipeline::{InputOptions, OutputOptions};
 
 use super::{ClusteringFamily, GeometryInfo};
 
-/// Stores resolved source, geometry, projection, extent, and encoding state for optimized output.
+/// Represents resolved source, geometry, projection, extent, and encoding state for optimized output.
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedOptimization {
   source_metadata: SourceDatasetMetadata,
@@ -91,12 +91,12 @@ pub(crate) async fn resolve_optimized_geoparquet(
     input,
     input_dataframe.clone(),
     source_schema,
-    input_options.geometry_column(),
-    input_options.input_wkid(),
+    input_options.geometry_column.as_deref(),
+    input_options.input_wkid,
     row_range,
   )
   .await?;
-  source.strip_dimensions(output_options.strips_z(), output_options.strips_m());
+  source.strip_dimensions(output_options.strip_z, output_options.strip_m);
   let geometry = GeometryInfo::resolve(&source)?;
   let source_projjson = source
     .source_spatial_reference
@@ -104,14 +104,14 @@ pub(crate) async fn resolve_optimized_geoparquet(
     .as_ref()
     .context("missing resolved source CRS PROJJSON")?;
   let reprojection =
-    ResolvedReprojection::from_source_projjson(source_projjson, output_options.output_wkid())?;
+    ResolvedReprojection::from_source_projjson(source_projjson, output_options.output_wkid)?;
   let normalized = NormalizedSpatialFrame::new(
     input_dataframe,
     source_schema,
     &source,
     &reprojection,
-    output_options.strips_z(),
-    output_options.strips_m(),
+    output_options.strip_z,
+    output_options.strip_m,
   )?;
   let target_extent = ExtentResolver::new(input, row_range)
     .resolve(&source, &normalized, &reprojection)
@@ -119,7 +119,7 @@ pub(crate) async fn resolve_optimized_geoparquet(
   let levels = match geometry.clustering_family {
     ClusteringFamily::PointGeometry => Vec::new(),
     ClusteringFamily::ComplexGeometry => {
-      MultiscaleLevel::create_all(output_options.output_wkid(), geometry.ty)?
+      MultiscaleLevel::create_all(output_options.output_wkid, geometry.ty)?
     }
   };
   let optimization = ResolvedOptimization::new(
@@ -128,7 +128,7 @@ pub(crate) async fn resolve_optimized_geoparquet(
     reprojection,
     target_extent,
     levels,
-    output_options.multiscale_encoding(),
+    output_options.multiscale_encoding,
   );
   Ok((normalized.dataframe(), optimization))
 }

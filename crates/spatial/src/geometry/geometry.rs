@@ -61,29 +61,29 @@ impl GeometryType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-/// Stores one coordinate in the format-neutral geometry model.
+/// Represents one coordinate in the format-neutral geometry model.
 pub(crate) struct Coord {
-  /// Stores the horizontal x coordinate.
+  /// Defines the horizontal x coordinate.
   pub(crate) x: f64,
-  /// Stores the horizontal y coordinate.
+  /// Defines the horizontal y coordinate.
   pub(crate) y: f64,
-  /// Stores the optional vertical coordinate.
+  /// Provides the optional vertical coordinate.
   pub(crate) z: Option<f64>,
-  /// Stores the optional measure coordinate.
+  /// Provides the optional measure coordinate.
   pub(crate) m: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-/// Stores one format-neutral geometry as coordinate parts.
+/// Represents one format-neutral geometry as coordinate parts.
 ///
 /// Each `lengths` entry owns the following contiguous coordinate range. Multipart and polygon
 /// boundaries therefore survive decoding without making codecs depend on a source geometry crate.
 pub(crate) struct Geometry {
-  /// Stores the normalized geometry representation.
+  /// Defines the normalized geometry representation.
   pub(crate) ty: GeometryType,
-  /// Stores coordinates in part order.
+  /// Provides coordinates in part order.
   pub(crate) coordinates: Vec<Coord>,
-  /// Stores the coordinate count for each part.
+  /// Defines the coordinate count for each part.
   pub(crate) lengths: Vec<u32>,
 }
 

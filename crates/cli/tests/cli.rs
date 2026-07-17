@@ -82,7 +82,7 @@ fn validation_runs_only_through_validate_subcommand() {
   assert!(validation.status.success());
   let validation_stdout = normalized_stdout(&validation.stdout);
   assert!(validation_stdout.contains("valid:"));
-  assert!(validation_stdout.contains("warning SOP-META-006"));
+  assert!(!validation_stdout.contains("warning SOP-META-006"));
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn write_subcommand_rejects_removed_explain() {
 }
 
 #[test]
-fn validate_subcommand_exits_zero_for_warnings() {
+fn validate_subcommand_exits_zero_for_conforming_optimized_output() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("input.parquet");
   let output = temp.path().join("output.parquet");
@@ -198,7 +198,7 @@ fn validate_subcommand_exits_zero_for_warnings() {
   assert!(result.status.success());
   let stdout = String::from_utf8_lossy(&result.stdout);
   assert!(stdout.contains("0 errors"));
-  assert!(stdout.contains("warning SOP-META-006"));
+  assert!(!stdout.contains("warning SOP-META-006"));
 }
 
 #[test]

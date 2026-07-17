@@ -18,7 +18,7 @@ use url::Url;
 use crate::geometry::{GeometryColumn, GeometryEncoding};
 use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata};
 
-/// Stores Parquet footer metadata and the location needed to construct future scans.
+/// Represents Parquet footer metadata and the location needed to construct future scans.
 pub(crate) struct ParquetInputSource {
   location: ParquetInputLocation,
   pub(super) metadata: Vec<ArrowReaderMetadata>,

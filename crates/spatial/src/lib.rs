@@ -1,15 +1,13 @@
-//! Writes and validates Spatially Optimized Parquet through stable public façades.
+//! Produces plain or spatially optimized GeoParquet from Parquet and GeoPackage sources.
 //!
-//! Construct [`SpatialPipelineOptions`] from [`InputOptions`] and [`OutputOptions`], then pass the
-//! request to [`Pipeline::run`]. [`RowRange`] selects source rows, [`SourceFormat`] overrides source
-//! detection, and [`OutputMode`] chooses plain or optimized GeoParquet output. Attach a
-//! [`WriteReporter`] when cumulative write counts are needed.
+//! Configure one conversion through [`SpatialPipelineOptions`], which combines
+//! [`InputOptions`] source policy with [`OutputOptions`] product policy, then submit it to
+//! [`Pipeline`]. [`RowRange`] selects source rows, [`SourceFormat`] overrides source detection,
+//! and [`OutputMode`] selects plain or optimized output.
 //!
-//! [`Pipeline::run`] validates the request, executes the complete DataFusion workflow, writes
-//! durable output, and automatically validates optimized output before returning
-//! [`SpatialPipelineResult`].
-//! [`validate`] inspects an existing file or recursive partitioned directory. The root façade keeps
-//! storage adapters, geometry processing, optimization algorithms, and output mechanics private.
+//! [`Pipeline::run`] returns [`SpatialPipelineResult`] after durable output completes. Attach a
+//! [`WriteReporter`] when write progress matters. [`validate`] returns a [`ValidationReport`] for
+//! an existing optimized file or partitioned dataset.
 
 #![warn(missing_docs)]
 

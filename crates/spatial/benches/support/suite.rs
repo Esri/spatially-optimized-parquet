@@ -2,9 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use criterion::{BenchmarkGroup, BenchmarkId, Criterion, SamplingMode, Throughput};
-use spatial::{
-  InputOptions, OutputMode, OutputOptions, Pipeline, RowRange, SpatialPipelineOptions,
-};
+use spatial::{InputOptions, OutputMode, OutputOptions, Pipeline, SpatialPipelineOptions};
 use tokio::runtime::Runtime;
 
 use super::{BenchmarkFixture, BenchmarkFixtureSet, remove_output};
@@ -108,25 +106,22 @@ fn benchmark_case(
         for _ in 0..iterations {
           let output = output_path(output_root, case, output_index);
           output_index += 1;
-          let options = SpatialPipelineOptions::new(
-            InputOptions::new(
-              fixture.path.to_string_lossy().into_owned(),
-              None,
-              RowRange::default(),
-              None,
-              None,
-              None,
-            ),
-            OutputOptions::new(
-              &output,
-              case.mode,
-              case.output_files,
-              Some("snappy".to_string()),
-              4326,
-              case.covering,
-              true,
-            ),
-          );
+          let options = SpatialPipelineOptions {
+            input: InputOptions {
+              location: fixture.path.to_string_lossy().into_owned(),
+              ..Default::default()
+            },
+            output: OutputOptions {
+              path: output.clone(),
+              mode: case.mode,
+              file_count: case.output_files,
+              compression: Some("snappy".to_string()),
+              covering: case.covering,
+              overwrite: true,
+              ..Default::default()
+            },
+            ..Default::default()
+          };
           let started = Instant::now();
           runtime
             .block_on(Pipeline::run(options))

@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
-/// Stores deduplicated warning messages for one pipeline execution.
+/// Collects deduplicated warning messages for one pipeline execution.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct PipelineWarnings {
   messages: Arc<Mutex<BTreeSet<String>>>,

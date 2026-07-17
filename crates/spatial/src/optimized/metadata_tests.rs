@@ -168,6 +168,10 @@ fn point_geometry_geodisplay_metadata_serializes_z_clustering() {
       "index": {
         "type": "z",
         "version": "0.1",
+        "writer": {
+          "name": "sop",
+          "version": env!("CARGO_PKG_VERSION")
+        },
         "code": "zCode",
         "wkid": 4326,
         "xColumn": "x",
@@ -231,6 +235,10 @@ fn xz_geodisplay_metadata_serializes_multiscale_clustering() {
       "index": {
         "type": "xz",
         "version": "0.1",
+        "writer": {
+          "name": "sop",
+          "version": env!("CARGO_PKG_VERSION")
+        },
         "code": "xzCode",
         "wkid": 4326,
         "encoding": "esriPBF",

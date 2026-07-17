@@ -766,25 +766,19 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
       assert_eq!(sink.coordinates[0].m, dimension_case.has_m.then_some(4.0));
 
       let output = temp.path().join("optimized.parquet");
-      let optimization_result = runtime().block_on(Pipeline::run(SpatialPipelineOptions::new(
-        InputOptions::new(
-          path.to_string_lossy(),
-          None,
-          RowRange::default(),
-          None,
-          None,
-          None,
-        ),
-        OutputOptions::new(
-          &output,
-          OutputMode::OptimizedGeoParquet,
-          None,
-          None,
-          4326,
-          false,
-          true,
-        ),
-      )));
+      let optimization_result = runtime().block_on(Pipeline::run(SpatialPipelineOptions {
+        input: InputOptions {
+          location: path.to_string_lossy().into_owned(),
+          ..Default::default()
+        },
+        output: OutputOptions {
+          path: output.clone(),
+          mode: OutputMode::OptimizedGeoParquet,
+          overwrite: true,
+          ..Default::default()
+        },
+        ..Default::default()
+      }));
       if !geometry_case.supports_optimized_output {
         let error = optimization_result.unwrap_err();
         assert!(
