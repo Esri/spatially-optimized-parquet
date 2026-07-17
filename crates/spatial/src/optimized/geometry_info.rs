@@ -26,7 +26,7 @@ pub(super) fn clustering_family(ty: GeometryType) -> ClusteringFamily {
 
 #[derive(Debug, Clone, PartialEq)]
 /// Stores geometry facts required by optimized clustering and encoding.
-pub(super) struct OptimizedGeometry {
+pub(super) struct GeometryInfo {
   /// Stores the selected source geometry column.
   pub(super) geometry_spec: GeometrySpec,
   /// Stores the geometry type used by metadata and encoders.
@@ -39,7 +39,7 @@ pub(super) struct OptimizedGeometry {
   pub(super) has_m: bool,
 }
 
-impl OptimizedGeometry {
+impl GeometryInfo {
   /// Resolve optimized geometry from normalized source geometry facts.
   pub(super) fn resolve(source: &ResolvedGeoParquetSource) -> Result<Self> {
     let ty = source.geometry_type;

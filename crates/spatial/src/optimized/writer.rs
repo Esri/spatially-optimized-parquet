@@ -9,7 +9,7 @@ use crate::input::{InputSource, RowRange};
 use crate::optimized::clustering::{
   cluster_key_column, cluster_partition_column, validate_cluster_partition_column,
 };
-use crate::optimized::extent::TargetExtentResolver;
+use crate::optimized::extent_resolve::ExtentResolver;
 use crate::optimized::metadata::parquet_metadata;
 use crate::optimized::multiscale::create_multiscale_level_specs;
 use crate::optimized::projection::{
@@ -17,7 +17,7 @@ use crate::optimized::projection::{
 };
 use crate::optimized::range_boundaries::compute_cluster_range_boundaries;
 use crate::optimized::write::{PartitionedOutputWriter, write_optimized_single_file};
-use crate::optimized::{ClusteringFamily, OptimizedGeometry, ResolvedOptimization};
+use crate::optimized::{ClusteringFamily, GeometryInfo, ResolvedOptimization};
 use crate::output::{OutputLayout, ReprojectionSpec};
 use crate::pipeline::{OutputExecutionOptions, PipelineWarningStore, SharedWriteReporter};
 
@@ -83,7 +83,7 @@ impl<'a> OptimizedGeoParquetWriter<'a, PendingWriterState<'a>> {
     )
     .await?;
     source.strip_dimensions(options.strip_z, options.strip_m);
-    let geometry = OptimizedGeometry::resolve(&source)?;
+    let geometry = GeometryInfo::resolve(&source)?;
     let source_projjson = source
       .source_spatial_reference
       .projjson
@@ -99,7 +99,7 @@ impl<'a> OptimizedGeoParquetWriter<'a, PendingWriterState<'a>> {
       options.strip_z,
       options.strip_m,
     )?;
-    let target_extent = TargetExtentResolver::new(self.state.input, self.state.row_range)
+    let target_extent = ExtentResolver::new(self.state.input, self.state.row_range)
       .resolve(&source, &normalized, &reprojection)
       .await?;
     let levels = match geometry.clustering_family {

@@ -1,3 +1,8 @@
+//! Adapts local and HTTP Parquet locations into footer-backed metadata and DataFusion scans.
+//!
+//! Retains file metadata and location state at open time, then registers HTTP object stores or
+//! reads local paths when DataFusion executes the selected row range.
+
 use std::sync::Arc;
 
 use anyhow::{Context, Result};

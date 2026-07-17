@@ -6,7 +6,7 @@ use datafusion::dataframe::DataFrame;
 
 use crate::input::{InputSource, RowRange};
 use crate::optimized::COVERING_BBOX_COLUMN;
-use crate::optimized::TargetExtentResolver;
+use crate::optimized::ExtentResolver;
 use crate::output::{
   GeoMetadataInput, OutputLayout, ParquetOutputWriter, ParquetWriterOptions, ReprojectionSpec,
   geoparquet_metadata,
@@ -86,7 +86,7 @@ impl<'a> GeoParquetWriter<'a> {
       strip_z,
       strip_m,
     )?;
-    let target_extent = TargetExtentResolver::new(self.input, self.row_range)
+    let target_extent = ExtentResolver::new(self.input, self.row_range)
       .resolve(&source, &normalized, &reprojection)
       .await?;
     let dataframe = plain_output_dataframe(

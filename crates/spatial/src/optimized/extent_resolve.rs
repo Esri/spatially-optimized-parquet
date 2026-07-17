@@ -17,12 +17,12 @@ const EXTENT_XMAX_COLUMN: &str = "__extent_xmax";
 const EXTENT_YMAX_COLUMN: &str = "__extent_ymax";
 
 /// Resolves one selected dataset extent in the output coordinate reference system.
-pub(crate) struct TargetExtentResolver<'a> {
+pub(crate) struct ExtentResolver<'a> {
   input: &'a dyn InputSource,
   row_range: RowRange,
 }
 
-impl<'a> TargetExtentResolver<'a> {
+impl<'a> ExtentResolver<'a> {
   /// Construct target-extent resolution for one prepared input selection.
   pub(crate) fn new(input: &'a dyn InputSource, row_range: RowRange) -> Self {
     Self { input, row_range }

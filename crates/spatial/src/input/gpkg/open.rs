@@ -1,3 +1,7 @@
+//! Opens local GeoPackage datasets and layers through GDAL's restricted vector interface.
+//!
+//! Restricts GDAL to the GeoPackage driver and uses immutable, no-lock access for read-only scans.
+
 use std::path::Path;
 
 use anyhow::{Context, Result};

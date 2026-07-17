@@ -1,3 +1,8 @@
+//! Adapts one GeoPackage layer into normalized source metadata and a DataFusion table.
+//!
+//! Captures GDAL-derived layer state at open time, then creates partitioned Arrow streams when
+//! DataFusion executes the selected row range.
+
 use std::path::PathBuf;
 use std::sync::Arc;
 

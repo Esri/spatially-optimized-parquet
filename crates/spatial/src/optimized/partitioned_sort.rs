@@ -151,7 +151,7 @@ mod tests {
   use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
 
   use crate::optimized::clustering::cluster_partition_column;
-  use crate::optimized::geometry::ClusteringFamily;
+  use crate::optimized::geometry_info::ClusteringFamily;
   use crate::optimized::multiscale::POINT_Z_CODE_COLUMN;
   use crate::session::DataFusionSession;
 

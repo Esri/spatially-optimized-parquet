@@ -13,7 +13,7 @@ use crate::optimized::multiscale::{
 use crate::optimized::multiscale::{
   complex_geometry_geodisplay_expr, point_geometry_geodisplay_expr,
 };
-use crate::optimized::{ClusteringFamily, OptimizedGeometry, ResolvedOptimization};
+use crate::optimized::{ClusteringFamily, GeometryInfo, ResolvedOptimization};
 use anyhow::Result;
 use datafusion::dataframe::DataFrame;
 use datafusion::functions::core::expr_ext::FieldAccessor;
@@ -86,7 +86,7 @@ pub(super) fn partitioned_projection(
 
 fn narrow_helper_projection(
   dataframe: DataFrame,
-  geometry: &OptimizedGeometry,
+  geometry: &GeometryInfo,
 ) -> Result<DataFrame> {
   let projected = dataframe.select(vec![
     ident(&geometry.geometry_spec.column),
@@ -144,7 +144,7 @@ fn output_projection_expressions(
 fn base_helper_projection(
   dataframe: DataFrame,
   source_schema: &arrow_schema::Schema,
-  geometry: &OptimizedGeometry,
+  geometry: &GeometryInfo,
 ) -> Result<DataFrame> {
   let projected = dataframe.select(
     source_schema
@@ -160,7 +160,7 @@ fn base_helper_projection(
 
 fn add_geometry_helper_columns_dataframe(
   mut projected: DataFrame,
-  geometry: &OptimizedGeometry,
+  geometry: &GeometryInfo,
 ) -> Result<DataFrame> {
   match geometry.clustering_family {
     ClusteringFamily::PointGeometry => {

@@ -1,3 +1,8 @@
+//! Partitions GeoPackage layer scans into independently executable DataFusion streams.
+//!
+//! Resolves SQLite rowid boundaries for each requested row range, then falls back to one
+//! contiguous scan when boundary discovery cannot preserve that partitioning.
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

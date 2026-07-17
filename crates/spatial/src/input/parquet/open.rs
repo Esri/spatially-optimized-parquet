@@ -1,3 +1,8 @@
+//! Opens local Parquet datasets and direct HTTP Parquet objects as input sources.
+//!
+//! Discovers local files or loads remote footer metadata so later scans can share one
+//! footer-backed source description.
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

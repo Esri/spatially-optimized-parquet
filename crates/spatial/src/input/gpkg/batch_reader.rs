@@ -1,3 +1,8 @@
+//! Streams GeoPackage layers from GDAL into normalized Arrow batches for DataFusion.
+//!
+//! Retains each GDAL layer for its Arrow stream lifetime while normalizing provider-specific
+//! geometry field names and applying requested row limits.
+
 use std::path::Path;
 use std::sync::Arc;
 

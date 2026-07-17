@@ -5,13 +5,13 @@ use crate::input::SourceDatasetMetadata;
 use crate::optimized::multiscale::MultiscaleLevelSpec;
 use crate::output::{MultiscaleEncoding, ReprojectionSpec};
 
-use super::geometry::OptimizedGeometry;
+use super::geometry_info::GeometryInfo;
 
 #[derive(Debug, Clone)]
 /// Stores resolved source, geometry, projection, extent, and encoding state for optimized output.
 pub(super) struct ResolvedOptimization {
   source_metadata: SourceDatasetMetadata,
-  geometry: OptimizedGeometry,
+  geometry: GeometryInfo,
   reprojection: ReprojectionSpec,
   target_extent: Extent2D,
   levels: Vec<MultiscaleLevelSpec>,
@@ -21,7 +21,7 @@ pub(super) struct ResolvedOptimization {
 impl ResolvedOptimization {
   pub(super) fn new(
     source_metadata: SourceDatasetMetadata,
-    geometry: OptimizedGeometry,
+    geometry: GeometryInfo,
     reprojection: ReprojectionSpec,
     target_extent: Extent2D,
     levels: Vec<MultiscaleLevelSpec>,
@@ -41,7 +41,7 @@ impl ResolvedOptimization {
     &self.source_metadata
   }
 
-  pub(super) fn geometry(&self) -> &OptimizedGeometry {
+  pub(super) fn geometry(&self) -> &GeometryInfo {
     &self.geometry
   }
 
