@@ -586,23 +586,6 @@ fn write_iso_header(
   Ok(())
 }
 
-fn write_stripped_header(
-  output: &mut Vec<u8>,
-  base_type: u32,
-  has_z: bool,
-  has_m: bool,
-) -> Result<()> {
-  let dimension_offset = match (has_z, has_m) {
-    (false, false) => 0,
-    (true, false) => 1_000,
-    (false, true) => 2_000,
-    (true, true) => 3_000,
-  };
-  output.push(1);
-  output.extend_from_slice(&(base_type + dimension_offset).to_le_bytes());
-  Ok(())
-}
-
 fn write_count(output: &mut Vec<u8>, count: usize) -> Result<()> {
   output.extend_from_slice(
     &u32::try_from(count)
@@ -643,105 +626,6 @@ fn require_kind(actual: GeometryKind, expected: GeometryKind, context: &str) -> 
     bail!("{context} must be {expected:?}, found {actual:?}");
   }
   Ok(())
-}
-
-/// Write normalized geometry as deterministic little-endian WKB.
-///
-/// Polylines with one part encode as `LineString` and multiple parts encode as
-/// `MultiLineString`. Polygon parts encode as rings. The normalized model deliberately maps
-/// multipolygons to polygon rings because optimized output does not retain polygon grouping.
-impl Geometry {
-  pub(crate) fn to_wkb(&self) -> Result<Vec<u8>> {
-    let has_z = self
-      .coordinates
-      .iter()
-      .all(|coordinate| coordinate.z.is_some());
-    let has_m = self
-      .coordinates
-      .iter()
-      .all(|coordinate| coordinate.m.is_some());
-    if self
-      .coordinates
-      .iter()
-      .any(|coordinate| coordinate.z.is_some() != has_z)
-      || self
-        .coordinates
-        .iter()
-        .any(|coordinate| coordinate.m.is_some() != has_m)
-    {
-      bail!("WKB output requires consistent Z and M dimensions");
-    }
-
-    let mut output = Vec::new();
-    match self.ty {
-      GeometryType::Point => {
-        if self.lengths != [1] {
-          bail!("point geometry must contain exactly one coordinate");
-        }
-        write_stripped_header(&mut output, 1, has_z, has_m)?;
-        Self::write_wkb_coordinate(&mut output, self.coordinates[0], has_z, has_m);
-      }
-      GeometryType::MultiPoint => {
-        write_stripped_header(&mut output, 4, has_z, has_m)?;
-        write_count(&mut output, self.coordinates.len())?;
-        for coordinate in &self.coordinates {
-          write_stripped_header(&mut output, 1, has_z, has_m)?;
-          Self::write_wkb_coordinate(&mut output, *coordinate, has_z, has_m);
-        }
-      }
-      GeometryType::Polyline => {
-        if self.lengths.len() == 1 {
-          write_stripped_header(&mut output, 2, has_z, has_m)?;
-          self.write_wkb_part(&mut output, 0, has_z, has_m)?;
-        } else {
-          write_stripped_header(&mut output, 5, has_z, has_m)?;
-          write_count(&mut output, self.lengths.len())?;
-          for part_index in 0..self.lengths.len() {
-            write_stripped_header(&mut output, 2, has_z, has_m)?;
-            self.write_wkb_part(&mut output, part_index, has_z, has_m)?;
-          }
-        }
-      }
-      GeometryType::Polygon => {
-        write_stripped_header(&mut output, 3, has_z, has_m)?;
-        write_count(&mut output, self.lengths.len())?;
-        for part_index in 0..self.lengths.len() {
-          self.write_wkb_part(&mut output, part_index, has_z, has_m)?;
-        }
-      }
-    }
-    Ok(output)
-  }
-
-  fn write_wkb_part(
-    &self,
-    output: &mut Vec<u8>,
-    part_index: usize,
-    has_z: bool,
-    has_m: bool,
-  ) -> Result<()> {
-    let start = self.lengths[..part_index]
-      .iter()
-      .map(|length| *length as usize)
-      .sum::<usize>();
-    let length = self.lengths[part_index] as usize;
-    write_count(output, length)?;
-    for coordinate in &self.coordinates[start..start + length] {
-      Self::write_wkb_coordinate(output, *coordinate, has_z, has_m);
-    }
-    Ok(())
-  }
-
-  fn write_wkb_coordinate(output: &mut Vec<u8>, coordinate: Coord, has_z: bool, has_m: bool) {
-    output.extend_from_slice(&coordinate.x.to_le_bytes());
-    output.extend_from_slice(&coordinate.y.to_le_bytes());
-    if has_z {
-      output.extend_from_slice(&coordinate.z.expect("validated Z dimension").to_le_bytes());
-    }
-    if has_m {
-      output.extend_from_slice(&coordinate.m.expect("validated M dimension").to_le_bytes());
-    }
-  }
 }
 
 #[cfg(test)]
@@ -1041,33 +925,6 @@ mod tests {
     assert_eq!(geometry.lengths, [2]);
     assert_eq!(geometry.coordinates[1].x, 2.0);
     assert_eq!(geometry.coordinates[1].y, 3.0);
-  }
-
-  #[test]
-  fn writes_format_neutral_geometry_as_wkb() {
-    let geometry = Geometry::new(
-      GeometryType::Polyline,
-      vec![
-        Coord {
-          x: 0.0,
-          y: 1.0,
-          z: None,
-          m: None,
-        },
-        Coord {
-          x: 2.0,
-          y: 3.0,
-          z: None,
-          m: None,
-        },
-      ],
-      vec![2],
-    )
-    .unwrap();
-
-    let bytes = geometry.to_wkb().unwrap();
-
-    assert_eq!(Geometry::from_wkb(&bytes).unwrap(), geometry);
   }
 
   #[test]

@@ -58,11 +58,6 @@ impl GeometryType {
       Self::Polygon => "polygon",
     }
   }
-
-  /// Return whether this representation uses point-specific processing.
-  pub(crate) fn is_point(self) -> bool {
-    self == Self::Point
-  }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
