@@ -1,4 +1,4 @@
-//! Extends shared GeoParquet metadata with SOP geodisplay metadata.
+//! Extends GeoParquet metadata with spatially optimized output metadata.
 
 use anyhow::Result;
 use parquet::file::metadata::KeyValue;
@@ -14,6 +14,14 @@ use crate::output::{
   GeoMetadataInput, MultiscaleLevelInput, XzClusteringIndexInput, ZClusteringIndexInput,
   optimized_point_metadata, optimized_xz_metadata,
 };
+
+/// Serialize GeoParquet and Geodisplay metadata for optimized output.
+pub(super) fn parquet_metadata(
+  optimization: &ResolvedOptimization,
+  covering: bool,
+) -> Result<Vec<KeyValue>> {
+  optimization.parquet_metadata(covering)
+}
 
 impl ResolvedOptimization {
   /// Serialize GeoParquet and geodisplay metadata for optimized output.
