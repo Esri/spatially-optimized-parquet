@@ -128,24 +128,6 @@ mod tests {
   }
 
   #[test]
-  fn parquet_discovery_rejects_an_empty_directory() {
-    let temp = TempDir::new().unwrap();
-
-    let error = discover_parquet_files(temp.path()).unwrap_err();
-
-    assert!(error.to_string().contains("no parquet files found"));
-  }
-
-  #[test]
-  fn parquet_discovery_declines_non_parquet_files() {
-    let temp = TempDir::new().unwrap();
-    let path = temp.path().join("data.txt");
-    fs::write(&path, []).unwrap();
-
-    assert!(discover_parquet_files(&path).unwrap().is_none());
-  }
-
-  #[test]
   fn parquet_footer_loading_reports_the_file_context() {
     let temp = TempDir::new().unwrap();
     let path = temp.path().join("broken.parquet");

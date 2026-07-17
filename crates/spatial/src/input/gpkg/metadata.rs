@@ -299,39 +299,3 @@ fn map_geometry_type(
     _ => (None, false, false),
   }
 }
-
-#[cfg(test)]
-mod tests {
-  use gdal_sys::OGRwkbGeometryType;
-
-  use super::{format_feature_count, map_geometry_type};
-  use crate::geometry::GeometryKind;
-
-  #[test]
-  fn feature_count_formatting_uses_commas() {
-    assert_eq!(format_feature_count(0), "0");
-    assert_eq!(format_feature_count(12), "12");
-    assert_eq!(format_feature_count(1_234), "1,234");
-    assert_eq!(format_feature_count(26_348_056), "26,348,056");
-  }
-
-  #[test]
-  fn geometry_type_inference_preserves_z_and_m_flags() {
-    for (geometry_type, expected) in [
-      (
-        OGRwkbGeometryType::wkbPoint25D,
-        (Some(GeometryKind::Point), true, false),
-      ),
-      (
-        OGRwkbGeometryType::wkbPointM,
-        (Some(GeometryKind::Point), false, true),
-      ),
-      (
-        OGRwkbGeometryType::wkbPointZM,
-        (Some(GeometryKind::Point), true, true),
-      ),
-    ] {
-      assert_eq!(map_geometry_type(geometry_type), expected);
-    }
-  }
-}

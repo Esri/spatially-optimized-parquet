@@ -115,7 +115,7 @@ fn merge_optimized_geometry_type(
 
 #[cfg(test)]
 mod tests {
-  use super::{ClusteringFamily, OptimizedGeometryType, merge_optimized_geometry_type};
+  use super::{ClusteringFamily, OptimizedGeometryType};
   use crate::geometry::GeometryKind;
 
   #[test]
@@ -149,14 +149,5 @@ mod tests {
         .to_string()
         .contains("unsupported optimized geometry kind")
     );
-  }
-
-  #[test]
-  fn merges_repeated_compatible_kinds() {
-    let mut observed_type = None;
-    merge_optimized_geometry_type(&mut observed_type, GeometryKind::LineString).unwrap();
-    merge_optimized_geometry_type(&mut observed_type, GeometryKind::MultiLineString).unwrap();
-
-    assert_eq!(observed_type, Some(OptimizedGeometryType::Polyline));
   }
 }

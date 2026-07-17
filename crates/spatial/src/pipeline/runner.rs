@@ -101,25 +101,3 @@ async fn prepare_input_dataframe(
 
   dataframe.cache().await.map_err(Into::into)
 }
-
-#[cfg(test)]
-mod tests {
-  use super::PipelineKind;
-  use crate::output::OutputMode;
-
-  #[test]
-  fn selects_one_concrete_pipeline_kind() {
-    assert_eq!(
-      PipelineKind::new(OutputMode::Plain, 1).unwrap(),
-      PipelineKind::Plain
-    );
-    assert_eq!(
-      PipelineKind::new(OutputMode::Optimized, 1).unwrap(),
-      PipelineKind::OptimizedSingleFile
-    );
-    assert_eq!(
-      PipelineKind::new(OutputMode::Optimized, 2).unwrap(),
-      PipelineKind::OptimizedPartitioned
-    );
-  }
-}

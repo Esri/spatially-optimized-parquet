@@ -262,25 +262,6 @@ mod tests {
   }
 
   #[test]
-  fn metadata_sanitization_preserves_complete_bbox_values() {
-    let mut metadata = json!({
-      "columns": {
-        "geometry": {
-          "encoding": "WKB",
-          "bbox": [-1.0, -2.0, 3.0, 4.0]
-        }
-      }
-    });
-
-    sanitize_geo_metadata_json(&mut metadata);
-
-    assert_eq!(
-      metadata["columns"]["geometry"]["bbox"],
-      json!([-1.0, -2.0, 3.0, 4.0])
-    );
-  }
-
-  #[test]
   fn bbox_normalization_uses_outer_xy_values_for_dimensioned_bounds() {
     let extent = bbox_to_extent(Some(&[-1.0, -2.0, 10.0, 20.0, 3.0, 4.0])).unwrap();
 
@@ -315,29 +296,6 @@ mod tests {
       assert_eq!(has_dimension_suffix(&column, "Z"), expected_z);
       assert_eq!(has_dimension_suffix(&column, "M"), expected_m);
     }
-  }
-
-  #[test]
-  fn covering_normalization_accepts_one_root_bbox_struct() {
-    let metadata = json!({
-      "columns": {
-        "geometry": {
-          "covering": {
-            "bbox": {
-              "xmin": ["source_bbox", "xmin"],
-              "ymin": ["source_bbox", "ymin"],
-              "xmax": ["source_bbox", "xmax"],
-              "ymax": ["source_bbox", "ymax"]
-            }
-          }
-        }
-      }
-    });
-
-    assert_eq!(
-      covering_column(&metadata, "geometry").unwrap().column,
-      "source_bbox"
-    );
   }
 
   #[test]

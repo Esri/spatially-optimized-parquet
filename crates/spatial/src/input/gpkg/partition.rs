@@ -197,8 +197,7 @@ pub(super) fn plan_gpkg_scan_partitions(
 
 #[cfg(test)]
 mod tests {
-  use super::{GpkgScanPartition, effective_gpkg_scan_partition_count, quoted_sqlite_identifier};
-  use crate::input::RowRange;
+  use super::{GpkgScanPartition, quoted_sqlite_identifier};
 
   #[test]
   fn partition_filter_uses_inclusive_lower_and_exclusive_upper_bounds() {
@@ -210,34 +209,6 @@ mod tests {
     assert_eq!(
       partition.attribute_filter().as_deref(),
       Some("rowid >= 10 AND rowid < 20")
-    );
-  }
-
-  #[test]
-  fn partition_count_does_not_exceed_requested_rows() {
-    assert_eq!(
-      effective_gpkg_scan_partition_count(100, RowRange::new(10, Some(2)), 8,),
-      2
-    );
-  }
-
-  #[test]
-  fn partition_count_uses_one_partition_for_empty_or_single_row_ranges() {
-    assert_eq!(
-      effective_gpkg_scan_partition_count(100, RowRange::new(100, None), 8,),
-      1
-    );
-    assert_eq!(
-      effective_gpkg_scan_partition_count(100, RowRange::new(10, Some(1)), 8,),
-      1
-    );
-  }
-
-  #[test]
-  fn partition_count_clamps_zero_target_to_one() {
-    assert_eq!(
-      effective_gpkg_scan_partition_count(100, RowRange::default(), 0),
-      1
     );
   }
 

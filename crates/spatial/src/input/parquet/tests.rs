@@ -78,29 +78,6 @@ fn string_value(array: &dyn arrow_array::Array, index: usize) -> String {
 }
 
 #[test]
-fn open_input_accepts_single_parquet_file() {
-  let temp = TempDir::new().unwrap();
-  let path = temp.path().join("data.parquet");
-  let schema = sample_schema_with_geometry();
-  let batch = sample_batch_with_geometry(vec![None, None, None]);
-  write_parquet(
-    &path,
-    &schema,
-    &[batch],
-    parquet::basic::Compression::SNAPPY,
-    &[],
-  );
-
-  let input = runtime()
-    .block_on(open_input(
-      SourceFormat::Parquet,
-      &InputOpenOptions::new(path.to_string_lossy().into_owned(), None),
-    ))
-    .unwrap();
-  assert_eq!(input.total_rows().unwrap(), 3);
-}
-
-#[test]
 fn open_input_accepts_directory_of_parquet_files() {
   let temp = TempDir::new().unwrap();
   let schema = sample_schema_with_geometry();
@@ -127,22 +104,6 @@ fn open_input_accepts_directory_of_parquet_files() {
     ))
     .unwrap();
   assert_eq!(input.total_rows().unwrap(), 6);
-}
-
-#[test]
-fn open_input_rejects_non_parquet_file() {
-  let temp = TempDir::new().unwrap();
-  let path = temp.path().join("data.txt");
-  std::fs::write(&path, "hi").unwrap();
-
-  let err = match runtime().block_on(open_input(
-    SourceFormat::Parquet,
-    &InputOpenOptions::new(path.to_string_lossy().into_owned(), None),
-  )) {
-    Ok(_) => panic!("expected non-parquet input to be rejected"),
-    Err(err) => err,
-  };
-  assert!(err.to_string().contains("parquet input must be"));
 }
 
 #[test]

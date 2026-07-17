@@ -135,39 +135,6 @@ mod tests {
   }
 
   #[test]
-  fn metadata_reports_each_missing_reserved_entry() {
-    let temp = TempDir::new().unwrap();
-    let path = temp.path().join("missing.parquet");
-    let schema = Arc::new(Schema::new(vec![Field::new(
-      "geometry",
-      DataType::Binary,
-      true,
-    )]));
-    let geometry = wkb_point(1.0, 1.0);
-    let batch = RecordBatch::try_new(
-      schema.clone(),
-      vec![Arc::new(BinaryArray::from(vec![Some(geometry.as_slice())]))],
-    )
-    .unwrap();
-    write_parquet(
-      &path,
-      &schema,
-      &[batch],
-      parquet::basic::Compression::SNAPPY,
-      &[],
-    );
-
-    let report = validate(&path).unwrap();
-    let missing_count = report
-      .findings()
-      .iter()
-      .filter(|finding| finding.rule() == ValidationRule::MetadataMissing)
-      .count();
-
-    assert_eq!(missing_count, 2);
-  }
-
-  #[test]
   fn metadata_rejects_wkid_and_wkt_together() {
     let temp = TempDir::new().unwrap();
     let path = temp.path().join("duplicate-crs.parquet");

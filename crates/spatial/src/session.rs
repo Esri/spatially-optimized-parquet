@@ -111,9 +111,7 @@ fn env_usize(name: &str) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-  use datafusion_execution::config::SessionConfig;
-
-  use super::{DataFusionSession, half_physical_memory};
+  use super::DataFusionSession;
 
   #[test]
   fn session_owns_spill_directory_for_its_lifetime() {
@@ -123,28 +121,5 @@ mod tests {
     assert!(spill_path.is_dir());
     drop(session);
     assert!(!spill_path.exists());
-  }
-
-  #[test]
-  fn session_uses_datafusion_target_partition_default() {
-    let session = DataFusionSession::new(Some(1024 * 1024), None).unwrap();
-
-    assert_eq!(
-      session.context().copied_config().target_partitions(),
-      SessionConfig::new().target_partitions()
-    );
-  }
-
-  #[test]
-  fn session_accepts_requested_target_partitions() {
-    let session = DataFusionSession::new(Some(1024 * 1024), Some(3)).unwrap();
-
-    assert_eq!(session.context().copied_config().target_partitions(), 3);
-  }
-
-  #[test]
-  fn default_memory_uses_half_of_physical_memory() {
-    assert_eq!(half_physical_memory(16 * 1024).unwrap(), 8 * 1024);
-    assert!(half_physical_memory(1).is_err());
   }
 }

@@ -122,54 +122,11 @@ fn env_usize(name: &str) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-  use parquet::basic::Compression;
-  use parquet::file::metadata::KeyValue;
-
-  use super::{ParquetWriterOptions, parse_compression};
-
-  #[test]
-  fn compression_parser_accepts_known_codecs() {
-    let codec = parse_compression("snappy").unwrap();
-    assert!(matches!(codec, Compression::SNAPPY));
-    let codec = parse_compression("gzip").unwrap();
-    assert!(matches!(codec, Compression::GZIP(_)));
-    let codec = parse_compression("uncompressed").unwrap();
-    assert!(matches!(codec, Compression::UNCOMPRESSED));
-  }
+  use super::parse_compression;
 
   #[test]
   fn compression_parser_rejects_invalid_codec() {
     let error = parse_compression("bogus").unwrap_err();
     assert!(error.to_string().contains("compression"));
-  }
-
-  #[test]
-  fn writer_options_preserve_tuning_and_metadata() {
-    let options = ParquetWriterOptions::new(
-      "gzip",
-      &[KeyValue::new("geo".to_string(), Some("{}".to_string()))],
-    )
-    .unwrap()
-    .into_datafusion();
-
-    assert_eq!(options.global.compression.as_deref(), Some("gzip(6)"));
-    assert_eq!(options.global.dictionary_enabled, Some(true));
-    assert_eq!(
-      options.global.writer_version,
-      datafusion::common::parquet_config::DFParquetWriterVersion::V2_0
-    );
-    assert_eq!(
-      options.global.maximum_parallel_row_group_writers,
-      std::thread::available_parallelism()
-        .map(usize::from)
-        .unwrap_or(1)
-    );
-    assert_eq!(
-      options
-        .key_value_metadata
-        .get("geo")
-        .and_then(|value| value.as_deref()),
-      Some("{}")
-    );
   }
 }

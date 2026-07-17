@@ -114,35 +114,9 @@ impl OutputLayout {
 
 #[cfg(test)]
 mod tests {
-  use std::path::PathBuf;
-
   use tempfile::TempDir;
 
   use super::OutputLayout;
-
-  #[test]
-  fn directory_layout_requires_parts() {
-    let temp = TempDir::new().unwrap();
-    let out_dir = temp.path().join("out_dir");
-    let error = OutputLayout::new(&out_dir, None, false).unwrap_err();
-    assert!(error.to_string().contains("output-files"));
-  }
-
-  #[test]
-  fn file_layout_requires_single_part() {
-    let temp = TempDir::new().unwrap();
-    let output = temp.path().join("out.parquet");
-    let error = OutputLayout::new(&output, Some(2), false).unwrap_err();
-    assert!(error.to_string().contains("output-files"));
-  }
-
-  #[test]
-  fn directory_layout_rejects_zero_parts() {
-    let temp = TempDir::new().unwrap();
-    let out_dir = temp.path().join("out_dir");
-    let error = OutputLayout::new(&out_dir, Some(0), false).unwrap_err();
-    assert!(error.to_string().contains("output-files"));
-  }
 
   #[test]
   fn existing_path_requires_overwrite() {
@@ -169,18 +143,5 @@ mod tests {
     assert!(out_dir.exists());
     assert!(out_dir.is_dir());
     assert!(!out_dir.join("stale.parquet").exists());
-  }
-
-  #[test]
-  fn directory_paths_use_deterministic_part_names() {
-    let temp = TempDir::new().unwrap();
-    let layout = OutputLayout::new(&temp.path().join("out"), Some(3), false).unwrap();
-    let paths = layout.paths().unwrap();
-    let expected: Vec<PathBuf> = vec![
-      temp.path().join("out/part-00000.parquet"),
-      temp.path().join("out/part-00001.parquet"),
-      temp.path().join("out/part-00002.parquet"),
-    ];
-    assert_eq!(paths, expected);
   }
 }

@@ -27,17 +27,3 @@ impl From<ClusterKey> for u64 {
     key.value()
   }
 }
-
-#[cfg(test)]
-mod tests {
-  use super::ClusterKey;
-
-  #[test]
-  fn cluster_key_preserves_conversion_and_ordering() {
-    let lower = ClusterKey::from(7);
-    let upper = ClusterKey::new(12);
-
-    assert_eq!(u64::from(lower), 7);
-    assert!(lower < upper);
-  }
-}

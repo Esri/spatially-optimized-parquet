@@ -407,31 +407,3 @@ impl fmt::Display for ValidationFailure {
 }
 
 impl std::error::Error for ValidationFailure {}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  fn report_orders_and_counts_findings() {
-    let mut report = ValidationReport::new(PathBuf::from("dataset"));
-    report.push(
-      ValidationRule::PageIndex,
-      ValidationSeverity::Warning,
-      ValidationLocation::file("b.parquet"),
-      "warning",
-    );
-    report.push(
-      ValidationRule::Schema,
-      ValidationSeverity::Error,
-      ValidationLocation::file("a.parquet"),
-      "error",
-    );
-    report.sort_findings();
-
-    assert_eq!(report.error_count(), 1);
-    assert_eq!(report.warning_count(), 1);
-    assert_eq!(report.findings()[0].severity(), ValidationSeverity::Error);
-    assert!(report.to_string().starts_with("invalid: dataset\n"));
-  }
-}

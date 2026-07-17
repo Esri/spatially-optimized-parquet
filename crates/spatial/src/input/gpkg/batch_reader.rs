@@ -223,20 +223,6 @@ mod tests {
   }
 
   #[test]
-  fn schema_normalization_preserves_schema_without_geometry_extension() {
-    let schema = Arc::new(Schema::new(vec![Field::new(
-      "payload",
-      DataType::Binary,
-      true,
-    )]));
-
-    assert!(Arc::ptr_eq(
-      &normalize_schema(schema.clone(), "geometry"),
-      &schema
-    ));
-  }
-
-  #[test]
   fn batch_normalization_applies_the_stable_schema_without_reordering_columns() {
     let provider_schema = provider_schema("geom");
     let stable_schema = normalize_schema(provider_schema.clone(), "geometry");

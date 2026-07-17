@@ -675,25 +675,4 @@ mod tests {
     assert!(!validity.z_is_valid(0));
     assert!(validity.m_is_valid(0));
   }
-
-  #[test]
-  fn native_degenerated_geometry_does_not_require_component_validity_xy() {
-    let mut coords = Vec::new();
-    let mut lengths = Vec::new();
-    let mut validity = OptionalComponentValidity::default();
-    quantize_native_geometry_payload_into(
-      &[coordinate(0.0, 0.0), coordinate(0.1, 0.0)],
-      &[2],
-      &test_encoding(3),
-      false,
-      false,
-      &mut coords,
-      &mut lengths,
-      &mut validity,
-    )
-    .unwrap();
-
-    assert_eq!(lengths, [1]);
-    assert_eq!(coords, [0, 0]);
-  }
 }

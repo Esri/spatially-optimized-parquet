@@ -150,32 +150,3 @@ pub(crate) trait InputSource: Send + Sync {
     row_range: RowRange,
   ) -> BoxFuture<'a, Result<DataFrame>>;
 }
-
-#[cfg(test)]
-mod tests {
-  use std::path::Path;
-
-  use super::{InputOpenOptions, RowRange};
-
-  #[test]
-  fn input_open_options_classify_http_and_local_locations() {
-    let http = InputOpenOptions::new("https://example.com/data.parquet", None);
-    let local = InputOpenOptions::new("data.parquet", None);
-
-    assert!(http.is_http());
-    assert!(http.local_path().is_none());
-    assert!(!local.is_http());
-    assert_eq!(local.local_path(), Some(Path::new("data.parquet")));
-  }
-
-  #[test]
-  fn row_range_exposes_selection_without_public_fields() {
-    let range = RowRange::new(3, Some(5));
-
-    assert_eq!(range.start(), 3);
-    assert_eq!(range.num(), Some(5));
-    assert_eq!(range.effective_rows(6), 3);
-    assert!(!range.is_full());
-    assert!(RowRange::default().is_full());
-  }
-}

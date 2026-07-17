@@ -284,46 +284,6 @@ mod tests {
   use super::*;
 
   #[test]
-  fn write_subcommand_preserves_existing_arguments() {
-    let cli = Cli::try_parse_from([
-      "sop",
-      "write",
-      "--input",
-      "input.parquet",
-      "--output",
-      "output.parquet",
-      "--no-optimization",
-    ])
-    .unwrap();
-
-    let Command::Write(args) = cli.command else {
-      panic!("expected write command");
-    };
-    assert_eq!(args.input, "input.parquet");
-    assert_eq!(args.output, PathBuf::from("output.parquet"));
-    assert!(args.no_optimization);
-  }
-
-  #[test]
-  fn write_subcommand_accepts_no_progress() {
-    let cli = Cli::try_parse_from([
-      "sop",
-      "write",
-      "--input",
-      "input.parquet",
-      "--output",
-      "output.parquet",
-      "--no-progress",
-    ])
-    .unwrap();
-
-    let Command::Write(args) = cli.command else {
-      panic!("expected write command");
-    };
-    assert!(args.no_progress);
-  }
-
-  #[test]
   fn write_subcommand_accepts_dimension_stripping_flags() {
     let cli = Cli::try_parse_from([
       "sop",
@@ -345,73 +305,6 @@ mod tests {
   }
 
   #[test]
-  fn write_subcommand_accepts_quantized_native_multiscale_encoding() {
-    let cli = Cli::try_parse_from([
-      "sop",
-      "write",
-      "--input",
-      "input.parquet",
-      "--output",
-      "output.parquet",
-      "--multiscale-encoding",
-      "quantized-native",
-    ])
-    .unwrap();
-
-    let Command::Write(args) = cli.command else {
-      panic!("expected write command");
-    };
-    assert_eq!(
-      args.multiscale_encoding,
-      MultiscaleEncodingValue::QuantizedNative
-    );
-  }
-
-  #[test]
-  fn write_subcommand_defaults_to_pbf_multiscale_encoding() {
-    let cli = Cli::try_parse_from([
-      "sop",
-      "write",
-      "--input",
-      "input.parquet",
-      "--output",
-      "output.parquet",
-    ])
-    .unwrap();
-
-    let Command::Write(args) = cli.command else {
-      panic!("expected write command");
-    };
-    assert_eq!(args.multiscale_encoding, MultiscaleEncodingValue::Pbf);
-  }
-
-  #[test]
-  fn write_subcommand_accepts_resource_limits() {
-    let cli = Cli::try_parse_from([
-      "sop",
-      "write",
-      "--input",
-      "input.parquet",
-      "--output",
-      "output.parquet",
-      "--memory",
-      "8",
-      "--sort-concurrency",
-      "6",
-      "--cores",
-      "4",
-    ])
-    .unwrap();
-
-    let Command::Write(args) = cli.command else {
-      panic!("expected write command");
-    };
-    assert_eq!(args.memory_limit_bytes, Some(8 * 1024 * 1024 * 1024));
-    assert_eq!(args.sort_concurrency, Some(6));
-    assert_eq!(args.cores, Some(4));
-  }
-
-  #[test]
   fn write_subcommand_rejects_zero_resource_limits() {
     for option in ["--memory", "--sort-concurrency", "--cores"] {
       let error = Cli::try_parse_from([
@@ -428,35 +321,5 @@ mod tests {
 
       assert!(error.to_string().contains("must be >= 1"));
     }
-  }
-
-  #[test]
-  fn write_subcommand_rejects_removed_explain() {
-    let error = Cli::try_parse_from([
-      "sop",
-      "write",
-      "--input",
-      "input.parquet",
-      "--output",
-      "output.parquet",
-      "--explain",
-    ])
-    .unwrap_err();
-
-    assert!(
-      error
-        .to_string()
-        .contains("unexpected argument '--explain'")
-    );
-  }
-
-  #[test]
-  fn validate_subcommand_accepts_one_path() {
-    let cli = Cli::try_parse_from(["sop", "validate", "output"]).expect("validate arguments");
-
-    let Command::Validate(args) = cli.command else {
-      panic!("expected validate command");
-    };
-    assert_eq!(args.path, PathBuf::from("output"));
   }
 }

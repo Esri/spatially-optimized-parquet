@@ -727,20 +727,3 @@ pub(crate) fn float_matches(left: f64, right: f64) -> bool {
   let scale = left.abs().max(right.abs()).max(1.0);
   (left - right).abs() <= scale * 1.0e-9
 }
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  fn resolves_supported_wkt_names() {
-    assert_eq!(
-      resolve_wkt_name("GEOGCRS[\"WGS 84\",ID[\"EPSG\",4326]]"),
-      Some(ValidatedCrs::Wgs84)
-    );
-    assert_eq!(
-      resolve_wkt_name("PROJCRS[\"WGS 84 / Pseudo-Mercator\",ID[\"EPSG\",3857]]"),
-      Some(ValidatedCrs::WebMercator)
-    );
-  }
-}

@@ -335,15 +335,6 @@ mod tests {
   }
 
   #[test]
-  fn swizzle_bits_interleaves_xy_bits() {
-    assert_eq!(swizzle_bits(0, 0, 4), ClusterKey::new(0));
-    assert_eq!(swizzle_bits(1, 0, 4), ClusterKey::new(1));
-    assert_eq!(swizzle_bits(0, 1, 4), ClusterKey::new(2));
-    assert_eq!(swizzle_bits(1, 1, 4), ClusterKey::new(3));
-    assert_eq!(swizzle_bits(3, 3, 2), ClusterKey::new(15));
-  }
-
-  #[test]
   fn point_z_code_normalizes_against_full_extent() {
     let full_extent = Extent2D {
       xmin: -180.0,

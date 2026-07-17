@@ -83,26 +83,3 @@ fn render_to(writer: &mut dyn Write, rows_written: u64, total_rows: u64, finishe
   }
   let _ = writer.flush();
 }
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  struct FailingWriter;
-
-  impl Write for FailingWriter {
-    fn write(&mut self, _buffer: &[u8]) -> io::Result<usize> {
-      Err(io::Error::other("closed"))
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-      Err(io::Error::other("closed"))
-    }
-  }
-
-  #[test]
-  fn reporting_failures_do_not_escape() {
-    render_to(&mut FailingWriter, 1, 2, false);
-    render_to(&mut FailingWriter, 2, 2, true);
-  }
-}

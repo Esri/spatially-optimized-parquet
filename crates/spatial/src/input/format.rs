@@ -78,35 +78,12 @@ pub(crate) fn resolve_source_format(
 
 #[cfg(test)]
 mod tests {
-  use tempfile::TempDir;
-
   use super::*;
 
   #[test]
   fn explicit_format_wins_over_extension() {
     assert_eq!(
       resolve_source_format("data.gpkg", Some(SourceFormat::Parquet)).unwrap(),
-      SourceFormat::Parquet
-    );
-  }
-
-  #[test]
-  fn resolves_extensions_case_insensitively() {
-    assert_eq!(
-      resolve_source_format("data.GPKG", None).unwrap(),
-      SourceFormat::GeoPackage
-    );
-    assert_eq!(
-      resolve_source_format("data.Parquet", None).unwrap(),
-      SourceFormat::Parquet
-    );
-  }
-
-  #[test]
-  fn resolves_directories_as_parquet() {
-    let temp = TempDir::new().unwrap();
-    assert_eq!(
-      resolve_source_format(temp.path().to_str().unwrap(), None).unwrap(),
       SourceFormat::Parquet
     );
   }

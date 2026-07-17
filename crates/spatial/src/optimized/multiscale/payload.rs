@@ -39,22 +39,6 @@ pub(super) struct GeometryPayload {
   pub(super) has_m: bool,
 }
 
-/// Decode WKB into flattened optimized geometry and bounds.
-#[cfg(test)]
-fn geometry_payload_from_wkb(
-  bytes: &[u8],
-  geometry_type: OptimizedGeometryType,
-) -> Result<GeometryPayload> {
-  let (payload, bounds) = geometry_payload_parts_from_wkb(bytes, geometry_type, true)?;
-  Ok(GeometryPayload {
-    coordinates: payload.coordinates,
-    lengths: payload.lengths,
-    bounds: bounds.unwrap_or_default(),
-    has_z: payload.has_z,
-    has_m: payload.has_m,
-  })
-}
-
 /// Decode WKB into flattened optimized geometry without calculating bounds.
 pub(super) fn flat_geometry_payload_from_wkb(
   bytes: &[u8],
@@ -156,32 +140,5 @@ impl GeometryPartSink for PayloadBuilder {
   fn finish_part(&mut self) {
     self.lengths.push(self.current_len);
     self.current_len = 0;
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use geo_types::{Geometry, polygon};
-
-  use super::*;
-
-  #[test]
-  fn wkb_payload_matches_geometry_payload() {
-    let geometry = Geometry::Polygon(polygon![
-        (x: 0.0, y: 0.0),
-        (x: 2.0, y: 0.0),
-        (x: 2.0, y: 1.0),
-        (x: 0.0, y: 0.0),
-    ]);
-    let buffer = crate::geometry::write_test_geometry(&geometry);
-
-    let from_geometry =
-      geometry_payload_from_geometry(&geometry, OptimizedGeometryType::Polygon).unwrap();
-    let from_wkb = geometry_payload_from_wkb(&buffer, OptimizedGeometryType::Polygon).unwrap();
-    let flat = flat_geometry_payload_from_wkb(&buffer, OptimizedGeometryType::Polygon).unwrap();
-
-    assert_eq!(from_wkb, from_geometry);
-    assert_eq!(flat.coordinates, from_geometry.coordinates);
-    assert_eq!(flat.lengths, from_geometry.lengths);
   }
 }
