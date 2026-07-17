@@ -6,20 +6,14 @@ use datafusion::catalog::streaming::StreamingTable;
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
 use datafusion::physical_plan::streaming::PartitionStream;
-#[cfg(test)]
-use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use gdal::vector::LayerAccess;
 
 use super::batch_reader::load_schema;
-#[cfg(test)]
-use super::batch_reader::{batch_stream, open_gpkg_batch_reader};
 use super::metadata::{collect_layer_summaries, select_layer_name};
 use super::open::{is_gpkg_path, open_gpkg_dataset};
 use super::partition::{GpkgPartitionStream, plan_gpkg_scan_partitions};
 use crate::geometry::{GeometryEncoding, GeometrySpec};
-#[cfg(test)]
-use crate::input::source::InputBatchStream;
 use crate::input::{
   InputOpenOptions, InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata,
 };
@@ -91,37 +85,6 @@ impl InputSource for GpkgInputSource {
 
   fn source_metadata(&self) -> Result<SourceDatasetMetadata> {
     Ok(self.source_metadata.clone())
-  }
-
-  #[cfg(test)]
-  fn read_batches(&self, row_range: RowRange) -> BoxFuture<'_, Result<InputBatchStream>> {
-    let input_path = self.input_path.clone();
-    let layer_name = self.layer_name.clone();
-    let schema = self.schema.clone();
-    Box::pin(async move {
-      let rows_to_read = row_range
-        .num()
-        .map(|num| num.saturating_add(row_range.start()));
-      let reader = open_gpkg_batch_reader(&input_path, &layer_name, schema, None, rows_to_read)
-        .with_context(|| format!("failed to stream GeoPackage layer {layer_name}"))?;
-      let mut rows_to_skip = row_range.start();
-      let stream = batch_stream(reader).filter_map(move |batch| {
-        let out = match batch {
-          Ok(batch) if rows_to_skip >= batch.num_rows() => {
-            rows_to_skip -= batch.num_rows();
-            None
-          }
-          Ok(batch) => {
-            let offset = rows_to_skip;
-            rows_to_skip = 0;
-            Some(Ok(batch.slice(offset, batch.num_rows() - offset)))
-          }
-          Err(err) => Some(Err(err)),
-        };
-        std::future::ready(out)
-      });
-      Ok(Box::pin(stream) as InputBatchStream)
-    })
   }
 
   fn to_dataframe<'a>(

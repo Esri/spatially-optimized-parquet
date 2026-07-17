@@ -1,19 +1,20 @@
-//! Serializes quantized geometry into the compact Esri PBF wire payload.
+//! Encodes quantized geometry with the compact Esri PBF wire format.
+//!
+//! Field 2 stores part lengths. Field 3 stores signed integer coordinates where x and y use
+//! deltas after the first coordinate of each part, while z and m remain absolute. The codec
+//! operates on [`QuantizedGeometry`] and therefore does not depend on multiscale level policy.
 
 use anyhow::Result;
+use arrow_array::ArrayRef;
+use arrow_array::builder::BinaryBuilder;
 use prost::Message;
+use std::sync::Arc;
 
-#[cfg(test)]
-use super::MultiscaleLevelSpec;
-#[cfg(test)]
-use super::payload::GeometryPayload;
-#[cfg(test)]
-use super::quantize::quantize_geometry_into;
-use super::quantize::{QuantizedGeometryBuffer, encode_deltas_xy};
+use super::{QuantizedGeometry, encode_deltas_xy};
 
 /// Reuses quantization vectors and serialization storage across geometry encodes.
 #[derive(Debug, Default)]
-pub(super) struct GeometryEncodeScratch {
+pub(crate) struct GeometryEncodeScratch {
   quantized_coords: Vec<i64>,
   quantized_lengths: Vec<u32>,
   buffer: Vec<u8>,
@@ -32,25 +33,9 @@ pub(crate) fn decode_pbf_geometry(bytes: &[u8]) -> Result<PbfGeometry> {
   Ok(PbfGeometry::decode(bytes)?)
 }
 
-/// Quantize and encode a complete geometry payload into a new byte buffer.
-#[cfg(test)]
-fn encode_geometry(payload: &GeometryPayload, encoding: &MultiscaleLevelSpec) -> Result<Vec<u8>> {
-  let mut scratch = GeometryEncodeScratch::default();
-  let mut geometry = QuantizedGeometryBuffer::default();
-  quantize_geometry_into(
-    &payload.coordinates,
-    &payload.lengths,
-    encoding,
-    payload.has_z,
-    payload.has_m,
-    &mut geometry,
-  )?;
-  Ok(encode_quantized_geometry_with_scratch(&geometry, &mut scratch)?.to_vec())
-}
-
 /// Serialize pre-quantized absolute coordinates as a PBF payload.
-pub(super) fn encode_quantized_geometry_with_scratch<'a>(
-  geometry: &QuantizedGeometryBuffer,
+pub(crate) fn encode_quantized_geometry_with_scratch<'a>(
+  geometry: &QuantizedGeometry,
   scratch: &'a mut GeometryEncodeScratch,
 ) -> Result<&'a [u8]> {
   scratch.quantized_coords.clear();
@@ -79,15 +64,44 @@ pub(super) fn encode_quantized_geometry_with_scratch<'a>(
   Ok(scratch.buffer.as_slice())
 }
 
+/// Builds a BinaryArray containing one Esri PBF payload per geometry row.
+pub(crate) struct PbfArrayBuilder {
+  builder: BinaryBuilder,
+  scratch: GeometryEncodeScratch,
+}
+
+impl PbfArrayBuilder {
+  /// Create a PBF array builder with capacity for the expected row count.
+  pub(crate) fn new(capacity: usize) -> Self {
+    Self {
+      builder: BinaryBuilder::with_capacity(capacity, capacity * 16),
+      scratch: GeometryEncodeScratch::default(),
+    }
+  }
+
+  /// Append one absolute quantized geometry as a PBF payload.
+  pub(crate) fn append(&mut self, geometry: &QuantizedGeometry) -> Result<()> {
+    let bytes = encode_quantized_geometry_with_scratch(geometry, &mut self.scratch)?;
+    self.builder.append_value(bytes);
+    Ok(())
+  }
+
+  /// Append a null geometry row.
+  pub(crate) fn append_null(&mut self) {
+    self.builder.append_null();
+  }
+
+  /// Finish the Arrow binary array.
+  pub(crate) fn finish(mut self) -> ArrayRef {
+    Arc::new(self.builder.finish())
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use std::io::Cursor;
 
-  use geo_types::{Geometry, polygon};
-
-  use super::super::{geometry_payload_from_geometry, levels::QuantizationTransform};
   use super::*;
-  use crate::optimized::OptimizedGeometryType;
 
   #[derive(Clone, PartialEq, Message)]
   struct EsriPbfGeometry {
@@ -98,28 +112,18 @@ mod tests {
   }
 
   #[test]
-  fn encodes_polygon_pbf() {
-    let geometry = Geometry::Polygon(polygon![
-        (x: 0.0, y: 0.0),
-        (x: 1.0, y: 0.0),
-        (x: 1.0, y: 1.0),
-        (x: 0.0, y: 0.0),
-    ]);
-    let payload =
-      geometry_payload_from_geometry(&geometry, OptimizedGeometryType::Polygon).unwrap();
-    let encoding = MultiscaleLevelSpec {
-      level: 0,
-      column: "level_0".to_string(),
-      resolution: 1.0,
-      scale: 1.0,
-      transform: QuantizationTransform {
-        scale: [1.0, 1.0, 1.0, 1.0],
-        translate: [0.0, 0.0, 0.0, 0.0],
-      },
-      min_length: 3,
+  fn encodes_quantized_geometry() {
+    let geometry = QuantizedGeometry {
+      coordinates: vec![0, 0, 1, 0, 1, 1, 0, 0],
+      lengths: vec![4],
+      validity: Default::default(),
+      has_z: false,
+      has_m: false,
     };
-
-    let bytes = encode_geometry(&payload, &encoding).unwrap();
+    let mut scratch = GeometryEncodeScratch::default();
+    let bytes = encode_quantized_geometry_with_scratch(&geometry, &mut scratch)
+      .unwrap()
+      .to_vec();
     let decoded = PbfGeometry::decode(Cursor::new(&bytes)).unwrap();
     let esri_decoded = EsriPbfGeometry::decode(Cursor::new(bytes)).unwrap();
     assert_eq!(decoded.lengths, vec![4]);

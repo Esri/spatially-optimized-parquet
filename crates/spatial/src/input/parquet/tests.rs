@@ -139,9 +139,14 @@ fn input_schema_and_batch_limit_work() {
   let schema = input.schema().unwrap();
   assert!(schema.field_with_name("name").is_ok());
   assert!(schema.field_with_name("geometry").is_ok());
+  let session = DataFusionSession::new(None, None).unwrap();
 
   let rows = runtime().block_on(async {
-    let mut stream = input.read_batches(RowRange::new(0, Some(2))).await.unwrap();
+    let dataframe = input
+      .to_dataframe(session.context(), RowRange::new(0, Some(2)))
+      .await
+      .unwrap();
+    let mut stream = dataframe.execute_stream().await.unwrap();
     let mut rows = 0usize;
     while let Some(batch) = stream.next().await {
       rows += batch.unwrap().num_rows();

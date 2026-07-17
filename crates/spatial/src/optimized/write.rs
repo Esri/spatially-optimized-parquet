@@ -5,7 +5,7 @@ use datafusion::dataframe::DataFrame;
 
 use crate::optimized::ResolvedOptimization;
 use crate::optimized::clustering::{cluster_key_column, cluster_partition_column};
-use crate::output::{OutputLayout, ParquetWriterOptions, TrackingParquetWriter};
+use crate::output::{OutputLayout, ParquetOutputWriter, ParquetWriterOptions};
 use crate::pipeline::SharedWriteReporter;
 
 use super::partitioned_sort::PartitionedSortConfig;
@@ -40,7 +40,7 @@ pub(super) async fn write_optimized_single_file(
     .context("missing output path")?
     .to_string_lossy()
     .into_owned();
-  TrackingParquetWriter::new(total_input_rows, write_reporter)
+  ParquetOutputWriter::new(total_input_rows, write_reporter)
     .write_single(
       dataframe,
       output_path,
@@ -85,7 +85,7 @@ impl<'a> PartitionedOutputWriter<'a> {
       self.output_layout.part_count(),
       true,
     );
-    TrackingParquetWriter::new(self.total_input_rows, self.write_reporter)
+    ParquetOutputWriter::new(self.total_input_rows, self.write_reporter)
       .write_partitioned(
         dataframe,
         self.output_layout.path().to_string_lossy().into_owned(),

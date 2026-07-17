@@ -10,7 +10,7 @@ use parquet::arrow::async_reader::ParquetObjectReader;
 use url::Url;
 
 use crate::input::{InputOpenOptions, InputSource};
-use crate::parquet_dataset::{DiscoveryMode, discover_parquet_dataset, load_parquet_metadata};
+use crate::parquet_dataset::{DiscoveryMode, load_parquet_metadata, try_discover_parquet_dataset};
 
 use super::source::{ParquetInputLocation, ParquetInputSource};
 
@@ -94,7 +94,7 @@ async fn open_http_parquet(location: &str) -> Result<Arc<dyn InputSource>> {
 /// Returns `None` for unsupported paths so another input provider can attempt them.
 fn discover_parquet_files(input: &Path) -> Result<Option<Vec<PathBuf>>> {
   Ok(
-    discover_parquet_dataset(input, DiscoveryMode::Flat)?
+    try_discover_parquet_dataset(input, DiscoveryMode::Flat)?
       .map(|files| files.into_iter().map(|file| file.path).collect()),
   )
 }

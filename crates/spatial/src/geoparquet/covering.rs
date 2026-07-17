@@ -14,7 +14,7 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::col;
 
-use crate::geometry::GeometryCategory;
+use crate::geometry::GeometryType;
 use crate::geometry::to_datafusion_error;
 use crate::optimized::{COVERING_BBOX_COLUMN, bounds_expr, point_expr};
 
@@ -67,13 +67,10 @@ fn feature_bbox_udf() -> ScalarUDF {
   ScalarUDF::new_from_impl(FeatureBboxUdf)
 }
 
-pub(crate) fn geometry_bbox_expr(
-  geometry_column: &str,
-  geometry_category: GeometryCategory,
-) -> Expr {
+pub(crate) fn geometry_bbox_expr(geometry_column: &str, geometry_type: GeometryType) -> Expr {
   let geometry = col(geometry_column);
-  match geometry_category {
-    GeometryCategory::Point => {
+  match geometry_type {
+    GeometryType::Point => {
       let coordinates = point_expr(geometry_column);
       let x = coordinates.clone().field("x");
       let y = coordinates.field("y");
@@ -81,7 +78,7 @@ pub(crate) fn geometry_bbox_expr(
         .call(vec![geometry, x.clone(), y.clone(), x, y])
         .alias(COVERING_BBOX_COLUMN)
     }
-    GeometryCategory::NonPoint => {
+    GeometryType::MultiPoint | GeometryType::Polyline | GeometryType::Polygon => {
       let bounds = bounds_expr(geometry_column);
       feature_bbox_udf()
         .call(vec![

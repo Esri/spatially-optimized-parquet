@@ -6,7 +6,7 @@ use datafusion::dataframe::DataFrame;
 use datafusion::functions_aggregate::expr_fn::{max, min};
 
 use crate::geometry::Extent2D;
-use crate::geoparquet::{PreparedSpatialFrame, ResolvedGeoParquetSource, bbox_field_expr};
+use crate::geoparquet::{NormalizedSpatialFrame, ResolvedGeoParquetSource, bbox_field_expr};
 use crate::input::{InputSource, RowRange};
 use crate::output::ReprojectionSpec;
 use crate::plan_diagnostics::collect_dataframe;
@@ -32,7 +32,7 @@ impl<'a> TargetExtentResolver<'a> {
   pub(crate) async fn resolve(
     self,
     source: &ResolvedGeoParquetSource,
-    prepared: &PreparedSpatialFrame,
+    normalized: &NormalizedSpatialFrame,
     reprojection: &ReprojectionSpec,
   ) -> Result<Extent2D> {
     let source_metadata = self.input.source_metadata()?;
@@ -41,13 +41,13 @@ impl<'a> TargetExtentResolver<'a> {
       && source_metadata
         .geometry
         .as_ref()
-        .filter(|metadata| metadata.column == prepared.geometry_column())
+        .filter(|metadata| metadata.column == normalized.geometry_column())
         .and_then(|metadata| metadata.bbox)
         .is_some();
     let target_extent = if metadata_fast_path {
       source.source_extent
     } else {
-      let aggregate_dataframe = target_extent_aggregate(prepared.dataframe())?;
+      let aggregate_dataframe = target_extent_aggregate(normalized.dataframe())?;
       let batches = collect_dataframe(aggregate_dataframe, "target extent aggregate").await?;
       extract_target_extent(&batches)?
     };

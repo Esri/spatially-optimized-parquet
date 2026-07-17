@@ -12,7 +12,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use crate::parquet_dataset::{DiscoveryMode, discover_parquet_dataset};
+use crate::parquet_dataset::{DiscoveryMode, try_discover_parquet_dataset};
 
 pub use report::{
   ValidationFailure, ValidationFinding, ValidationLocation, ValidationReport, ValidationRule,
@@ -23,7 +23,7 @@ pub use report::{
 pub fn validate(path: impl AsRef<Path>) -> Result<ValidationReport> {
   let path = path.as_ref();
   let dataset_path = path.to_path_buf();
-  let files = discover_parquet_dataset(path, DiscoveryMode::Recursive)?.with_context(|| {
+  let files = try_discover_parquet_dataset(path, DiscoveryMode::Recursive)?.with_context(|| {
     format!(
       "validation path must be a .parquet file or directory: {}",
       path.display()
@@ -40,9 +40,9 @@ fn validate_dataset(
   report: &mut ValidationReport,
 ) {
   let validated_files = structure::load_dataset_files(files, report);
-  let contracts = metadata::validate_dataset_metadata(&validated_files, report);
-  structure::validate_dataset_structure(&validated_files, &contracts, report);
-  let ranges = structure::validate_file_data(&validated_files, &contracts, report);
+  let validated_dataset_files = metadata::validate_dataset_metadata(&validated_files, report);
+  structure::validate_dataset_structure(&validated_files, &validated_dataset_files, report);
+  let ranges = structure::validate_file_data(&validated_dataset_files, report);
   multifile::validate_multifile_ranges(&ranges, report);
 }
 
@@ -52,7 +52,7 @@ mod tests {
   use std::path::Path;
   use std::sync::Arc;
 
-  use arrow_array::{BinaryArray, Float64Array, RecordBatch, UInt64Array};
+  use arrow_array::{ArrayRef, BinaryArray, Float64Array, RecordBatch, UInt64Array};
   use arrow_schema::{DataType, Field, Schema, SchemaRef};
   use gdal::spatial_ref::SpatialRef;
   use parquet::arrow::arrow_writer::ArrowWriter;
@@ -174,12 +174,44 @@ mod tests {
     );
   }
 
+  #[test]
+  fn data_validation_reports_malformed_z_batch_views() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("wrong-z-code-type.parquet");
+    write_z_fixture_with_code_type(&path, 4326, Some(4326), false, None, DataType::Float64);
+
+    let report = validate(&path).unwrap();
+
+    assert!(report.findings().iter().any(|finding| {
+      finding.rule() == ValidationRule::RowGroup
+        && finding.message() == "Arrow column 'zCode' is not UInt64"
+    }));
+  }
+
   fn write_z_fixture(
     path: &std::path::Path,
     geo_epsg: u32,
     display_epsg: Option<u32>,
     duplicate_geo: bool,
     display_wkt: Option<&str>,
+  ) {
+    write_z_fixture_with_code_type(
+      path,
+      geo_epsg,
+      display_epsg,
+      duplicate_geo,
+      display_wkt,
+      DataType::UInt64,
+    );
+  }
+
+  fn write_z_fixture_with_code_type(
+    path: &std::path::Path,
+    geo_epsg: u32,
+    display_epsg: Option<u32>,
+    duplicate_geo: bool,
+    display_wkt: Option<&str>,
+    code_type: DataType,
   ) {
     let extent = Extent2D {
       xmin: 0.0,
@@ -191,15 +223,20 @@ mod tests {
     let code = point_z_code(extent, 1.0, 1.0, 20).value();
     let schema = Arc::new(Schema::new(vec![
       Field::new("geometry", DataType::Binary, true),
-      Field::new("zCode", DataType::UInt64, false),
+      Field::new("zCode", code_type.clone(), false),
       Field::new("x", DataType::Float64, false),
       Field::new("y", DataType::Float64, false),
     ]));
+    let code_values: ArrayRef = match code_type {
+      DataType::UInt64 => Arc::new(UInt64Array::from(vec![code])),
+      DataType::Float64 => Arc::new(Float64Array::from(vec![code as f64])),
+      _ => unreachable!("test fixture only supports supported Z code types"),
+    };
     let batch = RecordBatch::try_new(
       schema.clone(),
       vec![
         Arc::new(BinaryArray::from(vec![Some(geometry.as_slice())])),
-        Arc::new(UInt64Array::from(vec![code])),
+        code_values,
         Arc::new(Float64Array::from(vec![1.0])),
         Arc::new(Float64Array::from(vec![1.0])),
       ],

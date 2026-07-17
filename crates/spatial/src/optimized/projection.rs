@@ -124,10 +124,10 @@ fn output_projection_expressions(
     }
     ClusteringFamily::ComplexGeometry => expressions.push(complex_geometry_geodisplay_expr(
       &context.geometry().geometry_spec.column,
-      context.geometry().geometry_type,
+      context.geometry().ty,
       context.geometry().has_z,
       context.geometry().has_m,
-      context.encodings(),
+      context.levels(),
       context.multiscale_encoding(),
       warning_store,
     )),

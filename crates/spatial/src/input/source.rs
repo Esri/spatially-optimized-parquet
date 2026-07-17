@@ -8,24 +8,13 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
-#[cfg(test)]
-use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
-#[cfg(test)]
-use futures_util::Stream;
 use futures_util::future::BoxFuture;
-#[cfg(test)]
-use std::pin::Pin;
 
 use super::{SourceDatasetMetadata, SourceFormat, gpkg, parquet};
 use crate::geometry::GeometrySpec;
-
-/// Streams fallible Arrow batches without exposing a source implementation.
-#[cfg(test)]
-pub(super) type InputBatchStream =
-  Pin<Box<dyn Stream<Item = Result<RecordBatch>> + Send + 'static>>;
 
 /// Selects a zero-based contiguous range of source rows.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -140,9 +129,6 @@ pub(crate) trait InputSource: Send + Sync {
   fn inferred_geometry_spec(&self) -> Result<Option<GeometrySpec>>;
   /// Return normalized geometry and pass-through file metadata.
   fn source_metadata(&self) -> Result<SourceDatasetMetadata>;
-  /// Stream a selected row range directly as Arrow batches.
-  #[cfg(test)]
-  fn read_batches(&self, row_range: RowRange) -> BoxFuture<'_, Result<InputBatchStream>>;
   /// Create a lazy DataFusion DataFrame for a selected row range.
   fn to_dataframe<'a>(
     &'a self,

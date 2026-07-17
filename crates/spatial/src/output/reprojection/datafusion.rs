@@ -1,5 +1,7 @@
 //! Implements typed DataFusion expressions for geometry reprojection.
 
+use arrow_array::ArrayRef;
+use arrow_array::builder::BinaryBuilder;
 use arrow_schema::DataType;
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
 use datafusion::logical_expr::{
@@ -7,8 +9,9 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::col;
 use std::any::Any;
+use std::sync::Arc;
 
-use crate::geometry::{geometry_signature, map_geometry_to_binary, to_datafusion_error};
+use crate::geometry::{GeometryArray, geometry_signature, to_datafusion_error};
 
 use super::CoordinateTransformSpec;
 
@@ -40,14 +43,17 @@ impl ScalarUDFImpl for ReprojectGeometryUdf {
       .first()
       .ok_or_else(|| DataFusionError::Execution("missing geometry argument".to_string()))?;
     let prepared = self.transform.prepare().map_err(to_datafusion_error)?;
-    let output = map_geometry_to_binary(geometry, |bytes| match bytes {
-      Some(bytes) => prepared
-        .reproject_wkb(bytes)
-        .map(Some)
-        .map_err(to_datafusion_error),
-      None => Ok(None),
-    })?;
-    Ok(ColumnarValue::Array(output))
+    let geometry = GeometryArray::try_new(geometry.as_ref())?;
+    let mut builder = BinaryBuilder::with_capacity(geometry.len(), geometry.len() * 16);
+    for value in geometry.values() {
+      match value {
+        Some(bytes) => {
+          builder.append_value(prepared.reproject_wkb(bytes).map_err(to_datafusion_error)?)
+        }
+        None => builder.append_null(),
+      }
+    }
+    Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
   }
 }
 

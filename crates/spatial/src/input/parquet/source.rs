@@ -4,8 +4,6 @@ use anyhow::{Context, Result};
 use arrow_schema::SchemaRef;
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
-#[cfg(test)]
-use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use geoparquet::metadata::GeoParquetColumnEncoding;
 use object_store::ObjectStore;
@@ -13,8 +11,6 @@ use parquet::arrow::arrow_reader::ArrowReaderMetadata;
 use url::Url;
 
 use crate::geometry::{GeometryEncoding, GeometrySpec};
-#[cfg(test)]
-use crate::input::source::InputBatchStream;
 use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata};
 
 use super::metadata::{
@@ -109,47 +105,6 @@ impl InputSource for ParquetInputSource {
       geometry,
       passthrough_kv: passthrough_metadata(&self.metadata),
     })
-  }
-
-  #[cfg(test)]
-  fn read_batches(&self, row_range: RowRange) -> BoxFuture<'_, Result<InputBatchStream>> {
-    match &self.location {
-      ParquetInputLocation::Local { input_path } => {
-        let input_path = input_path.clone();
-        Box::pin(async move {
-          let context = SessionContext::new();
-          let mut dataframe = context
-            .read_parquet(&input_path, Default::default())
-            .await?;
-          if !row_range.is_full() {
-            dataframe = dataframe.limit(row_range.start(), row_range.num())?;
-          }
-
-          let stream = dataframe.execute_stream().await.context("execute stream")?;
-          Ok(Box::pin(stream.map(|batch| batch.map_err(Into::into))) as InputBatchStream)
-        })
-      }
-      ParquetInputLocation::Http {
-        input_url,
-        store_url,
-        store,
-        ..
-      } => {
-        let input_url = input_url.clone();
-        let store_url = store_url.clone();
-        let store = Arc::clone(store);
-        Box::pin(async move {
-          let context = SessionContext::new();
-          context.register_object_store(&store_url, store);
-          let mut dataframe = context.read_parquet(&input_url, Default::default()).await?;
-          if !row_range.is_full() {
-            dataframe = dataframe.limit(row_range.start(), row_range.num())?;
-          }
-          let stream = dataframe.execute_stream().await.context("execute stream")?;
-          Ok(Box::pin(stream.map(|batch| batch.map_err(Into::into))) as InputBatchStream)
-        })
-      }
-    }
   }
 
   fn to_dataframe<'a>(

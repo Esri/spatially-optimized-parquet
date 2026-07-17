@@ -8,8 +8,6 @@ use ::parquet::file::metadata::KeyValue;
 use anyhow::Result;
 
 pub(crate) use geo::GeoMetadata;
-#[cfg(test)]
-pub(crate) use geodisplay::QuantizationTransform;
 pub(crate) use geodisplay::{
   ESRI_PBF_ENCODING, GEODISPLAY_VERSION, GeodisplayIndex, GeodisplayMetadata, MultiscaleLevel,
   QUANTIZED_NATIVE_ENCODING, XzClusteringIndex, ZClusteringIndex,

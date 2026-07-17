@@ -36,6 +36,11 @@ pub(crate) struct ValidatedMetadata {
   pub(crate) crs: ValidatedCrs,
 }
 
+pub(crate) struct ValidatedDatasetFile<'file> {
+  pub(crate) file: &'file LoadedDatasetFile,
+  pub(crate) metadata: ValidatedMetadata,
+}
+
 impl ValidatedMetadata {
   pub(crate) fn geometry_column(&self) -> &str {
     &self.geo.primary_column
@@ -50,41 +55,34 @@ impl ValidatedMetadata {
   }
 }
 
-pub(crate) fn validate_dataset_metadata(
-  files: &[LoadedDatasetFile],
+pub(crate) fn validate_dataset_metadata<'file>(
+  files: &'file [LoadedDatasetFile],
   report: &mut ValidationReport,
-) -> Vec<Option<ValidatedMetadata>> {
-  let contracts = files
+) -> Vec<ValidatedDatasetFile<'file>> {
+  let validated_files = files
     .iter()
-    .map(|file| validate_file_metadata(file, report))
+    .filter_map(|file| {
+      validate_file_metadata(file, report).map(|metadata| ValidatedDatasetFile { file, metadata })
+    })
     .collect::<Vec<_>>();
 
-  let baseline = contracts
-    .iter()
-    .enumerate()
-    .find_map(|(index, contract)| contract.as_ref().map(|contract| (index, contract)));
-  if let Some((baseline_index, baseline_contract)) = baseline {
-    for (index, contract) in contracts.iter().enumerate() {
-      if index == baseline_index {
-        continue;
-      }
-      if let Some(contract) = contract
-        && contract != baseline_contract
-      {
+  if let Some(baseline) = validated_files.first() {
+    for validated_file in validated_files.iter().skip(1) {
+      if validated_file.metadata != baseline.metadata {
         report.push(
           ValidationRule::DatasetConsistency,
           ValidationSeverity::Error,
-          ValidationLocation::file(files[index].file.relative_path.clone()),
+          ValidationLocation::file(validated_file.file.file.relative_path.clone()),
           format!(
             "GeoParquet or geodisplay metadata differs from {}",
-            files[baseline_index].file.relative_path.display()
+            baseline.file.file.relative_path.display()
           ),
         );
       }
     }
   }
 
-  contracts
+  validated_files
 }
 
 fn validate_file_metadata(

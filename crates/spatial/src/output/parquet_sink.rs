@@ -1,4 +1,4 @@
-//! Owns observable Parquet writes for every output product.
+//! Owns tracked Parquet sink construction and failed-write cleanup.
 
 use std::any::Any;
 use std::fmt;
@@ -7,40 +7,26 @@ use std::sync::{
   atomic::{AtomicU64, Ordering},
 };
 
-use anyhow::{Context, Result, anyhow};
-use arrow_array::{Array, RecordBatch, UInt64Array};
-use arrow_schema::{DataType, Field, Schema, SchemaRef};
+use anyhow::Result;
+use arrow_schema::{DataType, SchemaRef};
 use async_trait::async_trait;
 use datafusion::common::{
   DataFusionError, Result as DataFusionResult, config::TableParquetOptions,
 };
-use datafusion::dataframe::DataFrame;
 use datafusion::datasource::file_format::parquet::ParquetSink;
 use datafusion::datasource::listing::ListingTableUrl;
 use datafusion::datasource::physical_plan::FileSinkConfig;
-use datafusion::datasource::sink::{DataSink, DataSinkExec};
+use datafusion::datasource::sink::DataSink;
 use datafusion::execution::TaskContext;
 use datafusion::logical_expr::dml::InsertOp;
-use datafusion::physical_expr::{
-  Distribution, EquivalenceProperties, expressions::Column as PhysicalColumn,
-};
 use datafusion::physical_plan::{
-  DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties, Partitioning,
-  PlanProperties, SendableRecordBatchStream,
-  coalesce_partitions::CoalescePartitionsExec,
-  collect, execute_input_stream,
-  execution_plan::{EvaluationType, SchedulingType},
-  projection::{ProjectionExec, ProjectionExpr},
-  sorts::sort_preserving_merge::SortPreservingMergeExec,
-  stream::RecordBatchStreamAdapter,
+  DisplayAs, DisplayFormatType, SendableRecordBatchStream, stream::RecordBatchStreamAdapter,
 };
 use futures_util::StreamExt;
-use tokio::task::JoinSet;
 
 use crate::pipeline::{SharedWriteReporter, WriteProgress};
-use crate::plan_diagnostics::print_physical_plan;
 
-struct WriteTracker {
+pub(super) struct WriteTracker {
   total_rows: u64,
   rows_written: AtomicU64,
   reporter: Option<SharedWriteReporter>,
@@ -48,7 +34,7 @@ struct WriteTracker {
 }
 
 impl WriteTracker {
-  fn new(total_rows: u64, reporter: Option<SharedWriteReporter>) -> Self {
+  pub(super) fn new(total_rows: u64, reporter: Option<SharedWriteReporter>) -> Self {
     Self {
       total_rows,
       rows_written: AtomicU64::new(0),
@@ -68,7 +54,7 @@ impl WriteTracker {
     self.deliver(rows_written, false);
   }
 
-  fn finish(&self, rows_written: u64) {
+  pub(super) fn finish(&self, rows_written: u64) {
     self.rows_written.store(rows_written, Ordering::Relaxed);
     self.deliver(rows_written, true);
   }
@@ -90,7 +76,7 @@ impl WriteTracker {
 }
 
 /// Wraps DataFusion's Parquet sink with shared row tracking and failed-write cleanup.
-struct TrackingParquetSink {
+pub(super) struct TrackingParquetSink {
   config: FileSinkConfig,
   inner: ParquetSink,
   tracker: Arc<WriteTracker>,
@@ -109,7 +95,10 @@ impl TrackingParquetSink {
     }
   }
 
-  async fn cleanup_written_files(&self, context: &Arc<TaskContext>) -> DataFusionResult<()> {
+  pub(super) async fn cleanup_written_files(
+    &self,
+    context: &Arc<TaskContext>,
+  ) -> DataFusionResult<()> {
     let object_store = context
       .runtime_env()
       .object_store(&self.config.object_store_url)?;
@@ -176,112 +165,7 @@ impl DataSink for TrackingParquetSink {
   }
 }
 
-/// Executes single-file and concurrent partitioned Parquet writes through one tracking sink.
-pub(crate) struct TrackingParquetWriter {
-  tracker: Arc<WriteTracker>,
-}
-
-impl TrackingParquetWriter {
-  /// Construct one writer with a shared cumulative row counter.
-  pub(crate) fn new(total_rows: u64, reporter: Option<SharedWriteReporter>) -> Self {
-    Self {
-      tracker: Arc::new(WriteTracker::new(total_rows, reporter)),
-    }
-  }
-
-  /// Write one DataFrame into an exact Parquet file path.
-  pub(crate) async fn write_single(
-    self,
-    dataframe: DataFrame,
-    write_path: String,
-    writer_options: TableParquetOptions,
-    hidden_columns: Vec<&str>,
-  ) -> Result<u64> {
-    let (state, logical_plan) = dataframe.into_parts();
-    let context = Arc::new(TaskContext::from(&state));
-    let mut input = state.create_physical_plan(&logical_plan).await?;
-    if input.output_partitioning().partition_count() != 1 {
-      input = match input.properties().output_ordering().cloned() {
-        Some(ordering) => Arc::new(SortPreservingMergeExec::new(ordering, input)),
-        None => Arc::new(CoalescePartitionsExec::new(input)),
-      };
-    }
-    let sort_order = if hidden_columns.is_empty() {
-      input
-        .properties()
-        .output_ordering()
-        .cloned()
-        .map(Into::into)
-    } else {
-      input = Self::project_without_columns(input, &hidden_columns)?;
-      None
-    };
-    let sink = create_sink(
-      &state,
-      write_path,
-      input.schema(),
-      Vec::new(),
-      writer_options,
-      Arc::clone(&self.tracker),
-    )?;
-    let plan: Arc<dyn ExecutionPlan> =
-      Arc::new(DataSinkExec::new(input, Arc::clone(&sink) as _, sort_order));
-    let rows_written = execute_sink_plan("single-file sink", plan, sink, context).await?;
-    self.tracker.finish(rows_written);
-    Ok(rows_written)
-  }
-
-  fn project_without_columns(
-    input: Arc<dyn ExecutionPlan>,
-    hidden_columns: &[&str],
-  ) -> Result<Arc<dyn ExecutionPlan>> {
-    let expressions = input
-      .schema()
-      .fields()
-      .iter()
-      .enumerate()
-      .filter(|(_, field)| !hidden_columns.contains(&field.name().as_str()))
-      .map(|(index, field)| ProjectionExpr {
-        expr: Arc::new(PhysicalColumn::new(field.name(), index)),
-        alias: field.name().to_string(),
-      })
-      .collect::<Vec<_>>();
-    Ok(Arc::new(ProjectionExec::try_new(expressions, input)?))
-  }
-
-  /// Write one DataFrame through concurrent partition-local Parquet sinks.
-  pub(crate) async fn write_partitioned<RewritePlan>(
-    self,
-    dataframe: DataFrame,
-    write_path: String,
-    partition_by: Vec<String>,
-    writer_options: TableParquetOptions,
-    rewrite_plan: RewritePlan,
-  ) -> Result<u64>
-  where
-    RewritePlan: FnOnce(Arc<dyn ExecutionPlan>) -> DataFusionResult<Arc<dyn ExecutionPlan>>,
-  {
-    let (state, logical_plan) = dataframe.into_parts();
-    let context = Arc::new(TaskContext::from(&state));
-    let input = rewrite_plan(state.create_physical_plan(&logical_plan).await?)?;
-    let sink = create_sink(
-      &state,
-      write_path,
-      input.schema(),
-      partition_by,
-      writer_options,
-      Arc::clone(&self.tracker),
-    )?;
-    let plan: Arc<dyn ExecutionPlan> =
-      Arc::new(ConcurrentPartitionSinkExec::new(input, Arc::clone(&sink)));
-    let rows_written = execute_sink_plan("partitioned sink", plan, sink, context).await?;
-    self.tracker.finish(rows_written);
-    Ok(rows_written)
-  }
-}
-
-fn create_sink(
-  _state: &datafusion::execution::context::SessionState,
+pub(super) fn create_sink(
   write_path: String,
   output_schema: SchemaRef,
   partition_by: Vec<String>,
@@ -308,192 +192,6 @@ fn create_sink(
     writer_options,
     tracker,
   )))
-}
-
-async fn execute_sink_plan(
-  label: &str,
-  plan: Arc<dyn ExecutionPlan>,
-  sink: Arc<TrackingParquetSink>,
-  context: Arc<TaskContext>,
-) -> Result<u64> {
-  print_physical_plan(label, plan.as_ref());
-  let batches = match collect(plan, Arc::clone(&context)).await {
-    Ok(batches) => batches,
-    Err(error) => {
-      if let Err(cleanup_error) = sink.cleanup_written_files(&context).await {
-        return Err(anyhow!(
-          "parquet write failed: {error}; cleanup failed: {cleanup_error}"
-        ));
-      }
-      return Err(error.into());
-    }
-  };
-  let batch = batches.first().context("write returned no row count")?;
-  let values = batch
-    .column(0)
-    .as_any()
-    .downcast_ref::<UInt64Array>()
-    .context("write result count column was not UInt64")?;
-  Ok(if values.is_empty() {
-    0
-  } else {
-    values.value(0)
-  })
-}
-
-#[derive(Clone, Debug)]
-struct ConcurrentPartitionSinkExec {
-  input: Arc<dyn ExecutionPlan>,
-  sink: Arc<TrackingParquetSink>,
-  count_schema: SchemaRef,
-  cache: PlanProperties,
-}
-
-impl ConcurrentPartitionSinkExec {
-  fn new(input: Arc<dyn ExecutionPlan>, sink: Arc<TrackingParquetSink>) -> Self {
-    let count_schema = count_schema();
-    let cache = PlanProperties::new(
-      EquivalenceProperties::new(Arc::clone(&count_schema)),
-      Partitioning::UnknownPartitioning(1),
-      input.pipeline_behavior(),
-      input.boundedness(),
-    )
-    .with_scheduling_type(SchedulingType::Cooperative)
-    .with_evaluation_type(EvaluationType::Eager);
-    Self {
-      input,
-      sink,
-      count_schema,
-      cache,
-    }
-  }
-}
-
-impl DisplayAs for ConcurrentPartitionSinkExec {
-  fn fmt_as(
-    &self,
-    format_type: DisplayFormatType,
-    formatter: &mut fmt::Formatter<'_>,
-  ) -> fmt::Result {
-    self.sink.fmt_as(format_type, formatter)
-  }
-}
-
-impl ExecutionPlan for ConcurrentPartitionSinkExec {
-  fn name(&self) -> &'static str {
-    "ConcurrentPartitionSinkExec"
-  }
-
-  fn as_any(&self) -> &dyn Any {
-    self
-  }
-
-  fn properties(&self) -> &PlanProperties {
-    &self.cache
-  }
-
-  fn required_input_distribution(&self) -> Vec<Distribution> {
-    vec![Distribution::UnspecifiedDistribution]
-  }
-
-  fn maintains_input_order(&self) -> Vec<bool> {
-    vec![true]
-  }
-
-  fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
-    vec![&self.input]
-  }
-
-  fn with_new_children(
-    self: Arc<Self>,
-    children: Vec<Arc<dyn ExecutionPlan>>,
-  ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-    Ok(Arc::new(Self::new(
-      Arc::clone(&children[0]),
-      Arc::clone(&self.sink),
-    )))
-  }
-
-  fn execute(
-    &self,
-    partition: usize,
-    context: Arc<TaskContext>,
-  ) -> DataFusionResult<SendableRecordBatchStream> {
-    if partition != 0 {
-      return Err(DataFusionError::Execution(format!(
-        "{} can only execute partition 0",
-        self.name()
-      )));
-    }
-    let count_schema = Arc::clone(&self.count_schema);
-    let input = Arc::clone(&self.input);
-    let sink = Arc::clone(&self.sink);
-    let stream = futures_util::stream::once(async move {
-      run_concurrent_partition_writes(input, sink, &context)
-        .await
-        .map(make_count_batch)
-    });
-    Ok(Box::pin(RecordBatchStreamAdapter::new(
-      count_schema,
-      stream,
-    )))
-  }
-}
-
-async fn run_concurrent_partition_writes(
-  input: Arc<dyn ExecutionPlan>,
-  sink: Arc<TrackingParquetSink>,
-  context: &Arc<TaskContext>,
-) -> DataFusionResult<u64> {
-  let mut write_tasks = JoinSet::new();
-  for partition in 0..input.output_partitioning().partition_count() {
-    let input = Arc::clone(&input);
-    let sink = Arc::clone(&sink);
-    let context = Arc::clone(context);
-    write_tasks.spawn(async move {
-      let data = execute_input_stream(
-        input,
-        Arc::clone(sink.schema()),
-        partition,
-        Arc::clone(&context),
-      )?;
-      sink.write_all(data, &context).await
-    });
-  }
-
-  let mut rows_written = 0;
-  let mut first_error = None;
-  while let Some(result) = write_tasks.join_next().await {
-    match result {
-      Ok(Ok(count)) => rows_written += count,
-      Ok(Err(error)) => {
-        first_error.get_or_insert(error);
-      }
-      Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
-      Err(error) => {
-        first_error.get_or_insert_with(|| {
-          DataFusionError::Execution(format!("partitioned parquet write task failed: {error}"))
-        });
-      }
-    }
-  }
-  first_error.map_or(Ok(rows_written), Err)
-}
-
-fn count_schema() -> SchemaRef {
-  Arc::new(Schema::new(vec![Field::new(
-    "count",
-    DataType::UInt64,
-    false,
-  )]))
-}
-
-fn make_count_batch(count: u64) -> RecordBatch {
-  RecordBatch::try_new(
-    count_schema(),
-    vec![Arc::new(UInt64Array::from(vec![count]))],
-  )
-  .expect("count batch should always be valid")
 }
 
 #[cfg(test)]

@@ -41,7 +41,7 @@ pub(crate) struct ParquetDatasetFile {
 }
 
 /// Discover one Parquet file or a deterministic local file set.
-pub(crate) fn discover_parquet_dataset(
+pub(crate) fn try_discover_parquet_dataset(
   input: &Path,
   mode: DiscoveryMode,
 ) -> Result<Option<Vec<ParquetDatasetFile>>> {
@@ -49,7 +49,7 @@ pub(crate) fn discover_parquet_dataset(
     if !has_parquet_extension(input) {
       return Ok(None);
     }
-    let path = absolute_path(input)?;
+    let path = to_absolute_path(input)?;
     let relative_path = path
       .file_name()
       .map(PathBuf::from)
@@ -65,7 +65,7 @@ pub(crate) fn discover_parquet_dataset(
     return Ok(None);
   }
 
-  let root = absolute_path(input)?;
+  let root = to_absolute_path(input)?;
   let mut paths = Vec::new();
   discover_directory_files(&root, mode, &mut paths)?;
   if paths.is_empty() {
@@ -120,7 +120,7 @@ fn has_parquet_extension(path: &Path) -> bool {
     .is_some_and(|extension| extension.eq_ignore_ascii_case("parquet"))
 }
 
-fn absolute_path(path: &Path) -> Result<PathBuf> {
+fn to_absolute_path(path: &Path) -> Result<PathBuf> {
   if path.is_absolute() {
     Ok(path.to_path_buf())
   } else {

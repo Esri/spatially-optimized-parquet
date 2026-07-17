@@ -2,9 +2,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 
-use arrow_array::{
-  BinaryArray, BinaryViewArray, Int32Array, LargeBinaryArray, StringArray, StringViewArray,
-};
+use arrow_array::{Int32Array, StringArray, StringViewArray};
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
 use datafusion::physical_plan::ExecutionPlanProperties;
 use futures_util::StreamExt;
@@ -17,7 +15,7 @@ use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
 use crate::geometry::{
-  BinaryValueAccess, Extent2D, GeometryKind, PolygonRingOrder, WkbCoordinate, WkbPartRole, WkbSink,
+  Extent2D, GeometryArray, GeometryKind, PolygonRingOrder, WkbCoordinate, WkbPartRole, WkbSink,
   visit_wkb_geometry,
 };
 use crate::input::{InputOpenOptions, InputSource, RowRange, SourceFormat, open_input};
@@ -113,16 +111,11 @@ fn string_value(array: &dyn arrow_array::Array, index: usize) -> String {
 }
 
 fn binary_value(array: &dyn arrow_array::Array, index: usize) -> Vec<u8> {
-  if let Some(array) = array.as_any().downcast_ref::<BinaryArray>() {
-    return array.value_opt(index).unwrap().to_vec();
-  }
-  if let Some(array) = array.as_any().downcast_ref::<LargeBinaryArray>() {
-    return array.value_opt(index).unwrap().to_vec();
-  }
-  if let Some(array) = array.as_any().downcast_ref::<BinaryViewArray>() {
-    return array.value_opt(index).unwrap().to_vec();
-  }
-  panic!("unexpected binary array type: {:?}", array.data_type());
+  GeometryArray::try_new(array)
+    .unwrap()
+    .value(index)
+    .unwrap()
+    .to_vec()
 }
 
 #[derive(Default)]
@@ -175,6 +168,7 @@ fn open_input_accepts_single_layer_geopackage_and_reads_metadata() {
   );
 
   let input = open_gpkg_input(&path, None);
+  let session = DataFusionSession::new(None, None).unwrap();
   assert_eq!(input.total_rows().unwrap(), 2);
   let schema = input.schema().unwrap();
   assert!(schema.field_with_name("id").is_ok());
@@ -200,7 +194,11 @@ fn open_input_accepts_single_layer_geopackage_and_reads_metadata() {
   assert_eq!(projjson["id"]["code"], 4326);
 
   let (ids, names) = runtime().block_on(async {
-    let mut stream = input.read_batches(RowRange::default()).await.unwrap();
+    let dataframe = input
+      .to_dataframe(session.context(), RowRange::default())
+      .await
+      .unwrap();
+    let mut stream = dataframe.execute_stream().await.unwrap();
     let mut ids = Vec::new();
     let mut names = Vec::new();
     while let Some(batch) = stream.next().await {
@@ -220,8 +218,12 @@ fn open_input_accepts_single_layer_geopackage_and_reads_metadata() {
     (ids, names)
   });
 
-  assert_eq!(ids, vec![2, 1]);
-  assert_eq!(names, vec!["late".to_string(), "early".to_string()]);
+  let mut records = ids.into_iter().zip(names).collect::<Vec<_>>();
+  records.sort_unstable_by_key(|(id, _)| *id);
+  assert_eq!(
+    records,
+    vec![(1, "early".to_string()), (2, "late".to_string())]
+  );
 }
 
 #[test]
@@ -743,8 +745,13 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
       assert_eq!(geometry_metadata.has_z, dimension_case.has_z);
       assert_eq!(geometry_metadata.has_m, dimension_case.has_m);
 
+      let session = DataFusionSession::new(None, None).unwrap();
       let bytes = runtime().block_on(async {
-        let mut stream = input.read_batches(RowRange::default()).await.unwrap();
+        let dataframe = input
+          .to_dataframe(session.context(), RowRange::default())
+          .await
+          .unwrap();
+        let mut stream = dataframe.execute_stream().await.unwrap();
         let batch = stream.next().await.unwrap().unwrap();
         binary_value(batch.column_by_name("geometry").unwrap().as_ref(), 0)
       });
@@ -853,8 +860,13 @@ fn gpkg_input_respects_batch_limit() {
   );
 
   let input = open_gpkg_input(&path, None);
+  let session = DataFusionSession::new(None, None).unwrap();
   let rows = runtime().block_on(async {
-    let mut stream = input.read_batches(RowRange::new(0, Some(2))).await.unwrap();
+    let dataframe = input
+      .to_dataframe(session.context(), RowRange::new(0, Some(2)))
+      .await
+      .unwrap();
+    let mut stream = dataframe.execute_stream().await.unwrap();
     let mut rows = 0usize;
     while let Some(batch) = stream.next().await {
       rows += batch.unwrap().num_rows();

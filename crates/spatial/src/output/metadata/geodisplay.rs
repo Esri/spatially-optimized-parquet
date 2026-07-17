@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::geometry::Extent2D;
+use crate::geometry::{Extent2D, QuantizationTransform};
 
 use super::parquet::ParquetMetadata;
 
@@ -161,12 +161,6 @@ pub(crate) struct MultiscaleLevel {
   pub(crate) resolution: f64,
   pub(crate) scale: f64,
   pub(crate) transform: QuantizationTransform,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct QuantizationTransform {
-  pub(crate) scale: [f64; 4],
-  pub(crate) translate: [f64; 4],
 }
 
 impl GeodisplayMetadata {

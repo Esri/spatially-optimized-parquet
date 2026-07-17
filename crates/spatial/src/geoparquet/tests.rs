@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::path::Path;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -10,9 +9,7 @@ use arrow_array::{BinaryArray, Int32Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
-use futures_util::Stream;
 use futures_util::future::BoxFuture;
-use futures_util::stream;
 use gdal::spatial_ref::SpatialRef;
 use parquet::arrow::arrow_writer::ArrowWriter;
 use parquet::basic::Compression;
@@ -28,8 +25,6 @@ use crate::input::{
 };
 
 use super::resolve_source;
-
-type InputBatchStream = Pin<Box<dyn Stream<Item = Result<RecordBatch>> + Send + 'static>>;
 
 fn runtime() -> Runtime {
   Runtime::new().unwrap()
@@ -118,7 +113,7 @@ fn open_parquet_input(path: &Path) -> Arc<dyn InputSource> {
 struct MetadataInputSource {
   schema: SchemaRef,
   metadata: SourceDatasetMetadata,
-  read_batch_calls: Arc<AtomicUsize>,
+  dataframe_calls: Arc<AtomicUsize>,
 }
 
 impl InputSource for MetadataInputSource {
@@ -142,17 +137,17 @@ impl InputSource for MetadataInputSource {
     Ok(self.metadata.clone())
   }
 
-  fn read_batches(&self, _row_range: RowRange) -> BoxFuture<'_, Result<InputBatchStream>> {
-    self.read_batch_calls.fetch_add(1, Ordering::SeqCst);
-    Box::pin(async { Ok(Box::pin(stream::empty::<Result<RecordBatch>>()) as InputBatchStream) })
-  }
-
   fn to_dataframe<'a>(
     &'a self,
-    _ctx: &'a SessionContext,
+    ctx: &'a SessionContext,
     _row_range: RowRange,
   ) -> BoxFuture<'a, Result<DataFrame>> {
-    Box::pin(async { panic!("source context should not create a DataFrame") })
+    self.dataframe_calls.fetch_add(1, Ordering::SeqCst);
+    Box::pin(async move {
+      ctx
+        .read_batch(RecordBatch::new_empty(self.schema.clone()))
+        .map_err(Into::into)
+    })
   }
 }
 
@@ -309,8 +304,8 @@ fn resolved_source_retains_crs_and_extent_in_source_metadata() {
 }
 
 #[test]
-fn resolved_source_uses_complete_metadata_without_scanning_batches() {
-  let read_batch_calls = Arc::new(AtomicUsize::new(0));
+fn resolved_source_uses_complete_metadata_without_creating_dataframe() {
+  let dataframe_calls = Arc::new(AtomicUsize::new(0));
   let expected_extent = Extent2D {
     xmin: -10.0,
     ymin: 5.0,
@@ -332,7 +327,7 @@ fn resolved_source_uses_complete_metadata_without_scanning_batches() {
       }),
       passthrough_kv: Vec::new(),
     },
-    read_batch_calls: read_batch_calls.clone(),
+    dataframe_calls: dataframe_calls.clone(),
   };
 
   let context = runtime()
@@ -348,7 +343,7 @@ fn resolved_source_uses_complete_metadata_without_scanning_batches() {
 
   assert_eq!(context.geometry_types, vec![GeometryKind::Point]);
   assert_eq!(context.source_extent, expected_extent);
-  assert_eq!(read_batch_calls.load(Ordering::SeqCst), 0);
+  assert_eq!(dataframe_calls.load(Ordering::SeqCst), 0);
 }
 
 #[test]
@@ -378,7 +373,7 @@ fn resolved_source_prefers_top_level_crs_authority_code() {
       }),
       passthrough_kv: Vec::new(),
     },
-    read_batch_calls: Arc::new(AtomicUsize::new(0)),
+    dataframe_calls: Arc::new(AtomicUsize::new(0)),
   };
 
   let context = runtime()
@@ -422,7 +417,7 @@ fn resolved_source_preserves_projjson_for_unknown_crs_authority() {
       }),
       passthrough_kv: Vec::new(),
     },
-    read_batch_calls: Arc::new(AtomicUsize::new(0)),
+    dataframe_calls: Arc::new(AtomicUsize::new(0)),
   };
 
   let context = runtime()

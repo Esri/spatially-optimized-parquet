@@ -1,7 +1,10 @@
 //! Removes selected Z/M values from WKB output geometry.
 
 use std::any::Any;
+use std::sync::Arc;
 
+use arrow_array::ArrayRef;
+use arrow_array::builder::BinaryBuilder;
 use arrow_schema::DataType;
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
 use datafusion::logical_expr::{
@@ -10,7 +13,7 @@ use datafusion::logical_expr::{
 use datafusion::prelude::col;
 
 use crate::geometry::{
-  geometry_signature, map_geometry_to_binary, strip_wkb_dimensions, to_datafusion_error,
+  GeometryArray, geometry_signature, strip_wkb_dimensions, to_datafusion_error,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -41,13 +44,17 @@ impl ScalarUDFImpl for StripGeometryDimensionsUdf {
       .into_iter()
       .next()
       .ok_or_else(|| DataFusionError::Execution("missing geometry argument".to_string()))?;
-    let output = map_geometry_to_binary(&geometry, |bytes| match bytes {
-      Some(bytes) => strip_wkb_dimensions(bytes, self.strip_z, self.strip_m)
-        .map(Some)
-        .map_err(to_datafusion_error),
-      None => Ok(None),
-    })?;
-    Ok(ColumnarValue::Array(output))
+    let geometry = GeometryArray::try_new(geometry.as_ref())?;
+    let mut builder = BinaryBuilder::with_capacity(geometry.len(), geometry.len() * 16);
+    for value in geometry.values() {
+      match value {
+        Some(bytes) => builder.append_value(
+          strip_wkb_dimensions(bytes, self.strip_z, self.strip_m).map_err(to_datafusion_error)?,
+        ),
+        None => builder.append_null(),
+      }
+    }
+    Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
   }
 }
 

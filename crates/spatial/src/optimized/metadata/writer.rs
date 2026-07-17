@@ -64,7 +64,7 @@ impl ResolvedOptimization {
         XzClusteringIndexInput {
           code: XZ_CODE_COLUMN.to_string(),
           encoding: self.multiscale_encoding().metadata_identifier().to_string(),
-          geometry_type: self.geometry().geometry_type.as_str().to_string(),
+          geometry_type: self.geometry().ty.as_str().to_string(),
           full_extent: self.target_extent(),
           max_level: DEFAULT_XZ_MAX_LEVEL,
           wkid: self.reprojection().target_spatial_reference().wkid,
@@ -72,7 +72,7 @@ impl ResolvedOptimization {
           has_z: self.geometry().has_z,
           has_m: self.geometry().has_m,
           levels: self
-            .encodings()
+            .levels()
             .iter()
             .map(|encoding| MultiscaleLevelInput {
               column: encoding.column.clone(),
@@ -89,11 +89,11 @@ impl ResolvedOptimization {
   }
 
   fn fallback_geometry_kind(&self) -> GeometryKind {
-    match self.geometry().geometry_type {
-      crate::optimized::OptimizedGeometryType::Point => GeometryKind::Point,
-      crate::optimized::OptimizedGeometryType::MultiPoint => GeometryKind::MultiPoint,
-      crate::optimized::OptimizedGeometryType::Polyline => GeometryKind::LineString,
-      crate::optimized::OptimizedGeometryType::Polygon => GeometryKind::Polygon,
+    match self.geometry().ty {
+      crate::geometry::GeometryType::Point => GeometryKind::Point,
+      crate::geometry::GeometryType::MultiPoint => GeometryKind::MultiPoint,
+      crate::geometry::GeometryType::Polyline => GeometryKind::LineString,
+      crate::geometry::GeometryType::Polygon => GeometryKind::Polygon,
     }
   }
 }

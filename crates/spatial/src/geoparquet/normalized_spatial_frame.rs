@@ -13,12 +13,12 @@ use crate::optimized::COVERING_BBOX_COLUMN;
 use crate::output::{ReprojectionSpec, reproject_geometry_expr, strip_geometry_dimensions_expr};
 
 #[derive(Clone)]
-pub(crate) struct PreparedSpatialFrame {
+pub(crate) struct NormalizedSpatialFrame {
   dataframe: DataFrame,
   geometry_column: String,
 }
 
-impl PreparedSpatialFrame {
+impl NormalizedSpatialFrame {
   pub(crate) fn new(
     mut dataframe: DataFrame,
     source_schema: &Schema,
@@ -55,10 +55,7 @@ impl PreparedSpatialFrame {
     } else {
       dataframe.with_column(
         COVERING_BBOX_COLUMN,
-        geometry_bbox_expr(
-          &source.geometry_spec.column,
-          source.geometry_shape.category(),
-        ),
+        geometry_bbox_expr(&source.geometry_spec.column, source.geometry_type),
       )?
     };
 

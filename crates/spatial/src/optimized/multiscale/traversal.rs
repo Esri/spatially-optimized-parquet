@@ -4,15 +4,14 @@ use anyhow::{Context, Result, bail};
 use geo_traits::Dimensions;
 #[cfg(test)]
 use geo_traits::{
-  CoordTrait, GeometryTrait, GeometryType, LineStringTrait, MultiLineStringTrait, MultiPointTrait,
-  MultiPolygonTrait, PointTrait, PolygonTrait,
+  CoordTrait, GeometryTrait, GeometryType as GeoGeometryType, LineStringTrait,
+  MultiLineStringTrait, MultiPointTrait, MultiPolygonTrait, PointTrait, PolygonTrait,
 };
 
 use crate::geometry::{
-  Extent2D, GeometryKind, PolygonRingOrder, WkbCoordinate,
+  Extent2D, GeometryKind, GeometryType, PolygonRingOrder, WkbCoordinate,
   visit_wkb_geometry as decode_wkb_geometry,
 };
-use crate::optimized::OptimizedGeometryType;
 
 pub(crate) use crate::geometry::{WkbPartRole as GeometryPartRole, WkbSink as GeometryPartSink};
 
@@ -36,20 +35,20 @@ pub(crate) fn visit_wkb_geometry<S: GeometryPartSink>(
 
 pub(crate) fn visit_wkb_geometry_for_display<S: GeometryPartSink>(
   bytes: &[u8],
-  geometry_type: OptimizedGeometryType,
+  geometry_type: GeometryType,
   sink: &mut S,
 ) -> Result<Dimensions> {
   let header = decode_wkb_geometry(bytes, PolygonRingOrder::Reverse, sink)?;
   let kind_matches = match geometry_type {
-    OptimizedGeometryType::Point => header.kind == GeometryKind::Point,
-    OptimizedGeometryType::MultiPoint => header.kind == GeometryKind::MultiPoint,
-    OptimizedGeometryType::Polyline => {
+    GeometryType::Point => header.kind == GeometryKind::Point,
+    GeometryType::MultiPoint => header.kind == GeometryKind::MultiPoint,
+    GeometryType::Polyline => {
       matches!(
         header.kind,
         GeometryKind::LineString | GeometryKind::MultiLineString
       )
     }
-    OptimizedGeometryType::Polygon => {
+    GeometryType::Polygon => {
       matches!(
         header.kind,
         GeometryKind::Polygon | GeometryKind::MultiPolygon
@@ -68,24 +67,24 @@ pub(crate) fn visit_wkb_geometry_for_display<S: GeometryPartSink>(
 #[cfg(test)]
 pub(super) fn visit_geometry_for_display<G: GeometryTrait<T = f64>, S: GeometryPartSink>(
   geometry: &G,
-  geometry_type: OptimizedGeometryType,
+  geometry_type: GeometryType,
   sink: &mut S,
 ) -> Result<()> {
   match (geometry_type, geometry.as_type()) {
-    (OptimizedGeometryType::Point, GeometryType::Point(point)) => visit_point(point, sink),
-    (OptimizedGeometryType::MultiPoint, GeometryType::MultiPoint(points)) => {
+    (GeometryType::Point, GeoGeometryType::Point(point)) => visit_point(point, sink),
+    (GeometryType::MultiPoint, GeoGeometryType::MultiPoint(points)) => {
       visit_multipoint(points, sink)
     }
-    (OptimizedGeometryType::Polyline, GeometryType::LineString(line)) => {
+    (GeometryType::Polyline, GeoGeometryType::LineString(line)) => {
       visit_line_string(line, GeometryPartRole::Other, sink)
     }
-    (OptimizedGeometryType::Polyline, GeometryType::MultiLineString(lines)) => {
+    (GeometryType::Polyline, GeoGeometryType::MultiLineString(lines)) => {
       visit_multiline_string(lines, sink)
     }
-    (OptimizedGeometryType::Polygon, GeometryType::Polygon(polygon)) => {
+    (GeometryType::Polygon, GeoGeometryType::Polygon(polygon)) => {
       visit_polygon_reversed(polygon, sink)
     }
-    (OptimizedGeometryType::Polygon, GeometryType::MultiPolygon(polygons)) => {
+    (GeometryType::Polygon, GeoGeometryType::MultiPolygon(polygons)) => {
       visit_multipolygon_reversed(polygons, sink)
     }
     _ => bail!("unsupported geometry for optimized type {geometry_type:?}"),

@@ -8,12 +8,12 @@ use crate::input::{InputSource, RowRange};
 use crate::optimized::COVERING_BBOX_COLUMN;
 use crate::optimized::TargetExtentResolver;
 use crate::output::{
-  GeoMetadataInput, OutputLayout, ParquetWriterOptions, ReprojectionSpec, TrackingParquetWriter,
+  GeoMetadataInput, OutputLayout, ParquetOutputWriter, ParquetWriterOptions, ReprojectionSpec,
   geoparquet_metadata,
 };
 use crate::pipeline::SharedWriteReporter;
 
-use super::{PreparedSpatialFrame, plain_output_dataframe, resolve_source};
+use super::{NormalizedSpatialFrame, plain_output_dataframe, resolve_source};
 
 pub(crate) struct PlainOutput<'a> {
   input: &'a dyn InputSource,
@@ -78,7 +78,7 @@ impl<'a> PlainOutput<'a> {
       .as_ref()
       .context("missing resolved source CRS PROJJSON")?;
     let reprojection = ReprojectionSpec::from_source_projjson(source_projjson, output_wkid)?;
-    let prepared = PreparedSpatialFrame::new(
+    let normalized = NormalizedSpatialFrame::new(
       self.input_dataframe.clone(),
       self.source_schema,
       &source,
@@ -87,10 +87,10 @@ impl<'a> PlainOutput<'a> {
       strip_m,
     )?;
     let target_extent = TargetExtentResolver::new(self.input, self.row_range)
-      .resolve(&source, &prepared, &reprojection)
+      .resolve(&source, &normalized, &reprojection)
       .await?;
     let dataframe = plain_output_dataframe(
-      prepared.dataframe(),
+      normalized.dataframe(),
       self.source_schema,
       &source.geometry_spec.column,
       covering,
@@ -116,7 +116,7 @@ impl<'a> PlainOutput<'a> {
       .context("missing output path")?
       .to_string_lossy()
       .into_owned();
-    TrackingParquetWriter::new(self.total_rows, self.write_reporter)
+    ParquetOutputWriter::new(self.total_rows, self.write_reporter)
       .write_single(dataframe, output_path, writer_options, Vec::new())
       .await
   }

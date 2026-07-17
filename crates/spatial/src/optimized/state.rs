@@ -14,7 +14,7 @@ pub(super) struct ResolvedOptimization {
   geometry: OptimizedGeometry,
   reprojection: ReprojectionSpec,
   target_extent: Extent2D,
-  encodings: Vec<MultiscaleLevelSpec>,
+  levels: Vec<MultiscaleLevelSpec>,
   multiscale_encoding: MultiscaleEncoding,
 }
 
@@ -24,7 +24,7 @@ impl ResolvedOptimization {
     geometry: OptimizedGeometry,
     reprojection: ReprojectionSpec,
     target_extent: Extent2D,
-    encodings: Vec<MultiscaleLevelSpec>,
+    levels: Vec<MultiscaleLevelSpec>,
     multiscale_encoding: MultiscaleEncoding,
   ) -> Self {
     Self {
@@ -32,7 +32,7 @@ impl ResolvedOptimization {
       geometry,
       reprojection,
       target_extent,
-      encodings,
+      levels,
       multiscale_encoding,
     }
   }
@@ -53,8 +53,8 @@ impl ResolvedOptimization {
     self.target_extent
   }
 
-  pub(super) fn encodings(&self) -> &[MultiscaleLevelSpec] {
-    &self.encodings
+  pub(super) fn levels(&self) -> &[MultiscaleLevelSpec] {
+    &self.levels
   }
 
   pub(super) fn multiscale_encoding(&self) -> MultiscaleEncoding {
@@ -63,8 +63,8 @@ impl ResolvedOptimization {
 
   pub(super) fn delta_binary_packed_column_paths(&self) -> Vec<String> {
     self.multiscale_encoding.delta_binary_packed_column_paths(
-      &self.encodings,
-      self.geometry.geometry_type,
+      &self.levels,
+      self.geometry.ty,
       self.geometry.has_z,
       self.geometry.has_m,
     )

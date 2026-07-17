@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use arrow_schema::Schema;
 use datafusion::dataframe::DataFrame;
 
-use crate::geoparquet::{PreparedSpatialFrame, resolve_source};
+use crate::geoparquet::{NormalizedSpatialFrame, resolve_source};
 use crate::input::{InputSource, RowRange};
 use crate::optimized::clustering::{
   cluster_key_column, cluster_partition_column, validate_cluster_partition_column,
@@ -91,7 +91,7 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
       .context("missing resolved source CRS PROJJSON")?;
     let reprojection =
       ReprojectionSpec::from_source_projjson(source_projjson, options.output_wkid)?;
-    let prepared = PreparedSpatialFrame::new(
+    let normalized = NormalizedSpatialFrame::new(
       self.input_dataframe.clone(),
       self.source_schema,
       &source,
@@ -100,16 +100,16 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
       options.strip_m,
     )?;
     let target_extent = TargetExtentResolver::new(self.state.input, self.state.row_range)
-      .resolve(&source, &prepared, &reprojection)
+      .resolve(&source, &normalized, &reprojection)
       .await?;
-    let encodings = match geometry.clustering_family {
+    let levels = match geometry.clustering_family {
       ClusteringFamily::PointGeometry => Vec::new(),
       ClusteringFamily::ComplexGeometry => {
-        create_multiscale_level_specs(options.output_wkid, geometry.geometry_type)?
+        create_multiscale_level_specs(options.output_wkid, geometry.ty)?
       }
     };
     Ok(OptimizedOutput {
-      input_dataframe: prepared.dataframe(),
+      input_dataframe: normalized.dataframe(),
       output_layout: self.output_layout,
       source_schema: self.source_schema,
       total_input_rows: self.total_input_rows,
@@ -123,7 +123,7 @@ impl<'a> OptimizedOutput<'a, PendingOutputState<'a>> {
           geometry,
           reprojection,
           target_extent,
-          encodings,
+          levels,
           options.multiscale_encoding,
         ),
       },

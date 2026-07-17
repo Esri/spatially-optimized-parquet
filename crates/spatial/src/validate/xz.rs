@@ -1,11 +1,11 @@
-use arrow_array::{Array, Float64Array, UInt64Array};
+use arrow_array::{Array, Float64Array};
 use arrow_schema::DataType;
 
-use crate::geometry::Extent2D;
-use crate::geometry::WkbCoordinate;
+use crate::geometry::{
+  Extent2D, GeometryType, WkbCoordinate, decode_pbf_geometry, native_geometry_data_type,
+};
 use crate::optimized::{
-  GeometryPartRole, GeometryPartSink, OptimizedGeometryType, decode_pbf_geometry, extent_xz_code,
-  native_geometry_data_type, visit_wkb_geometry_for_display,
+  GeometryPartRole, GeometryPartSink, extent_xz_code, visit_wkb_geometry_for_display,
 };
 use crate::output::{QUANTIZED_NATIVE_ENCODING, XzClusteringIndex};
 use crate::parquet_dataset::PartitionFamily;
@@ -16,6 +16,7 @@ use super::multifile::FileCodeRange;
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
 use super::structure::{
   LoadedDatasetFile, array_at_path, display_column_path, field_at_path, read_row_groups,
+  uint64_array_at_path,
 };
 
 const PBF_SEARCH_LIMIT: usize = 512;
@@ -151,19 +152,13 @@ pub(crate) fn validate_xz_file(
   let native_geometry = index.encoding == QUANTIZED_NATIVE_ENCODING;
 
   let read_result = read_row_groups(file, &projected_columns, |row_group, row_offset, batch| {
-    let Ok(geometry) = array_at_path(batch, contract.geometry_column()) else {
-      return;
-    };
-    let Ok(code_values) = array_at_path(batch, &code_path) else {
-      return;
-    };
-    let Some(code_values) = code_values.as_any().downcast_ref::<UInt64Array>() else {
-      return;
-    };
+    let geometry = array_at_path(batch, contract.geometry_column())?;
+    let code_values = uint64_array_at_path(batch, &code_path)?;
     let level_values = level_paths
       .iter()
-      .map(|path| array_at_path(batch, path).ok())
-      .collect::<Vec<_>>();
+      .map(|path| array_at_path(batch, path))
+      .collect::<anyhow::Result<Vec<_>>>()?;
+    let covering_view = covering_extent_view(batch, contract);
 
     for row_index in 0..batch.num_rows() {
       let row = row_offset + row_index as u64;
@@ -211,9 +206,7 @@ pub(crate) fn validate_xz_file(
           continue;
         }
         level_search_count[level_index] += 1;
-        let Some(level_array) = level_values[level_index] else {
-          continue;
-        };
+        let level_array = level_values[level_index];
         let level_location = ValidationLocation::file(file.file.relative_path.clone())
           .with_row_group(row_group)
           .with_row(row)
@@ -336,13 +329,13 @@ pub(crate) fn validate_xz_file(
         report,
       );
       let optimized_geometry_type = match index.geometry_type.as_str() {
-        "multipoint" => OptimizedGeometryType::MultiPoint,
-        "polyline" => OptimizedGeometryType::Polyline,
-        "polygon" => OptimizedGeometryType::Polygon,
+        "multipoint" => GeometryType::MultiPoint,
+        "polyline" => GeometryType::Polyline,
+        "polygon" => GeometryType::Polygon,
         _ => continue,
       };
       if native_geometry {
-        let feature_extent = match covering_extent(batch, contract, row_index) {
+        let feature_extent = match resolve_covering_extent(&covering_view, row_index) {
           Ok(Some(extent)) => Some(extent),
           Ok(None) => inspection.extent,
           Err(error) => {
@@ -366,9 +359,7 @@ pub(crate) fn validate_xz_file(
         continue;
       }
       for (level_index, level) in index.levels.iter().enumerate() {
-        let Some(level_array) = level_values[level_index] else {
-          continue;
-        };
+        let level_array = level_values[level_index];
         let Ok(Some(payload)) = binary_value(level_array, row_index) else {
           continue;
         };
@@ -391,7 +382,7 @@ pub(crate) fn validate_xz_file(
           report,
         );
       }
-      let feature_extent = match covering_extent(batch, contract, row_index) {
+      let feature_extent = match resolve_covering_extent(&covering_view, row_index) {
         Ok(Some(extent)) => Some(extent),
         Ok(None) => inspection.extent,
         Err(error) => {
@@ -424,6 +415,7 @@ pub(crate) fn validate_xz_file(
         );
       }
     }
+    Ok(())
   });
   if let Err(error) = read_result {
     report.push(
@@ -464,11 +456,11 @@ pub(crate) fn validate_xz_file(
   }
 }
 
-fn optimized_geometry_type(value: &str) -> Option<OptimizedGeometryType> {
+fn optimized_geometry_type(value: &str) -> Option<GeometryType> {
   match value {
-    "multipoint" => Some(OptimizedGeometryType::MultiPoint),
-    "polyline" => Some(OptimizedGeometryType::Polyline),
-    "polygon" => Some(OptimizedGeometryType::Polygon),
+    "multipoint" => Some(GeometryType::MultiPoint),
+    "polyline" => Some(GeometryType::Polyline),
+    "polygon" => Some(GeometryType::Polygon),
     _ => None,
   }
 }
@@ -504,7 +496,7 @@ fn validate_sampled_xz_code(
 #[allow(clippy::too_many_arguments)]
 fn validate_pbf_vertex_provenance(
   wkb: &[u8],
-  geometry_type: OptimizedGeometryType,
+  geometry_type: GeometryType,
   lengths: &[u32],
   coords: &[i64],
   level: &crate::output::MultiscaleLevel,
@@ -626,11 +618,22 @@ impl GeometryPartSink for CoordinateCollector {
   fn finish_part(&mut self) {}
 }
 
-fn covering_extent(
-  batch: &arrow_array::RecordBatch,
+struct CoveringExtentView<'array> {
+  xmin: CoveringField<'array>,
+  ymin: CoveringField<'array>,
+  xmax: CoveringField<'array>,
+  ymax: CoveringField<'array>,
+}
+
+struct CoveringField<'array> {
+  array: &'array Float64Array,
+  path: String,
+}
+
+fn covering_extent_view<'array>(
+  batch: &'array arrow_array::RecordBatch,
   contract: &ValidatedMetadata,
-  row_index: usize,
-) -> Result<Option<Extent2D>, String> {
+) -> Result<Option<CoveringExtentView<'array>>, String> {
   let Some(column) = contract.geo.columns.get(contract.geometry_column()) else {
     return Ok(None);
   };
@@ -643,25 +646,54 @@ fn covering_extent(
     covering.bbox.xmax.join("."),
     covering.bbox.ymax.join("."),
   ];
-  let mut values = [0.0; 4];
-  for (value, path) in values.iter_mut().zip(paths) {
+  let fields: [Result<CoveringField<'array>, String>; 4] = paths.map(|path| {
     let array = array_at_path(batch, &path).map_err(|error| error.to_string())?;
     let array = array
       .as_any()
       .downcast_ref::<Float64Array>()
       .ok_or_else(|| format!("covering field '{path}' is not Float64"))?;
-    if array.is_null(row_index) {
+    Ok(CoveringField { array, path })
+  });
+  let [xmin, ymin, xmax, ymax] = fields;
+  Ok(Some(CoveringExtentView {
+    xmin: xmin?,
+    ymin: ymin?,
+    xmax: xmax?,
+    ymax: ymax?,
+  }))
+}
+
+fn resolve_covering_extent(
+  view: &Result<Option<CoveringExtentView<'_>>, String>,
+  row_index: usize,
+) -> Result<Option<Extent2D>, String> {
+  let view = view.as_ref().map_err(Clone::clone)?;
+  let Some(view) = view else {
+    return Ok(None);
+  };
+  covering_extent(view, row_index)
+}
+
+fn covering_extent(
+  view: &CoveringExtentView<'_>,
+  row_index: usize,
+) -> Result<Option<Extent2D>, String> {
+  let values = [&view.xmin, &view.ymin, &view.xmax, &view.ymax];
+  let mut extent_values = [0.0; 4];
+  for (value, extent_value) in values.into_iter().zip(extent_values.iter_mut()) {
+    if value.array.is_null(row_index) {
       return Err(format!(
-        "covering field '{path}' is null for a non-null geometry"
+        "covering field '{}' is null for a non-null geometry",
+        value.path
       ));
     }
-    *value = array.value(row_index);
+    *extent_value = value.array.value(row_index);
   }
   let extent = Extent2D {
-    xmin: values[0],
-    ymin: values[1],
-    xmax: values[2],
-    ymax: values[3],
+    xmin: extent_values[0],
+    ymin: extent_values[1],
+    xmax: extent_values[2],
+    ymax: extent_values[3],
   };
   if [extent.xmin, extent.ymin, extent.xmax, extent.ymax]
     .iter()
@@ -927,7 +959,7 @@ mod tests {
 
     validate_pbf_vertex_provenance(
       &wkb,
-      OptimizedGeometryType::Polyline,
+      GeometryType::Polyline,
       &[2],
       &[0, 0, 10, 2, 0, 999],
       &level,

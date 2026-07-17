@@ -7,9 +7,7 @@ use std::sync::{Arc, OnceLock};
 
 use arrow_array::{Array, ArrayRef, Float64Array, StructArray, UInt64Array};
 use arrow_schema::{DataType, Field, Fields};
-use datafusion::common::cast::{
-  as_binary_array, as_binary_view_array, as_float64_array, as_large_binary_array,
-};
+use datafusion::common::cast::as_float64_array;
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
 use datafusion::logical_expr::{
   ColumnarValue, Expr, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature,
@@ -17,9 +15,7 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::{col, lit};
 
-use crate::geometry::{
-  BinaryValueAccess, Extent2D, geometry_signature, map_geometry_to_u64, to_datafusion_error,
-};
+use crate::geometry::{Extent2D, GeometryArray, geometry_signature, to_datafusion_error};
 use crate::optimized::multiscale::TEMP_XZ_CODE_COLUMN;
 use crate::optimized::multiscale::geometry_extent_from_wkb;
 
@@ -157,16 +153,8 @@ impl ScalarUDFImpl for BoundsUdf {
     let geometry = arrays
       .first()
       .ok_or_else(|| DataFusionError::Execution("missing geometry argument".to_string()))?;
-    let output = match geometry.data_type() {
-      DataType::Binary => bounds_struct(as_binary_array(geometry.as_ref())?)?,
-      DataType::LargeBinary => bounds_struct(as_large_binary_array(geometry.as_ref())?)?,
-      DataType::BinaryView => bounds_struct(as_binary_view_array(geometry.as_ref())?)?,
-      other => {
-        return Err(DataFusionError::Execution(format!(
-          "unsupported geometry data type for UDF: {other}"
-        )));
-      }
-    };
+    let geometry = GeometryArray::try_new(geometry.as_ref())?;
+    let output = bounds_struct(&geometry)?;
     Ok(ColumnarValue::Array(Arc::new(output) as ArrayRef))
   }
 }
@@ -197,17 +185,22 @@ impl ScalarUDFImpl for ComplexGeometryClusterKeyUdf {
       .first()
       .ok_or_else(|| DataFusionError::Execution("missing geometry argument".to_string()))?;
     let full_extent = extent_from_args(&arrays, 1)?;
-    let output = map_geometry_to_u64(geometry, |bytes| match bytes {
-      Some(bytes) => Ok(
-        extent_xz_code(
-          full_extent,
-          geometry_extent_from_wkb(bytes).map_err(to_datafusion_error)?,
-          DEFAULT_XZ_MAX_LEVEL,
-        )
-        .value(),
-      ),
-      None => Ok(0),
-    })?;
+    let geometry = GeometryArray::try_new(geometry.as_ref())?;
+    let values = geometry
+      .values()
+      .map(|value| match value {
+        Some(bytes) => Ok(
+          extent_xz_code(
+            full_extent,
+            geometry_extent_from_wkb(bytes).map_err(to_datafusion_error)?,
+            DEFAULT_XZ_MAX_LEVEL,
+          )
+          .value(),
+        ),
+        None => Ok(0),
+      })
+      .collect::<DataFusionResult<Vec<_>>>()?;
+    let output = UInt64Array::from(values);
     Ok(ColumnarValue::Array(Arc::new(output) as ArrayRef))
   }
 }
@@ -278,16 +271,13 @@ fn complex_geometry_xzcode_from_bounds_udf() -> ScalarUDF {
   ScalarUDF::new_from_impl(ComplexGeometryBoundsClusterKeyUdf)
 }
 
-fn bounds_struct<T>(array: &T) -> DataFusionResult<StructArray>
-where
-  T: BinaryValueAccess,
-{
-  let mut xmin_values = Vec::with_capacity(array.len());
-  let mut ymin_values = Vec::with_capacity(array.len());
-  let mut xmax_values = Vec::with_capacity(array.len());
-  let mut ymax_values = Vec::with_capacity(array.len());
-  for index in 0..array.len() {
-    match array.value_opt(index) {
+fn bounds_struct(geometry: &GeometryArray<'_>) -> DataFusionResult<StructArray> {
+  let mut xmin_values = Vec::with_capacity(geometry.len());
+  let mut ymin_values = Vec::with_capacity(geometry.len());
+  let mut xmax_values = Vec::with_capacity(geometry.len());
+  let mut ymax_values = Vec::with_capacity(geometry.len());
+  for value in geometry.values() {
+    match value {
       Some(bytes) => {
         let extent = geometry_extent_from_wkb(bytes).map_err(to_datafusion_error)?;
         xmin_values.push(Some(extent.xmin));

@@ -1,4 +1,9 @@
-//! Writes nested multiscale geometry arrays with quantized integer coordinates.
+//! Encodes quantized geometry as nested Arrow arrays with integer coordinates.
+//!
+//! Quantized native geometry keeps absolute integer coordinates in nested Arrow lists and
+//! structs. Multipoints use `list<struct<x, y, z?, m?>>`, while polylines and polygons add an
+//! outer list for parts. x and y remain non-null. z and m preserve their source validity through
+//! nullable integer fields.
 
 use std::sync::Arc;
 
@@ -6,10 +11,7 @@ use arrow_array::ArrayRef;
 use arrow_array::builder::{Int64Builder, ListBuilder, StructBuilder};
 use arrow_schema::{DataType, Field, Fields};
 
-use crate::optimized::OptimizedGeometryType;
-
-use super::quantize::{OptionalComponentValidity, QuantizedGeometryBuffer};
-use super::{GEODISPLAY_COLUMN, MultiscaleLevelSpec};
+use super::{ComponentValidity, GeometryType, QuantizedGeometry};
 
 type CoordinateBuilder = StructBuilder;
 type PointListBuilder = ListBuilder<CoordinateBuilder>;
@@ -22,8 +24,8 @@ pub(crate) enum NativeGeometryArrayBuilder {
 }
 
 impl NativeGeometryArrayBuilder {
-  pub(super) fn new(
-    geometry_type: OptimizedGeometryType,
+  pub(crate) fn new(
+    geometry_type: GeometryType,
     has_z: bool,
     has_m: bool,
     capacity: usize,
@@ -34,15 +36,15 @@ impl NativeGeometryArrayBuilder {
       Arc::new(Field::new("element", coordinate_type.clone(), false)),
     );
     match geometry_type {
-      OptimizedGeometryType::MultiPoint => Self::MultiPoint(point_builder),
-      OptimizedGeometryType::Polyline | OptimizedGeometryType::Polygon => {
+      GeometryType::MultiPoint => Self::MultiPoint(point_builder),
+      GeometryType::Polyline | GeometryType::Polygon => {
         let part_type = DataType::List(Arc::new(Field::new("element", coordinate_type, false)));
         Self::Multipart(
           ListBuilder::with_capacity(point_builder, capacity)
             .with_field(Arc::new(Field::new("element", part_type, false))),
         )
       }
-      OptimizedGeometryType::Point => unreachable!("points do not use multiscale geometry"),
+      GeometryType::Point => unreachable!("points do not use multiscale geometry"),
     }
   }
 
@@ -52,7 +54,7 @@ impl NativeGeometryArrayBuilder {
     lengths: &[u32],
     has_z: bool,
     has_m: bool,
-    validity: &OptionalComponentValidity,
+    validity: &ComponentValidity,
   ) {
     let stride = coordinate_stride(has_z, has_m);
     match self {
@@ -81,7 +83,7 @@ impl NativeGeometryArrayBuilder {
     }
   }
 
-  pub(super) fn append_quantized_geometry(&mut self, geometry: &QuantizedGeometryBuffer) {
+  pub(crate) fn append_quantized_geometry(&mut self, geometry: &QuantizedGeometry) {
     self.append_geometry(
       &geometry.coordinates,
       &geometry.lengths,
@@ -91,14 +93,14 @@ impl NativeGeometryArrayBuilder {
     );
   }
 
-  pub(super) fn append_null(&mut self) {
+  pub(crate) fn append_null(&mut self) {
     match self {
       Self::MultiPoint(builder) => builder.append(false),
       Self::Multipart(builder) => builder.append(false),
     }
   }
 
-  pub(super) fn finish(&mut self) -> ArrayRef {
+  pub(crate) fn finish(&mut self) -> ArrayRef {
     match self {
       Self::MultiPoint(builder) => Arc::new(builder.finish()),
       Self::Multipart(builder) => Arc::new(builder.finish()),
@@ -107,31 +109,32 @@ impl NativeGeometryArrayBuilder {
 }
 
 pub(crate) fn native_geometry_data_type(
-  geometry_type: OptimizedGeometryType,
+  geometry_type: GeometryType,
   has_z: bool,
   has_m: bool,
 ) -> DataType {
   let coordinate_type = coordinate_data_type(has_z, has_m);
   let coordinate_list = DataType::List(Arc::new(Field::new("element", coordinate_type, false)));
   match geometry_type {
-    OptimizedGeometryType::MultiPoint => coordinate_list,
-    OptimizedGeometryType::Polyline | OptimizedGeometryType::Polygon => {
+    GeometryType::MultiPoint => coordinate_list,
+    GeometryType::Polyline | GeometryType::Polygon => {
       DataType::List(Arc::new(Field::new("element", coordinate_list, false)))
     }
-    OptimizedGeometryType::Point => unreachable!("points do not use multiscale geometry"),
+    GeometryType::Point => unreachable!("points do not use multiscale geometry"),
   }
 }
 
 pub(crate) fn native_coordinate_column_paths(
-  encodings: &[MultiscaleLevelSpec],
-  geometry_type: OptimizedGeometryType,
+  parent_column: &str,
+  level_columns: &[String],
+  geometry_type: GeometryType,
   has_z: bool,
   has_m: bool,
 ) -> Vec<String> {
   let nesting = match geometry_type {
-    OptimizedGeometryType::MultiPoint => "list.element",
-    OptimizedGeometryType::Polyline | OptimizedGeometryType::Polygon => "list.element.list.element",
-    OptimizedGeometryType::Point => return Vec::new(),
+    GeometryType::MultiPoint => "list.element",
+    GeometryType::Polyline | GeometryType::Polygon => "list.element.list.element",
+    GeometryType::Point => return Vec::new(),
   };
   let mut components = vec!["x", "y"];
   if has_z {
@@ -140,15 +143,12 @@ pub(crate) fn native_coordinate_column_paths(
   if has_m {
     components.push("m");
   }
-  encodings
+  level_columns
     .iter()
-    .flat_map(|encoding| {
-      components.iter().map(move |component| {
-        format!(
-          "{GEODISPLAY_COLUMN}.{}.{nesting}.{component}",
-          encoding.column
-        )
-      })
+    .flat_map(|level_column| {
+      components
+        .iter()
+        .map(move |component| format!("{parent_column}.{level_column}.{nesting}.{component}",))
     })
     .collect()
 }
@@ -176,7 +176,7 @@ fn append_coordinates(
   coordinates: &[i64],
   has_z: bool,
   has_m: bool,
-  validity: &OptionalComponentValidity,
+  validity: &ComponentValidity,
   coordinate_index_offset: usize,
 ) {
   let stride = coordinate_stride(has_z, has_m);
@@ -228,14 +228,13 @@ mod tests {
 
   #[test]
   fn builds_multipart_geometry_with_absolute_integer_coordinates() {
-    let mut builder =
-      NativeGeometryArrayBuilder::new(OptimizedGeometryType::Polygon, false, false, 1);
+    let mut builder = NativeGeometryArrayBuilder::new(GeometryType::Polygon, false, false, 1);
     builder.append_geometry(
       &[1, 2, 4, 6, 7, 8],
       &[2, 1],
       false,
       false,
-      &OptionalComponentValidity::default(),
+      &ComponentValidity::default(),
     );
     let array = builder.finish();
     let geometries = array.as_any().downcast_ref::<ListArray>().unwrap();

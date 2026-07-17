@@ -3,7 +3,7 @@
 use anyhow::{Context, Result, bail};
 use futures_util::StreamExt;
 
-use crate::geometry::{BinaryValueAccess, Extent2D, GeometryKind, geometry_kind_from_wkb};
+use crate::geometry::{Extent2D, GeometryArray, GeometryKind, geometry_kind_from_wkb};
 use crate::optimized::geometry_extent_from_wkb;
 
 pub(super) async fn scan_geometry_metadata(
@@ -22,33 +22,8 @@ pub(super) async fn scan_geometry_metadata(
     let array = batch
       .column_by_name(geometry_column)
       .with_context(|| format!("missing geometry column '{geometry_column}'"))?;
-    match array.data_type() {
-      arrow_schema::DataType::Binary => scan_binary_values(
-        array
-          .as_any()
-          .downcast_ref::<arrow_array::BinaryArray>()
-          .context("geometry column was not Binary")?,
-        &mut geometry_types,
-        &mut full_extent,
-      )?,
-      arrow_schema::DataType::LargeBinary => scan_binary_values(
-        array
-          .as_any()
-          .downcast_ref::<arrow_array::LargeBinaryArray>()
-          .context("geometry column was not LargeBinary")?,
-        &mut geometry_types,
-        &mut full_extent,
-      )?,
-      arrow_schema::DataType::BinaryView => scan_binary_values(
-        array
-          .as_any()
-          .downcast_ref::<arrow_array::BinaryViewArray>()
-          .context("geometry column was not BinaryView")?,
-        &mut geometry_types,
-        &mut full_extent,
-      )?,
-      data_type => bail!("unsupported geometry column type: {data_type}"),
-    }
+    let geometry = GeometryArray::try_new(array.as_ref()).map_err(anyhow::Error::from)?;
+    scan_binary_values(&geometry, &mut geometry_types, &mut full_extent)?;
   }
   if geometry_types.is_empty() {
     bail!("unable to determine geometry type from selected rows");
@@ -59,13 +34,13 @@ pub(super) async fn scan_geometry_metadata(
   ))
 }
 
-fn scan_binary_values<T: BinaryValueAccess>(
-  array: &T,
+fn scan_binary_values(
+  geometry: &GeometryArray<'_>,
   geometry_types: &mut Vec<GeometryKind>,
   full_extent: &mut Option<Extent2D>,
 ) -> Result<()> {
-  for index in 0..array.len() {
-    let Some(bytes) = array.value_opt(index) else {
+  for value in geometry.values() {
+    let Some(bytes) = value else {
       continue;
     };
     let geometry_kind = geometry_kind_from_wkb(bytes)?;

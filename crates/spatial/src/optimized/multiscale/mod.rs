@@ -2,14 +2,9 @@
 
 mod columns;
 mod datafusion;
+mod level_array_builder;
 mod levels;
-mod native_writer;
-mod payload;
-mod pbf_writer;
-mod quantize;
 mod traversal;
-mod wire;
-mod writer;
 
 pub(crate) use columns::{COVERING_BBOX_COLUMN, validate_internal_projection_columns};
 pub(crate) use columns::{
@@ -18,13 +13,7 @@ pub(crate) use columns::{
 };
 pub(crate) use datafusion::{complex_geometry_geodisplay_expr, point_geometry_geodisplay_expr};
 pub(crate) use levels::{MultiscaleLevelSpec, create_multiscale_level_specs};
-pub(crate) use native_writer::native_geometry_data_type;
-use payload::flat_geometry_payload_from_wkb;
 pub(crate) use traversal::{
   GeometryPartRole, GeometryPartSink, geometry_extent_from_wkb, visit_wkb_geometry,
   visit_wkb_geometry_for_display,
 };
-pub(crate) use wire::decode_pbf_geometry;
-
-#[cfg(test)]
-use payload::geometry_payload_from_geometry;

@@ -1,7 +1,7 @@
 use std::fs::File;
 
 use anyhow::{Context, Result};
-use arrow_array::{Array, RecordBatch, StructArray};
+use arrow_array::{Array, Float64Array, RecordBatch, StructArray, UInt64Array};
 use arrow_schema::{DataType, Field, Schema};
 use parquet::arrow::ProjectionMask;
 use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ParquetRecordBatchReaderBuilder};
@@ -9,7 +9,7 @@ use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ParquetRecordBatchReader
 use crate::output::GeodisplayIndex;
 use crate::parquet_dataset::{ParquetDatasetFile, PartitionFamily, load_parquet_metadata};
 
-use super::metadata::ValidatedMetadata;
+use super::metadata::{ValidatedDatasetFile, ValidatedMetadata};
 use super::multifile::FileCodeRange;
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
 
@@ -44,56 +44,53 @@ pub(crate) fn load_dataset_files(
 
 pub(crate) fn validate_dataset_structure(
   files: &[LoadedDatasetFile],
-  contracts: &[Option<ValidatedMetadata>],
+  validated_files: &[ValidatedDatasetFile<'_>],
   report: &mut ValidationReport,
 ) {
   validate_dataset_schema_consistency(files, report);
-  for (file, contract) in files.iter().zip(contracts) {
-    let Some(contract) = contract else {
-      continue;
-    };
-    validate_geometry_schema(file, contract, report);
-    match &contract.geodisplay.index {
+  for validated_file in validated_files {
+    let file = validated_file.file;
+    let metadata = &validated_file.metadata;
+    validate_geometry_schema(file, metadata, report);
+    match &metadata.geodisplay.index {
       GeodisplayIndex::Z(index) => super::z::validate_z_schema(
         file,
-        contract.geodisplay.parent_column.as_deref(),
+        metadata.geodisplay.parent_column.as_deref(),
         index,
         report,
       ),
       GeodisplayIndex::Xz(index) => super::xz::validate_xz_schema(
         file,
-        contract.geodisplay.parent_column.as_deref(),
+        metadata.geodisplay.parent_column.as_deref(),
         index,
         report,
       ),
     }
-    validate_partition_family(file, contract, report);
-    validate_clustering_page_indexes(file, contract, report);
+    validate_partition_family(file, metadata, report);
+    validate_clustering_page_indexes(file, metadata, report);
   }
 }
 
 pub(crate) fn validate_file_data(
-  files: &[LoadedDatasetFile],
-  contracts: &[Option<ValidatedMetadata>],
+  validated_files: &[ValidatedDatasetFile<'_>],
   report: &mut ValidationReport,
 ) -> Vec<FileCodeRange> {
   let mut ranges = Vec::new();
-  for (file, contract) in files.iter().zip(contracts) {
-    let Some(contract) = contract else {
-      continue;
-    };
-    let range = match &contract.geodisplay.index {
+  for validated_file in validated_files {
+    let file = validated_file.file;
+    let metadata = &validated_file.metadata;
+    let range = match &metadata.geodisplay.index {
       GeodisplayIndex::Z(index) => super::z::validate_z_file(
         file,
-        contract,
-        contract.geodisplay.parent_column.as_deref(),
+        metadata,
+        metadata.geodisplay.parent_column.as_deref(),
         index,
         report,
       ),
       GeodisplayIndex::Xz(index) => super::xz::validate_xz_file(
         file,
-        contract,
-        contract.geodisplay.parent_column.as_deref(),
+        metadata,
+        metadata.geodisplay.parent_column.as_deref(),
         index,
         report,
       ),
@@ -373,10 +370,30 @@ pub(crate) fn array_at_path<'a>(batch: &'a RecordBatch, path: &str) -> Result<&'
   Ok(array)
 }
 
+pub(crate) fn float64_array_at_path<'a>(
+  batch: &'a RecordBatch,
+  path: &str,
+) -> Result<&'a Float64Array> {
+  array_at_path(batch, path)?
+    .as_any()
+    .downcast_ref::<Float64Array>()
+    .with_context(|| format!("Arrow column '{path}' is not Float64"))
+}
+
+pub(crate) fn uint64_array_at_path<'a>(
+  batch: &'a RecordBatch,
+  path: &str,
+) -> Result<&'a UInt64Array> {
+  array_at_path(batch, path)?
+    .as_any()
+    .downcast_ref::<UInt64Array>()
+    .with_context(|| format!("Arrow column '{path}' is not UInt64"))
+}
+
 pub(crate) fn read_row_groups(
   file: &LoadedDatasetFile,
   columns: &[String],
-  mut visit_batch: impl FnMut(usize, u64, &RecordBatch),
+  mut visit_batch: impl FnMut(usize, u64, &RecordBatch) -> Result<()>,
 ) -> Result<()> {
   let projection = ProjectionMask::columns(
     file.metadata.parquet_schema(),
@@ -395,7 +412,7 @@ pub(crate) fn read_row_groups(
     for batch in reader {
       let batch =
         batch.with_context(|| format!("read parquet rows: {}", file.file.path.display()))?;
-      visit_batch(row_group, row_offset, &batch);
+      visit_batch(row_group, row_offset, &batch)?;
       row_offset += batch.num_rows() as u64;
     }
   }

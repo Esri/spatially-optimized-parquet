@@ -8,14 +8,16 @@ mod metadata;
 mod mode;
 mod multiscale;
 mod parquet;
+mod parquet_partition_exec;
 mod parquet_sink;
+mod parquet_writer;
 mod reprojection;
 mod spatial_reference;
 
+#[cfg(test)]
+pub(crate) use crate::geometry::QuantizationTransform;
 pub(crate) use dimensions::strip_geometry_dimensions_expr;
 pub(crate) use layout::OutputLayout;
-#[cfg(test)]
-pub(crate) use metadata::QuantizationTransform;
 pub(crate) use metadata::{
   ESRI_PBF_ENCODING, GEODISPLAY_VERSION, GeoMetadata, GeoMetadataInput, GeodisplayIndex,
   GeodisplayMetadata, MultiscaleLevel, MultiscaleLevelInput, QUANTIZED_NATIVE_ENCODING,
@@ -25,7 +27,7 @@ pub(crate) use metadata::{
 pub use mode::OutputMode;
 pub use multiscale::MultiscaleEncoding;
 pub(crate) use parquet::ParquetWriterOptions;
-pub(crate) use parquet_sink::TrackingParquetWriter;
+pub(crate) use parquet_writer::ParquetOutputWriter;
 pub(crate) use reprojection::{ReprojectionSpec, reproject_geometry_expr};
 pub use spatial_reference::DEFAULT_OUTPUT_WKID;
 pub(crate) use spatial_reference::{

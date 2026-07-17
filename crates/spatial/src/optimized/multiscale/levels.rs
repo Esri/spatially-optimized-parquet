@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use crate::optimized::OptimizedGeometryType;
+use crate::geometry::{GeometryType, QuantizationTransform};
 use crate::output::{DEFAULT_OUTPUT_WKID, WEB_MERCATOR_OUTPUT_WKID};
 
 const WGS84_SEMI_MAJOR_AXIS: f64 = 6_378_137.0;
@@ -17,15 +17,6 @@ const FIRST_PROJECTED_LEVEL_RESOLUTION: f64 = WGS84_EQUATORIAL_CIRCUMFERENCE / R
 const FIRST_LEVEL_SCALE: f64 =
   WGS84_EQUATORIAL_CIRCUMFERENCE * DISPLAY_DPI * 10_000.0 / (254.0 * ROOT_GRID_SIZE);
 const MAX_MULTISCALE_LEVEL: u16 = 16;
-
-#[derive(Debug, Clone, PartialEq)]
-/// Describes the scale and translation used to quantize four-dimensional coordinates.
-pub(crate) struct QuantizationTransform {
-  /// Stores per-axis quantization scale values.
-  pub(crate) scale: [f64; 4],
-  /// Stores per-axis quantization origins.
-  pub(crate) translate: [f64; 4],
-}
 
 /// Stores the quantization and simplification settings for one output geometry column.
 #[derive(Debug, Clone, PartialEq)]
@@ -47,7 +38,7 @@ pub(crate) struct MultiscaleLevelSpec {
 /// Create supported even-numbered multiscale level specifications for the target spatial reference.
 pub(crate) fn create_multiscale_level_specs(
   output_wkid: u32,
-  geometry_type: OptimizedGeometryType,
+  geometry_type: GeometryType,
 ) -> Result<Vec<MultiscaleLevelSpec>> {
   let min_length = min_vertex_count(geometry_type);
   let mut resolution = match output_wkid {
@@ -56,11 +47,11 @@ pub(crate) fn create_multiscale_level_specs(
     _ => todo!("multiscale levels for output WKID {output_wkid}"),
   };
   let mut scale = FIRST_LEVEL_SCALE;
-  let mut encodings = Vec::new();
+  let mut levels = Vec::new();
 
   for level in 0..=MAX_MULTISCALE_LEVEL {
     if level % 2 == 0 {
-      encodings.push(MultiscaleLevelSpec {
+      levels.push(MultiscaleLevelSpec {
         level,
         column: format!("level_{level}"),
         resolution,
@@ -76,14 +67,14 @@ pub(crate) fn create_multiscale_level_specs(
     scale /= 2.0;
   }
 
-  Ok(encodings)
+  Ok(levels)
 }
 
-fn min_vertex_count(geometry_type: OptimizedGeometryType) -> usize {
+fn min_vertex_count(geometry_type: GeometryType) -> usize {
   match geometry_type {
-    OptimizedGeometryType::MultiPoint | OptimizedGeometryType::Point => 1,
-    OptimizedGeometryType::Polyline => 2,
-    OptimizedGeometryType::Polygon => 3,
+    GeometryType::MultiPoint | GeometryType::Point => 1,
+    GeometryType::Polyline => 2,
+    GeometryType::Polygon => 3,
   }
 }
 
@@ -93,30 +84,28 @@ mod tests {
 
   #[test]
   fn creates_even_wgs84_levels() {
-    let encodings =
-      create_multiscale_level_specs(DEFAULT_OUTPUT_WKID, OptimizedGeometryType::Polygon).unwrap();
-    assert_eq!(encodings.first().unwrap().level, 0);
-    assert_eq!(encodings.last().unwrap().level, 16);
-    assert_eq!(encodings[0].min_length, 3);
-    assert_eq!(encodings.len(), 9);
-    assert_eq!(encodings[0].resolution, FIRST_LEVEL_RESOLUTION);
-    assert_eq!(encodings[0].scale, FIRST_LEVEL_SCALE);
+    let levels = create_multiscale_level_specs(DEFAULT_OUTPUT_WKID, GeometryType::Polygon).unwrap();
+    assert_eq!(levels.first().unwrap().level, 0);
+    assert_eq!(levels.last().unwrap().level, 16);
+    assert_eq!(levels[0].min_length, 3);
+    assert_eq!(levels.len(), 9);
+    assert_eq!(levels[0].resolution, FIRST_LEVEL_RESOLUTION);
+    assert_eq!(levels[0].scale, FIRST_LEVEL_SCALE);
     assert_eq!(
-      encodings[0].transform.scale,
+      levels[0].transform.scale,
       [FIRST_LEVEL_RESOLUTION, FIRST_LEVEL_RESOLUTION, 1.0, 1.0]
     );
-    assert_eq!(encodings[1].level, 2);
-    assert_eq!(encodings[1].resolution, FIRST_LEVEL_RESOLUTION / 4.0);
+    assert_eq!(levels[1].level, 2);
+    assert_eq!(levels[1].resolution, FIRST_LEVEL_RESOLUTION / 4.0);
   }
 
   #[test]
   fn creates_web_mercator_levels() {
-    let encodings =
-      create_multiscale_level_specs(WEB_MERCATOR_OUTPUT_WKID, OptimizedGeometryType::Polygon)
-        .unwrap();
-    assert_eq!(encodings[0].resolution, FIRST_PROJECTED_LEVEL_RESOLUTION);
+    let levels =
+      create_multiscale_level_specs(WEB_MERCATOR_OUTPUT_WKID, GeometryType::Polygon).unwrap();
+    assert_eq!(levels[0].resolution, FIRST_PROJECTED_LEVEL_RESOLUTION);
     assert_eq!(
-      encodings[0].transform.scale,
+      levels[0].transform.scale,
       [
         FIRST_PROJECTED_LEVEL_RESOLUTION,
         FIRST_PROJECTED_LEVEL_RESOLUTION,
@@ -124,9 +113,6 @@ mod tests {
         1.0
       ]
     );
-    assert_eq!(
-      encodings[1].resolution,
-      FIRST_PROJECTED_LEVEL_RESOLUTION / 4.0
-    );
+    assert_eq!(levels[1].resolution, FIRST_PROJECTED_LEVEL_RESOLUTION / 4.0);
   }
 }

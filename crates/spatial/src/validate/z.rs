@@ -1,4 +1,4 @@
-use arrow_array::{Array, Float64Array, UInt64Array};
+use arrow_array::Array;
 use arrow_schema::DataType;
 
 use crate::geometry::read_wkb_point_coordinate;
@@ -11,7 +11,8 @@ use super::metadata::{ValidatedMetadata, float_matches};
 use super::multifile::FileCodeRange;
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
 use super::structure::{
-  LoadedDatasetFile, array_at_path, display_column_path, field_at_path, read_row_groups,
+  LoadedDatasetFile, array_at_path, display_column_path, field_at_path, float64_array_at_path,
+  read_row_groups, uint64_array_at_path,
 };
 
 pub(crate) fn validate_z_schema(
@@ -153,39 +154,18 @@ pub(crate) fn validate_z_file(
   let mut maximum = None::<u64>;
   let mut sampled_geometry_count = 0usize;
   let read_result = read_row_groups(file, &projected_columns, |row_group, row_offset, batch| {
-    let Ok(geometry) = array_at_path(batch, contract.geometry_column()) else {
-      return;
-    };
-    let Ok(x_values) = array_at_path(batch, &x_path) else {
-      return;
-    };
-    let Ok(y_values) = array_at_path(batch, &y_path) else {
-      return;
-    };
-    let Ok(code_values) = array_at_path(batch, &code_path) else {
-      return;
-    };
-    let Some(x_values) = x_values.as_any().downcast_ref::<Float64Array>() else {
-      return;
-    };
-    let Some(y_values) = y_values.as_any().downcast_ref::<Float64Array>() else {
-      return;
-    };
-    let Some(code_values) = code_values.as_any().downcast_ref::<UInt64Array>() else {
-      return;
-    };
-    let z_values = z_path.as_ref().and_then(|path| {
-      array_at_path(batch, path)
-        .ok()?
-        .as_any()
-        .downcast_ref::<Float64Array>()
-    });
-    let m_values = m_path.as_ref().and_then(|path| {
-      array_at_path(batch, path)
-        .ok()?
-        .as_any()
-        .downcast_ref::<Float64Array>()
-    });
+    let geometry = array_at_path(batch, contract.geometry_column())?;
+    let x_values = float64_array_at_path(batch, &x_path)?;
+    let y_values = float64_array_at_path(batch, &y_path)?;
+    let code_values = uint64_array_at_path(batch, &code_path)?;
+    let z_values = z_path
+      .as_deref()
+      .map(|path| float64_array_at_path(batch, path))
+      .transpose()?;
+    let m_values = m_path
+      .as_deref()
+      .map(|path| float64_array_at_path(batch, path))
+      .transpose()?;
 
     for row_index in 0..batch.num_rows() {
       let row = row_offset + row_index as u64;
@@ -394,6 +374,7 @@ pub(crate) fn validate_z_file(
         );
       }
     }
+    Ok(())
   });
   if let Err(error) = read_result {
     report.push(

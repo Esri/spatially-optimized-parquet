@@ -5,9 +5,7 @@ use std::sync::{Arc, OnceLock};
 
 use arrow_array::{Array, ArrayRef, Float64Array, StructArray, UInt64Array};
 use arrow_schema::{DataType, Field, Fields};
-use datafusion::common::cast::{
-  as_binary_array, as_binary_view_array, as_float64_array, as_large_binary_array,
-};
+use datafusion::common::cast::as_float64_array;
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
 use datafusion::logical_expr::{
   ColumnarValue, Expr, ReturnFieldArgs, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature,
@@ -16,7 +14,7 @@ use datafusion::logical_expr::{
 use datafusion::prelude::{col, lit};
 
 use crate::geometry::read_wkb_point_coordinate;
-use crate::geometry::{BinaryValueAccess, Extent2D, geometry_signature, to_datafusion_error};
+use crate::geometry::{Extent2D, GeometryArray, geometry_signature, to_datafusion_error};
 use crate::optimized::multiscale::{
   POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_CODE_COLUMN, POINT_Z_COLUMN,
 };
@@ -95,25 +93,8 @@ impl ScalarUDFImpl for PointGeometryUdf {
     let geometry = arrays
       .first()
       .ok_or_else(|| DataFusionError::Execution("missing geometry argument".to_string()))?;
-    let output = match geometry.data_type() {
-      DataType::Binary => point_coords_struct(
-        as_binary_array(geometry.as_ref())?,
-        self.expected_dimensions,
-      )?,
-      DataType::LargeBinary => point_coords_struct(
-        as_large_binary_array(geometry.as_ref())?,
-        self.expected_dimensions,
-      )?,
-      DataType::BinaryView => point_coords_struct(
-        as_binary_view_array(geometry.as_ref())?,
-        self.expected_dimensions,
-      )?,
-      other => {
-        return Err(DataFusionError::Execution(format!(
-          "unsupported geometry data type for UDF: {other}"
-        )));
-      }
-    };
+    let geometry = GeometryArray::try_new(geometry.as_ref())?;
+    let output = point_coords_struct(&geometry, self.expected_dimensions)?;
     Ok(ColumnarValue::Array(Arc::new(output) as ArrayRef))
   }
 }
@@ -179,19 +160,16 @@ fn point_geometry_zcode_from_xy_udf() -> ScalarUDF {
   ScalarUDF::new_from_impl(PointGeometryClusterKeyUdf)
 }
 
-fn point_coords_struct<T>(
-  array: &T,
+fn point_coords_struct(
+  geometry: &GeometryArray<'_>,
   expected_dimensions: Option<(bool, bool)>,
-) -> DataFusionResult<StructArray>
-where
-  T: BinaryValueAccess,
-{
-  let mut xs = Vec::with_capacity(array.len());
-  let mut ys = Vec::with_capacity(array.len());
-  let mut zs = Vec::with_capacity(array.len());
-  let mut ms = Vec::with_capacity(array.len());
-  for index in 0..array.len() {
-    let Some(bytes) = array.value_opt(index) else {
+) -> DataFusionResult<StructArray> {
+  let mut xs = Vec::with_capacity(geometry.len());
+  let mut ys = Vec::with_capacity(geometry.len());
+  let mut zs = Vec::with_capacity(geometry.len());
+  let mut ms = Vec::with_capacity(geometry.len());
+  for value in geometry.values() {
+    let Some(bytes) = value else {
       xs.push(None);
       ys.push(None);
       zs.push(None);
@@ -299,7 +277,8 @@ mod tests {
     let point_wkb = crate::geometry::write_test_geometry(&Geometry::Point(Point::new(1.0, 2.0)));
     let input = BinaryArray::from(vec![Some(point_wkb.as_slice()), None]);
 
-    let coordinates = point_coords_struct(&input, None).unwrap();
+    let geometry = GeometryArray::try_new(&input).unwrap();
+    let coordinates = point_coords_struct(&geometry, None).unwrap();
     let x = coordinates
       .column_by_name("x")
       .unwrap()
@@ -329,7 +308,8 @@ mod tests {
     let invalid_wkb = [0_u8, 1, 2];
     let input = BinaryArray::from(vec![Some(invalid_wkb.as_slice())]);
 
-    let error = point_coords_struct(&input, None).unwrap_err();
+    let geometry = GeometryArray::try_new(&input).unwrap();
+    let error = point_coords_struct(&geometry, None).unwrap_err();
 
     assert!(error.to_string().contains("unexpected end of WKB"));
   }
