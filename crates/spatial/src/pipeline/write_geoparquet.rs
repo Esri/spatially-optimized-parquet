@@ -1,4 +1,4 @@
-//! Executes normalized single-file GeoParquet.
+//! Writes single-file GeoParquet.
 
 use anyhow::Result;
 

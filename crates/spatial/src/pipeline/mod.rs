@@ -1,13 +1,12 @@
 //! Connects one spatial request to its complete DataFusion execution path.
 
-mod optimized;
-mod optimized_partitioned;
-mod optimized_single_file;
 mod options;
-mod plain;
 mod reporter;
 mod result;
 mod runner;
+mod write_geoparquet;
+mod write_optimized_geoparquet;
+mod write_optimized_geoparquet_partitioned;
 
 use std::sync::Arc;
 

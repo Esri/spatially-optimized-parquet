@@ -1,9 +1,9 @@
-//! Executes globally sorted optimized single-file GeoParquet.
+//! Writes globally sorted optimized single-file GeoParquet.
 
 use anyhow::Result;
 
-use super::optimized::OptimizedGeoParquetWriter;
 use super::{OptimizedSingleFilePipeline, SpatialPipelineResult};
+use crate::optimized::OptimizedGeoParquetWriter;
 
 impl OptimizedSingleFilePipeline {
   pub(super) async fn execute(self) -> Result<SpatialPipelineResult> {

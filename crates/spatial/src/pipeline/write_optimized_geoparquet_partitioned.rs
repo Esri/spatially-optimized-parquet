@@ -1,9 +1,9 @@
-//! Executes range-partitioned optimized GeoParquet.
+//! Writes range-partitioned optimized GeoParquet.
 
 use anyhow::Result;
 
-use super::optimized::OptimizedGeoParquetWriter;
 use super::{OptimizedPartitionedPipeline, SpatialPipelineResult};
+use crate::optimized::OptimizedGeoParquetWriter;
 
 impl OptimizedPartitionedPipeline {
   pub(super) async fn execute(self) -> Result<SpatialPipelineResult> {
