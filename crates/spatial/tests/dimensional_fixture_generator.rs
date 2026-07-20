@@ -220,8 +220,8 @@ fn inspect_fixture(path: &Path, geometry: FixtureGeometry, layout: CoordinateLay
     geo["columns"]["geometry"]["geometry_types"][0],
     geometry.geoparquet_type(layout)
   );
-  assert_eq!(geodisplay["index"]["hasZ"], layout.has_z());
-  assert_eq!(geodisplay["index"]["hasM"], layout.has_m());
+  assert_eq!(geodisplay["hasZ"], layout.has_z());
+  assert_eq!(geodisplay["hasM"], layout.has_m());
 
   let runtime = Runtime::new().unwrap();
   let dataframe = runtime

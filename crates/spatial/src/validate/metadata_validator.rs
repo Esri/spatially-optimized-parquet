@@ -5,8 +5,7 @@ use serde::de::DeserializeOwned;
 use crate::geometry::{Extent2D, GeometryType};
 use crate::geoparquet::GeoMetadata;
 use crate::optimized::{
-  ClusteringIndexXZ, ClusteringIndexZ, DEFAULT_XZ_MAX_LEVEL, GEODISPLAY_VERSION, GeodisplayIndex,
-  GeodisplayMetadata,
+  ClusteringIndexXZ, ClusteringIndexZ, DEFAULT_XZ_MAX_LEVEL, GEODISPLAY_VERSION, GeodisplayMetadata,
 };
 
 use super::file_validator::FileValidator;
@@ -270,9 +269,9 @@ impl MetadataValidator {
     file: &FileValidator,
     report: &mut ValidationReport,
   ) {
-    match &geodisplay.index {
-      GeodisplayIndex::Z { index } => Self::validate_z_metadata(index, file, report),
-      GeodisplayIndex::Xz { index } => Self::validate_xz_metadata(index, file, report),
+    match geodisplay {
+      GeodisplayMetadata::Z { index } => Self::validate_z_metadata(index, file, report),
+      GeodisplayMetadata::Xz { index } => Self::validate_xz_metadata(index, file, report),
     }
   }
 
@@ -345,9 +344,9 @@ impl MetadataValidator {
       );
     }
     for (name, value) in [
-      ("code", index.code.as_str()),
-      ("xColumn", index.x_column.as_str()),
-      ("yColumn", index.y_column.as_str()),
+      ("code", &index.code),
+      ("xColumn", &index.x_column),
+      ("yColumn", &index.y_column),
     ] {
       if value.is_empty() {
         report.push(
@@ -443,7 +442,7 @@ impl MetadataValidator {
           ),
         );
       }
-      if level.column.is_empty() || !columns.insert(level.column.as_str()) {
+      if level.column.is_empty() || !columns.insert(&level.column) {
         report.push(
           ValidationRule::XzMetadata,
           ValidationSeverity::Error,
@@ -495,9 +494,9 @@ impl MetadataValidator {
     };
     let matches_family = column.geometry_types.iter().all(|geometry_type| {
       let base = Self::geometry_base_type(geometry_type);
-      match &geodisplay.index {
-        GeodisplayIndex::Z { .. } => base == "Point",
-        GeodisplayIndex::Xz { index } => match index.geometry_type {
+      match geodisplay {
+        GeodisplayMetadata::Z { .. } => base == "Point",
+        GeodisplayMetadata::Xz { index } => match index.geometry_type {
           GeometryType::MultiPoint => base == "MultiPoint",
           GeometryType::Polyline => matches!(base, "LineString" | "MultiLineString"),
           GeometryType::Polygon => matches!(base, "Polygon" | "MultiPolygon"),
@@ -557,9 +556,9 @@ impl MetadataValidator {
     file: &FileValidator,
     report: &mut ValidationReport,
   ) -> Option<ValidatedCrs> {
-    let (wkid, wkt) = match &geodisplay.index {
-      GeodisplayIndex::Z { index } => (index.wkid, index.wkt.as_deref()),
-      GeodisplayIndex::Xz { index } => (index.wkid, index.wkt.as_deref()),
+    let (wkid, wkt) = match geodisplay {
+      GeodisplayMetadata::Z { index } => (index.wkid, index.wkt.as_deref()),
+      GeodisplayMetadata::Xz { index } => (index.wkid, index.wkt.as_deref()),
     };
     let location =
       ValidationLocation::file(file.file.relative_path.clone()).with_column("geodisplay");
@@ -614,9 +613,9 @@ impl MetadataValidator {
     let Some(column) = geo.columns.get(&geo.primary_column) else {
       return;
     };
-    let display_extent = match &geodisplay.index {
-      GeodisplayIndex::Z { index } => index.full_extent,
-      GeodisplayIndex::Xz { index } => index.full_extent,
+    let display_extent = match geodisplay {
+      GeodisplayMetadata::Z { index } => index.full_extent,
+      GeodisplayMetadata::Xz { index } => index.full_extent,
     };
     let geo_extent = [
       column.bbox[0],

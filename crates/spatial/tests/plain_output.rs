@@ -49,7 +49,7 @@ fn plain_output_preserves_wkb_rows_and_passthrough_metadata() {
     ],
   )
   .unwrap();
-  let geodisplay = r#"{"index":{"type":"z","column":"zCode"}}"#.to_string();
+  let geodisplay = r#"{"type":"z","column":"zCode"}"#.to_string();
   let custom_value = "keep-me".to_string();
   write_parquet(
     &input,

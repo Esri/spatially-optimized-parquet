@@ -18,26 +18,19 @@ impl ZValidator {
   pub(crate) fn validate_schema(
     index: &ClusteringIndexZ,
     file: &FileValidator,
-    parent_column: Option<&str>,
     report: &mut ValidationReport,
   ) {
+    Self::validate_required_field(file, &index.code.dotted(), &DataType::UInt64, false, report);
     Self::validate_required_field(
       file,
-      &FileValidator::display_column_path(parent_column, &index.code),
-      &DataType::UInt64,
-      false,
-      report,
-    );
-    Self::validate_required_field(
-      file,
-      &FileValidator::display_column_path(parent_column, &index.x_column),
+      &index.x_column.dotted(),
       &DataType::Float64,
       false,
       report,
     );
     Self::validate_required_field(
       file,
-      &FileValidator::display_column_path(parent_column, &index.y_column),
+      &index.y_column.dotted(),
       &DataType::Float64,
       false,
       report,
@@ -46,8 +39,8 @@ impl ZValidator {
       file,
       index
         .z_column
-        .as_deref()
-        .map(|column| FileValidator::display_column_path(parent_column, column)),
+        .as_ref()
+        .map(crate::optimized::ColumnPath::dotted),
       index.has_z,
       "zColumn",
       report,
@@ -56,8 +49,8 @@ impl ZValidator {
       file,
       index
         .m_column
-        .as_deref()
-        .map(|column| FileValidator::display_column_path(parent_column, column)),
+        .as_ref()
+        .map(crate::optimized::ColumnPath::dotted),
       index.has_m,
       "mColumn",
       report,
@@ -127,20 +120,19 @@ impl ZValidator {
     index: &ClusteringIndexZ,
     file: &FileValidator,
     contract: &ValidatedMetadata,
-    parent_column: Option<&str>,
     report: &mut ValidationReport,
   ) -> Option<ClusteringRange> {
-    let code_path = FileValidator::display_column_path(parent_column, &index.code);
-    let x_path = FileValidator::display_column_path(parent_column, &index.x_column);
-    let y_path = FileValidator::display_column_path(parent_column, &index.y_column);
+    let code_path = index.code.dotted();
+    let x_path = index.x_column.dotted();
+    let y_path = index.y_column.dotted();
     let z_path = index
       .z_column
-      .as_deref()
-      .map(|column| FileValidator::display_column_path(parent_column, column));
+      .as_ref()
+      .map(crate::optimized::ColumnPath::dotted);
     let m_path = index
       .m_column
-      .as_deref()
-      .map(|column| FileValidator::display_column_path(parent_column, column));
+      .as_ref()
+      .map(crate::optimized::ColumnPath::dotted);
     let projected_columns = [
       contract.geometry_column().to_string(),
       code_path.clone(),

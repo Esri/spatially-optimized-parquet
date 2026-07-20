@@ -9,7 +9,7 @@ use crate::geoparquet::{
 };
 use crate::optimized::clustering::{DEFAULT_COORDINATE_PRECISION, DEFAULT_XZ_MAX_LEVEL};
 use crate::optimized::geodisplay_metadata::{
-  ClusteringIndexXZ, ClusteringIndexXZInput, ClusteringIndexZ, ClusteringIndexZInput,
+  ClusteringIndexXZ, ClusteringIndexXZInput, ClusteringIndexZ, ClusteringIndexZInput, ColumnPath,
   GeodisplayEncoding, GeodisplayMetadata, MultiscaleLevelInput,
 };
 use crate::optimized::multiscale::{
@@ -50,13 +50,18 @@ impl OptimizedLayout {
       ClusteringFamily::PointGeometry => Self::optimized_point_metadata(
         source_entries,
         geo_metadata,
-        GEODISPLAY_COLUMN,
         ClusteringIndexZInput {
-          code: POINT_Z_CODE_COLUMN.to_string(),
-          x_column: POINT_X_COLUMN.to_string(),
-          y_column: POINT_Y_COLUMN.to_string(),
-          z_column: self.geometry().has_z.then(|| POINT_Z_COLUMN.to_string()),
-          m_column: self.geometry().has_m.then(|| POINT_M_COLUMN.to_string()),
+          code: ColumnPath::nested(GEODISPLAY_COLUMN, POINT_Z_CODE_COLUMN),
+          x_column: ColumnPath::nested(GEODISPLAY_COLUMN, POINT_X_COLUMN),
+          y_column: ColumnPath::nested(GEODISPLAY_COLUMN, POINT_Y_COLUMN),
+          z_column: self
+            .geometry()
+            .has_z
+            .then(|| ColumnPath::nested(GEODISPLAY_COLUMN, POINT_Z_COLUMN)),
+          m_column: self
+            .geometry()
+            .has_m
+            .then(|| ColumnPath::nested(GEODISPLAY_COLUMN, POINT_M_COLUMN)),
           coordinate_precision: DEFAULT_COORDINATE_PRECISION,
           full_extent: context.target_extent(),
           wkid: context.reprojection().target_spatial_reference().wkid,
@@ -68,9 +73,8 @@ impl OptimizedLayout {
       ClusteringFamily::ComplexGeometry => Self::optimized_xz_metadata(
         source_entries,
         geo_metadata,
-        GEODISPLAY_COLUMN,
         ClusteringIndexXZInput {
-          code: XZ_CODE_COLUMN.to_string(),
+          code: ColumnPath::nested(GEODISPLAY_COLUMN, XZ_CODE_COLUMN),
           encoding: GeodisplayEncoding::from(self.multiscale_encoding()),
           geometry_type: self.geometry().ty,
           full_extent: context.target_extent(),
@@ -83,7 +87,7 @@ impl OptimizedLayout {
             .levels()
             .iter()
             .map(|encoding| MultiscaleLevelInput {
-              column: encoding.column.clone(),
+              column: ColumnPath::nested(GEODISPLAY_COLUMN, &encoding.column),
               level: encoding.level,
               resolution: encoding.resolution,
               scale: encoding.scale,
@@ -108,26 +112,24 @@ impl OptimizedLayout {
   fn optimized_point_metadata(
     source_entries: Vec<KeyValue>,
     geo_input: GeoMetadataInput<'_>,
-    field: &str,
     index_input: ClusteringIndexZInput,
   ) -> Result<Vec<KeyValue>> {
     Self::optimized_metadata(
       source_entries,
       geo_input,
-      GeodisplayMetadata::point(field, ClusteringIndexZ::new(index_input)),
+      GeodisplayMetadata::point(ClusteringIndexZ::new(index_input)),
     )
   }
 
   fn optimized_xz_metadata(
     source_entries: Vec<KeyValue>,
     geo_input: GeoMetadataInput<'_>,
-    field: &str,
     index_input: ClusteringIndexXZInput,
   ) -> Result<Vec<KeyValue>> {
     Self::optimized_metadata(
       source_entries,
       geo_input,
-      GeodisplayMetadata::xz(field, ClusteringIndexXZ::new(index_input)),
+      GeodisplayMetadata::xz(ClusteringIndexXZ::new(index_input)),
     )
   }
 

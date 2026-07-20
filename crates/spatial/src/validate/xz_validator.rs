@@ -22,37 +22,13 @@ impl XzValidator {
   pub(crate) fn validate_schema(
     index: &ClusteringIndexXZ,
     file: &FileValidator,
-    parent_column: Option<&str>,
     report: &mut ValidationReport,
   ) {
-    if let Some(parent_column) = parent_column {
-      let field_location = ValidationLocation::file(file.file.relative_path.clone())
-        .with_column(parent_column.to_string());
-      match FileValidator::field_at_path(file.metadata.schema().as_ref(), parent_column) {
-        Some(field) if matches!(field.data_type(), DataType::Struct(_)) => {}
-        Some(field) => report.push(
-          ValidationRule::XzSchema,
-          ValidationSeverity::Error,
-          field_location,
-          format!(
-            "XZ parent column must be an Arrow struct, found {}",
-            field.data_type()
-          ),
-        ),
-        None => report.push(
-          ValidationRule::XzSchema,
-          ValidationSeverity::Error,
-          field_location,
-          "XZ parent column is missing",
-        ),
-      }
-    }
-
-    let code_path = FileValidator::display_column_path(parent_column, &index.code);
+    let code_path = index.code.dotted();
     Self::validate_field(file, &code_path, &DataType::UInt64, Some(false), report);
     let native_geometry_type = Self::optimized_geometry_type(index);
     for level in &index.levels {
-      let level_path = FileValidator::display_column_path(parent_column, &level.column);
+      let level_path = level.column.dotted();
       let location =
         ValidationLocation::file(file.file.relative_path.clone()).with_column(level_path.clone());
       match FileValidator::field_at_path(file.metadata.schema().as_ref(), &level_path) {
@@ -124,14 +100,13 @@ impl XzValidator {
     index: &ClusteringIndexXZ,
     file: &FileValidator,
     contract: &ValidatedMetadata,
-    parent_column: Option<&str>,
     report: &mut ValidationReport,
   ) -> Option<ClusteringRange> {
-    let code_path = FileValidator::display_column_path(parent_column, &index.code);
+    let code_path = index.code.dotted();
     let level_paths = index
       .levels
       .iter()
-      .map(|level| FileValidator::display_column_path(parent_column, &level.column))
+      .map(|level| level.column.dotted())
       .collect::<Vec<_>>();
     let projected_columns = std::iter::once(contract.geometry_column().to_string())
       .chain(std::iter::once(code_path.clone()))
@@ -947,7 +922,7 @@ mod tests {
       wkb.extend_from_slice(&z.to_le_bytes());
     }
     let level = crate::optimized::MultiscaleLevel {
-      column: "level_0".to_string(),
+      column: crate::optimized::ColumnPath::Root("level_0".to_string()),
       level: 0,
       resolution: 1.0,
       scale: 1.0,

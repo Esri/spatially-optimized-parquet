@@ -3,6 +3,7 @@
 use ::parquet::file::metadata::KeyValue;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 use crate::geometry::{Extent2D, GeometryType, QuantizationTransform};
 
@@ -12,16 +13,42 @@ pub(crate) const GEODISPLAY_VERSION: &str = "0.1";
 const SOP_WRITER_NAME: &str = "sop";
 const SOP_WRITER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct GeodisplayMetadata {
-  #[serde(rename = "parentColumn")]
-  pub(crate) parent_column: Option<String>,
-  pub(crate) index: GeodisplayIndex,
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum ColumnPath {
+  Root(String),
+  Nested([String; 2]),
+}
+
+impl ColumnPath {
+  pub(crate) fn nested(parent: impl Into<String>, column: impl Into<String>) -> Self {
+    Self::Nested([parent.into(), column.into()])
+  }
+
+  pub(crate) fn dotted(&self) -> String {
+    match self {
+      Self::Root(column) => column.clone(),
+      Self::Nested([parent, column]) => format!("{parent}.{column}"),
+    }
+  }
+
+  pub(crate) fn is_empty(&self) -> bool {
+    match self {
+      Self::Root(column) => column.is_empty(),
+      Self::Nested([parent, column]) => parent.is_empty() || column.is_empty(),
+    }
+  }
+}
+
+impl fmt::Display for ColumnPath {
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    formatter.write_str(&self.dotted())
+  }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
-pub(crate) enum GeodisplayIndex {
+pub(crate) enum GeodisplayMetadata {
   #[serde(rename = "z")]
   Z {
     #[serde(flatten)]
@@ -65,19 +92,19 @@ pub(crate) struct ClusteringIndexZ {
   pub(crate) version: String,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub(crate) writer: Option<WriterMetadata>,
-  pub(crate) code: String,
+  pub(crate) code: ColumnPath,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub(crate) wkid: Option<u32>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub(crate) wkt: Option<String>,
   #[serde(rename = "xColumn")]
-  pub(crate) x_column: String,
+  pub(crate) x_column: ColumnPath,
   #[serde(rename = "yColumn")]
-  pub(crate) y_column: String,
+  pub(crate) y_column: ColumnPath,
   #[serde(rename = "zColumn", skip_serializing_if = "Option::is_none")]
-  pub(crate) z_column: Option<String>,
+  pub(crate) z_column: Option<ColumnPath>,
   #[serde(rename = "mColumn", skip_serializing_if = "Option::is_none")]
-  pub(crate) m_column: Option<String>,
+  pub(crate) m_column: Option<ColumnPath>,
   #[serde(rename = "coordinatePrecision")]
   pub(crate) coordinate_precision: u32,
   #[serde(rename = "fullExtent")]
@@ -95,7 +122,7 @@ pub(crate) struct ClusteringIndexXZ {
   pub(crate) version: String,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub(crate) writer: Option<WriterMetadata>,
-  pub(crate) code: String,
+  pub(crate) code: ColumnPath,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub(crate) wkid: Option<u32>,
   #[serde(skip_serializing_if = "Option::is_none")]
@@ -123,15 +150,15 @@ pub(crate) struct WriterMetadata {
 /// Collects point-index inputs before fixed metadata fields are applied.
 pub(crate) struct ClusteringIndexZInput {
   /// Identifies the column containing Z-order codes.
-  pub(crate) code: String,
+  pub(crate) code: ColumnPath,
   /// Identifies the column containing x coordinates.
-  pub(crate) x_column: String,
+  pub(crate) x_column: ColumnPath,
   /// Identifies the column containing y coordinates.
-  pub(crate) y_column: String,
+  pub(crate) y_column: ColumnPath,
   /// Identifies the column containing z coordinates when present.
-  pub(crate) z_column: Option<String>,
+  pub(crate) z_column: Option<ColumnPath>,
   /// Identifies the column containing m coordinates when present.
-  pub(crate) m_column: Option<String>,
+  pub(crate) m_column: Option<ColumnPath>,
   /// Specifies the coordinate quantization precision.
   pub(crate) coordinate_precision: u32,
   /// Defines the indexed dataset extent.
@@ -149,7 +176,7 @@ pub(crate) struct ClusteringIndexZInput {
 /// Collects non-point index inputs before fixed metadata fields are applied.
 pub(crate) struct ClusteringIndexXZInput {
   /// Identifies the field containing XZ-order codes.
-  pub(crate) code: String,
+  pub(crate) code: ColumnPath,
   /// Defines the geometry payload encoding.
   pub(crate) encoding: GeodisplayEncoding,
   /// Defines the Geodisplay geometry category.
@@ -173,7 +200,7 @@ pub(crate) struct ClusteringIndexXZInput {
 /// Collects one multiscale level before serialization fields are assembled.
 pub(crate) struct MultiscaleLevelInput {
   /// Identifies the generated payload column.
-  pub(crate) column: String,
+  pub(crate) column: ColumnPath,
   /// Defines the multiscale level.
   pub(crate) level: u16,
   /// Defines the coordinate resolution.
@@ -188,7 +215,7 @@ pub(crate) struct MultiscaleLevelInput {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct MultiscaleLevel {
-  pub(crate) column: String,
+  pub(crate) column: ColumnPath,
   pub(crate) level: u16,
   pub(crate) resolution: f64,
   pub(crate) scale: f64,
@@ -196,18 +223,12 @@ pub(crate) struct MultiscaleLevel {
 }
 
 impl GeodisplayMetadata {
-  pub(super) fn point(parent_column: &str, index: ClusteringIndexZ) -> Self {
-    Self {
-      parent_column: Some(parent_column.to_string()),
-      index: GeodisplayIndex::Z { index },
-    }
+  pub(super) fn point(index: ClusteringIndexZ) -> Self {
+    Self::Z { index }
   }
 
-  pub(super) fn xz(parent_column: &str, index: ClusteringIndexXZ) -> Self {
-    Self {
-      parent_column: Some(parent_column.to_string()),
-      index: GeodisplayIndex::Xz { index },
-    }
+  pub(super) fn xz(index: ClusteringIndexXZ) -> Self {
+    Self::Xz { index }
   }
 }
 

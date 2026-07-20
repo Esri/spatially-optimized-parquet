@@ -5,13 +5,11 @@ use serde_json::{Value, json};
 
 use crate::geometry::{Extent2D, GeometryKind, GeometryType};
 use crate::geoparquet::SpatialReference;
-use crate::optimized::GeodisplayIndex;
-
 use crate::geoparquet::{GeoMetadata, GeoMetadataInput};
 
 use super::{
-  ClusteringIndexXZInput, ClusteringIndexZInput, GeodisplayEncoding, GeodisplayMetadata,
-  MultiscaleLevelInput, OptimizedLayout,
+  ClusteringIndexXZInput, ClusteringIndexZInput, ColumnPath, GeodisplayEncoding,
+  GeodisplayMetadata, MultiscaleLevelInput, OptimizedLayout,
 };
 
 fn spatial_reference() -> SpatialReference {
@@ -140,11 +138,10 @@ fn point_geometry_geodisplay_metadata_serializes_z_clustering() {
     OptimizedLayout::optimized_point_metadata(
       Vec::new(),
       geo_input(&geometry_types, &spatial_reference, false),
-      "geodisplay",
       ClusteringIndexZInput {
-        code: "zCode".to_string(),
-        x_column: "x".to_string(),
-        y_column: "y".to_string(),
+        code: ColumnPath::nested("geodisplay", "zCode"),
+        x_column: ColumnPath::nested("geodisplay", "x"),
+        y_column: ColumnPath::nested("geodisplay", "y"),
         z_column: None,
         m_column: None,
         coordinate_precision: 20,
@@ -166,36 +163,31 @@ fn point_geometry_geodisplay_metadata_serializes_z_clustering() {
   assert_eq!(
     values["geodisplay"],
     json!({
-      "parentColumn": "geodisplay",
-      "index": {
-        "type": "z",
-        "version": "0.1",
-        "writer": {
-          "name": "sop",
-          "version": env!("CARGO_PKG_VERSION")
-        },
-        "code": "zCode",
-        "wkid": 4326,
-        "xColumn": "x",
-        "yColumn": "y",
-        "coordinatePrecision": 20,
-        "fullExtent": {
-          "xmin": -180.0,
-          "ymin": -90.0,
-          "xmax": 180.0,
-          "ymax": 90.0
-        },
-        "geometryType": "point",
-        "hasZ": false,
-        "hasM": false
-      }
+      "type": "z",
+      "version": "0.1",
+      "writer": {
+        "name": "sop",
+        "version": env!("CARGO_PKG_VERSION")
+      },
+      "code": ["geodisplay", "zCode"],
+      "wkid": 4326,
+      "xColumn": ["geodisplay", "x"],
+      "yColumn": ["geodisplay", "y"],
+      "coordinatePrecision": 20,
+      "fullExtent": {
+        "xmin": -180.0,
+        "ymin": -90.0,
+        "xmax": 180.0,
+        "ymax": 90.0
+      },
+      "geometryType": "point",
+      "hasZ": false,
+      "hasM": false
     })
   );
   assert!(matches!(
-    serde_json::from_value::<GeodisplayMetadata>(values["geodisplay"].clone())
-      .unwrap()
-      .index,
-    GeodisplayIndex::Z { .. }
+    serde_json::from_value::<GeodisplayMetadata>(values["geodisplay"].clone()).unwrap(),
+    GeodisplayMetadata::Z { .. }
   ));
 }
 
@@ -207,9 +199,8 @@ fn xz_geodisplay_metadata_serializes_multiscale_clustering() {
     OptimizedLayout::optimized_xz_metadata(
       Vec::new(),
       geo_input(&geometry_types, &spatial_reference, false),
-      "geodisplay",
       ClusteringIndexXZInput {
-        code: "xzCode".to_string(),
+        code: ColumnPath::nested("geodisplay", "xzCode"),
         encoding: GeodisplayEncoding::EsriPbf,
         geometry_type: GeometryType::Polygon,
         full_extent: Extent2D {
@@ -224,7 +215,7 @@ fn xz_geodisplay_metadata_serializes_multiscale_clustering() {
         has_z: false,
         has_m: false,
         levels: vec![MultiscaleLevelInput {
-          column: "level_0".to_string(),
+          column: ColumnPath::nested("geodisplay", "level_0"),
           level: 0,
           resolution: 0.703125,
           scale: 295_829_355.4545656,
@@ -239,49 +230,43 @@ fn xz_geodisplay_metadata_serializes_multiscale_clustering() {
   assert_eq!(
     values["geodisplay"],
     json!({
-      "parentColumn": "geodisplay",
-      "index": {
-        "type": "xz",
-        "version": "0.1",
-        "writer": {
-          "name": "sop",
-          "version": env!("CARGO_PKG_VERSION")
-        },
-        "code": "xzCode",
-        "wkid": 4326,
-        "encoding": "esriPBF",
-        "geometryType": "polygon",
-        "fullExtent": {
-          "xmin": -10.0,
-          "ymin": -5.0,
-          "xmax": 10.0,
-          "ymax": 5.0
-        },
-        "maxLevel": 20,
-        "hasZ": false,
-        "hasM": false,
-        "levels": [{
-          "column": "level_0",
-          "level": 0,
-          "resolution": 0.703125,
-          "scale": 295829355.4545656,
-          "transform": {
-            "scale": [0.703125, 0.703125, 1.0, 1.0],
-            "translate": [0.0, 0.0, 0.0, 0.0]
-          }
-        }]
-      }
+      "type": "xz",
+      "version": "0.1",
+      "writer": {
+        "name": "sop",
+        "version": env!("CARGO_PKG_VERSION")
+      },
+      "code": ["geodisplay", "xzCode"],
+      "wkid": 4326,
+      "encoding": "esriPBF",
+      "geometryType": "polygon",
+      "fullExtent": {
+        "xmin": -10.0,
+        "ymin": -5.0,
+        "xmax": 10.0,
+        "ymax": 5.0
+      },
+      "maxLevel": 20,
+      "hasZ": false,
+      "hasM": false,
+      "levels": [{
+        "column": ["geodisplay", "level_0"],
+        "level": 0,
+        "resolution": 0.703125,
+        "scale": 295829355.4545656,
+        "transform": {
+          "scale": [0.703125, 0.703125, 1.0, 1.0],
+          "translate": [0.0, 0.0, 0.0, 0.0]
+        }
+      }]
     })
   );
-  match serde_json::from_value::<GeodisplayMetadata>(values["geodisplay"].clone())
-    .unwrap()
-    .index
-  {
-    GeodisplayIndex::Xz { index } => {
+  match serde_json::from_value::<GeodisplayMetadata>(values["geodisplay"].clone()).unwrap() {
+    GeodisplayMetadata::Xz { index } => {
       assert_eq!(index.encoding, GeodisplayEncoding::EsriPbf);
       assert_eq!(index.geometry_type, GeometryType::Polygon);
     }
-    GeodisplayIndex::Z { .. } => panic!("XZ metadata decoded as Z metadata"),
+    GeodisplayMetadata::Z { .. } => panic!("XZ metadata decoded as Z metadata"),
   }
 }
 
@@ -318,34 +303,32 @@ fn geodisplay_metadata_serializes_closed_vocabulary_values() {
 #[test]
 fn geodisplay_metadata_rejects_unsupported_closed_vocabulary_values() {
   let metadata = json!({
-    "index": {
-      "type": "xz",
-      "version": "0.1",
-      "code": "xzCode",
-      "encoding": "esriPBF",
-      "geometryType": "polygon",
-      "fullExtent": {
-        "xmin": -10.0,
-        "ymin": -5.0,
-        "xmax": 10.0,
-        "ymax": 5.0
-      },
-      "maxLevel": 20,
-      "hasZ": false,
-      "hasM": false,
-      "levels": []
-    }
+    "type": "xz",
+    "version": "0.1",
+    "code": "xzCode",
+    "encoding": "esriPBF",
+    "geometryType": "polygon",
+    "fullExtent": {
+      "xmin": -10.0,
+      "ymin": -5.0,
+      "xmax": 10.0,
+      "ymax": 5.0
+    },
+    "maxLevel": 20,
+    "hasZ": false,
+    "hasM": false,
+    "levels": []
   });
 
   let mut unsupported_index = metadata.clone();
-  unsupported_index["index"]["type"] = json!("future");
+  unsupported_index["type"] = json!("future");
   assert!(serde_json::from_value::<GeodisplayMetadata>(unsupported_index).is_err());
 
   let mut unsupported_encoding = metadata.clone();
-  unsupported_encoding["index"]["encoding"] = json!("futureEncoding");
+  unsupported_encoding["encoding"] = json!("futureEncoding");
   assert!(serde_json::from_value::<GeodisplayMetadata>(unsupported_encoding).is_err());
 
   let mut unsupported_geometry = metadata;
-  unsupported_geometry["index"]["geometryType"] = json!("futureGeometry");
+  unsupported_geometry["geometryType"] = json!("futureGeometry");
   assert!(serde_json::from_value::<GeodisplayMetadata>(unsupported_geometry).is_err());
 }

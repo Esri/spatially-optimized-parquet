@@ -12,7 +12,7 @@ pub(crate) mod single;
 
 pub(crate) use clustering::{BoundsUdf, ClusterKey, DEFAULT_XZ_MAX_LEVEL, PointGeometryUdf};
 pub(crate) use geodisplay_metadata::{
-  ClusteringIndexXZ, ClusteringIndexZ, GEODISPLAY_VERSION, GeodisplayEncoding, GeodisplayIndex,
+  ClusteringIndexXZ, ClusteringIndexZ, ColumnPath, GEODISPLAY_VERSION, GeodisplayEncoding,
   GeodisplayMetadata, MultiscaleLevel,
 };
 pub(crate) use layout::OptimizedLayout;

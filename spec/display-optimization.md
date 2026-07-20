@@ -16,26 +16,54 @@ Metadata about how the file has been organized must be present in one of two pla
 
 1. As a `geodisplay` key-value pair in the root metadata of the Parquet file. The value must
    serialize [`GeodisplayMetadata`](#geodisplaymetadata).
-2. In Spark-authored files, as Spark group-level metadata on the `geodisplay` column. The Spark
-   field name supplies `parentColumn`, and the field metadata supplies `index`.
+2. In Spark-authored files, as custom field metadata on the root group field containing the
+   display columns. The custom field metadata serializes `GeodisplayMetadata` directly.
+
+A file MUST NOT define both forms. Readers MUST interpret root Parquet metadata relative to the
+root Parquet schema. Readers MUST interpret Spark custom field metadata relative to the containing
+root group field.
 
 ### GeodisplayMetadata
 
-`GeodisplayMetadata` resolves every index column relative to one optional parent column.
-`parentColumn` may name any root struct field. When it is `null`, index column names resolve
-directly against root fields.
+`GeodisplayMetadata` is one Z or XZ display index.
 
 ```ts
-interface GeodisplayMetadata {
-  parentColumn: string | null;
-  index: XZMetadata | ZMetadata;
+type GeodisplayMetadata = XZMetadata | ZMetadata;
+```
+
+Column references depend on the metadata location:
+
+```ts
+type ColumnPath = string | [string, string];
+```
+
+- In root Parquet metadata, a string identifies one root field. A two-element tuple identifies a
+  direct child of one root group, with the root group name first and child field name second.
+- In Spark custom field metadata, every column reference MUST be a non-empty string identifying a
+  direct child of the containing root group field. Two-element tuples MUST NOT be used because the
+  containing field already establishes the path root.
+
+Two-element tuples MUST contain exactly two non-empty strings. Deeper nesting is not supported in
+either metadata form.
+
+For example, root Parquet metadata references a nested XZ key as:
+
+```json
+{
+  "type": "xz",
+  "code": ["geodisplay", "indexkey"]
 }
 ```
 
-| Field name | Description |
-| --- | --- |
-| `parentColumn` | Parent struct containing every column referenced by `index`, or `null` when the referenced columns are root fields. |
-| `index` | Z or XZ display-index metadata. Column names within the index are relative to `parentColumn` when it is non-null. |
+The equivalent custom metadata attached to the Spark `geodisplay` field references the same child
+as:
+
+```json
+{
+  "type": "xz",
+  "code": "indexkey"
+}
+```
 
 ### DisplayMetadata
 
@@ -120,7 +148,7 @@ XZ-clustering is used for complex geometries. It encodes feature extents into a 
 interface XZMetadata extends DisplayMetadata {
   type: "xz";
   maxLevel: number;
-  code: string;
+  code: ColumnPath;
   levels: Array<MultiscaleLevel>,
   encoding: string;
 }
@@ -132,19 +160,16 @@ where:
 | --- | --- |
 | `type`  | Must be `"xz"`. |
 | `maxLevel` | Maximum XZ level used when generating XZ-codes. Currently this must be `20`. |
-| `code`  | Name of the column containing the XZ-code for the feature. Relative to `parentColumn`. |
-| `levels` | Multiscale levels. There must be at least one multiscale column. Relative to `parentColumn`. |
+| `code`  | Absolute path of the column containing the XZ-code for the feature. |
+| `levels` | Multiscale levels. There must be at least one multiscale column. |
 | `encoding` | Encoding format for all geometries in the index. Currently only `"esriPBF"` is supported. |
 
 #### Field Grouping
 
-When XZ metadata defines `parentColumn`, that group contains the XZ cluster key and every
-multiscale column. All column names in the XZ index refer to fields directly within this group.
-When `parentColumn` is `null`, those columns are root fields.
-
-For a `code` column named `xz-code`, the physical column must be present at
-`geodisplay.xz-code`. A multiscale level named `multiscale-0` must similarly be present at
-`geodisplay.multiscale-0`.
+The XZ cluster key and multiscale columns MAY be root fields or direct children of root groups.
+Each metadata reference independently identifies its absolute location. For example,
+`["geodisplay", "xz-code"]` identifies `geodisplay.xz-code`, while `"xz-code"` identifies a root
+field named `xz-code`.
 
 #### Multiscale level
 
@@ -152,7 +177,7 @@ Each `MultiscaleLevel` stores geometry quantized for a given map level. When ren
 
 ```ts
 interface MultiscaleLevel {
-  column: string;
+  column: ColumnPath;
   level: number;
   resolution: number;
   scale: number;
@@ -164,7 +189,7 @@ where:
 
 | Field name | Description |
 | --- | --- |
-| `column` | Name of the column where geometries for the multiscale level are stored. |
+| `column` | Absolute path of the column where geometries for the multiscale level are stored. |
 | `level` | Level associated with the multiscale column. This must be a number from `0` to `20`. |
 | `resolution` | Resolution of the level. |
 | `scale` | Scale of the level. |
@@ -206,36 +231,33 @@ The following example shows XZ `geodisplay` metadata:
 ```json
 {
   "geodisplay": {
-    "parentColumn": "geodisplay",
-    "index": {
-      "version": "0.1",
-      "type": "xz",
-      "wkid": 4326,
-      "code": "xz-code",
-      "geometryType": "polygon",
-      "maxLevel": 20,
-      "hasZ": false,
-      "hasM": false,
-      "fullExtent": {
-        "xmin": -180,
-        "ymin": -90,
-        "xmax": 180,
-        "ymax": 90
-      },
-      "encoding": "esriPBF",
-      "levels": [
-        {
-          "column": "multiscale-0",
-          "level": 0,
-          "resolution": 0.703125,
-          "scale": 295829355.4545656,
-          "transform": {
-            "scale": [0.703125, 0.703125, 1, 1],
-            "translate": [0, 0, 0, 0]
-          }
+    "version": "0.1",
+    "type": "xz",
+    "wkid": 4326,
+    "code": ["geodisplay", "xz-code"],
+    "geometryType": "polygon",
+    "maxLevel": 20,
+    "hasZ": false,
+    "hasM": false,
+    "fullExtent": {
+      "xmin": -180,
+      "ymin": -90,
+      "xmax": 180,
+      "ymax": 90
+    },
+    "encoding": "esriPBF",
+    "levels": [
+      {
+        "column": ["geodisplay", "multiscale-0"],
+        "level": 0,
+        "resolution": 0.703125,
+        "scale": 295829355.4545656,
+        "transform": {
+          "scale": [0.703125, 0.703125, 1, 1],
+          "translate": [0, 0, 0, 0]
         }
-      ]
-    }
+      }
+    ]
   }
 }
 ```
@@ -419,10 +441,9 @@ Geometry: {
 
 For point features, simple Z-clustering is used. XZ-codes are unnecessary for points because geometries do not carry a spatial extent, and point display does not require multiscale geometry columns.
 
-Z-clustering does not require a group field. An implementation may point directly to original
-root `x` and `y` columns or place its generated fields within `parentColumn`, provided those
-columns already use the desired display spatial reference. The SOP writer places `code`,
-`xColumn`, and `yColumn` in a required `geodisplay` struct for consistency with XZ output.
+Z-clustering does not require a group field. An implementation may reference original root `x`
+and `y` columns or place generated fields in a root group, provided those columns already use the
+desired display spatial reference. Every reference uses an absolute `ColumnPath`.
 
 ### Z Metadata
 
@@ -430,11 +451,11 @@ columns already use the desired display spatial reference. The SOP writer places
 interface ZMetadata extends DisplayMetadata {
   type: "z";
   geometryType: "point";
-  code: string;
-  xColumn: string;
-  yColumn: string;
-  zColumn?: string;
-  mColumn?: string;
+  code: ColumnPath;
+  xColumn: ColumnPath;
+  yColumn: ColumnPath;
+  zColumn?: ColumnPath;
+  mColumn?: ColumnPath;
   coordinatePrecision: number;
 }
 ```
@@ -445,11 +466,11 @@ where:
 | --- | --- |
 | `type` | Must be `"z"`. |
 | `geometryType` | Must be `"point"`. |
-| `code` | Name of the column containing Z-codes for points within the clustering. |
-| `xColumn` | Name of the non-nullable column containing point x-values. A null or invalid geometry should include `NaN`. |
-| `yColumn` | Name of the column containing point y-values. A null or invalid geometry should include `NaN`. |
-| `zColumn` | Required when `hasZ` is true and absent otherwise. Contains the original point Z value from the full-resolution WKB. A null or invalid geometry uses `NaN`. |
-| `mColumn` | Required when `hasM` is true and absent otherwise. Contains the original point M value from the full-resolution WKB. A null or invalid geometry uses `NaN`. |
+| `code` | Absolute path of the column containing Z-codes for points within the clustering. |
+| `xColumn` | Absolute path of the non-nullable column containing point x-values. A null or invalid geometry should include `NaN`. |
+| `yColumn` | Absolute path of the column containing point y-values. A null or invalid geometry should include `NaN`. |
+| `zColumn` | Required when `hasZ` is true and absent otherwise. Absolute path of the column containing the original point Z value from the full-resolution WKB. A null or invalid geometry uses `NaN`. |
+| `mColumn` | Required when `hasM` is true and absent otherwise. Absolute path of the column containing the original point M value from the full-resolution WKB. A null or invalid geometry uses `NaN`. |
 | `coordinatePrecision` | Number of bits of precision used for each coordinate when generating the Z-code. |
 
 #### Example
@@ -459,25 +480,22 @@ The following example shows `geodisplay` metadata for a file containing a single
 ```json
 {
   "geodisplay": {
-    "parentColumn": "geodisplay",
-    "index": {
-      "version": "0.1",
-      "type": "z",
-      "code": "zCode",
-      "geometryType": "point",
-      "hasZ": false,
-      "hasM": false,
-      "fullExtent": {
-        "xmin": -180,
-        "ymin": -90,
-        "xmax": 180,
-        "ymax": 90
-      },
-      "wkid": 4326,
-      "xColumn": "x",
-      "yColumn": "y",
-      "coordinatePrecision": 16
-    }
+    "version": "0.1",
+    "type": "z",
+    "code": ["geodisplay", "zCode"],
+    "geometryType": "point",
+    "hasZ": false,
+    "hasM": false,
+    "fullExtent": {
+      "xmin": -180,
+      "ymin": -90,
+      "xmax": 180,
+      "ymax": 90
+    },
+    "wkid": 4326,
+    "xColumn": ["geodisplay", "x"],
+    "yColumn": ["geodisplay", "y"],
+    "coordinatePrecision": 16
   }
 }
 ```

@@ -190,7 +190,7 @@ fn partitioned_output_writes_sorted_range_partitions() {
       serde_json::from_str(metadata.get("geodisplay").unwrap()).unwrap();
     assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
     assert_json_extent(&geo["columns"]["geometry"]["bbox"], [1.0, 1.0, 8.0, 8.0]);
-    assert_eq!(geodisplay["index"]["wkid"], 4326);
+    assert_eq!(geodisplay["wkid"], 4326);
     assert!(!metadata.get("geo").unwrap().contains("3857"));
     assert!(!metadata.get("geodisplay").unwrap().contains("3857"));
   }

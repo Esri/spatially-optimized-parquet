@@ -429,33 +429,30 @@ mod tests {
       }
     });
     let mut geodisplay = serde_json::json!({
-      "parentColumn": null,
-      "index": {
-        "type": "z",
-        "version": "0.1",
-        "code": "zCode",
-        "xColumn": "x",
-        "yColumn": "y",
-        "coordinatePrecision": 20,
-        "fullExtent": {
-          "xmin": 0.0,
-          "ymin": 0.0,
-          "xmax": 10.0,
-          "ymax": 10.0
-        },
-        "geometryType": "point",
-        "hasZ": false,
-        "hasM": false
-      }
+      "type": "z",
+      "version": "0.1",
+      "code": "zCode",
+      "xColumn": "x",
+      "yColumn": "y",
+      "coordinatePrecision": 20,
+      "fullExtent": {
+        "xmin": 0.0,
+        "ymin": 0.0,
+        "xmax": 10.0,
+        "ymax": 10.0
+      },
+      "geometryType": "point",
+      "hasZ": false,
+      "hasM": false
     });
     if let Some((field, value)) = index_override {
-      geodisplay["index"][field] = serde_json::Value::String(value.to_string());
+      geodisplay[field] = serde_json::Value::String(value.to_string());
     }
     if let Some(display_epsg) = display_epsg {
-      geodisplay["index"]["wkid"] = serde_json::Value::from(display_epsg);
+      geodisplay["wkid"] = serde_json::Value::from(display_epsg);
     }
     if let Some(display_wkt) = display_wkt {
-      geodisplay["index"]["wkt"] = serde_json::Value::String(display_wkt.to_string());
+      geodisplay["wkt"] = serde_json::Value::String(display_wkt.to_string());
     }
     let geo_entry = KeyValue::new("geo".to_string(), Some(geo.to_string()));
     let mut entries = vec![

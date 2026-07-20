@@ -175,7 +175,7 @@ fn optimized_output_sorts_points_and_writes_metadata() {
     explicit_report
       .findings()
       .iter()
-      .any(|finding| finding.rule() == ValidationRule::WriterMetadata)
+      .all(|finding| finding.rule() != ValidationRule::WriterMetadata)
   );
 
   let dataframe = runtime()
@@ -206,14 +206,20 @@ fn optimized_output_sorts_points_and_writes_metadata() {
   let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").unwrap()).unwrap();
   let geodisplay: serde_json::Value =
     serde_json::from_str(metadata.get("geodisplay").unwrap()).unwrap();
-  assert_eq!(geodisplay["parentColumn"], "geodisplay");
-  assert_eq!(geodisplay["index"]["type"], "z");
-  assert_eq!(geodisplay["index"]["version"], "0.1");
-  assert_eq!(geodisplay["index"]["geometryType"], "point");
-  assert_eq!(geodisplay["index"]["xColumn"], "x");
-  assert_eq!(geodisplay["index"]["yColumn"], "y");
-  assert_eq!(geodisplay["index"]["wkid"], 4326);
-  assert!(geodisplay["index"].get("wkt").is_none());
+  assert!(geodisplay.get("parentColumn").is_none());
+  assert_eq!(geodisplay["type"], "z");
+  assert_eq!(geodisplay["version"], "0.1");
+  assert_eq!(geodisplay["geometryType"], "point");
+  assert_eq!(
+    geodisplay["xColumn"],
+    serde_json::json!(["geodisplay", "x"])
+  );
+  assert_eq!(
+    geodisplay["yColumn"],
+    serde_json::json!(["geodisplay", "y"])
+  );
+  assert_eq!(geodisplay["wkid"], 4326);
+  assert!(geodisplay.get("wkt").is_none());
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["authority"], "EPSG");
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
 }
@@ -350,10 +356,16 @@ fn optimized_output_keeps_point_z_and_m_in_wkb_columns_and_metadata() {
   let geodisplay_metadata: serde_json::Value =
     serde_json::from_str(metadata.get("geodisplay").unwrap()).unwrap();
   assert_eq!(geo["columns"]["geometry"]["geometry_types"][0], "Point ZM");
-  assert_eq!(geodisplay_metadata["index"]["hasZ"], true);
-  assert_eq!(geodisplay_metadata["index"]["hasM"], true);
-  assert_eq!(geodisplay_metadata["index"]["zColumn"], "z");
-  assert_eq!(geodisplay_metadata["index"]["mColumn"], "m");
+  assert_eq!(geodisplay_metadata["hasZ"], true);
+  assert_eq!(geodisplay_metadata["hasM"], true);
+  assert_eq!(
+    geodisplay_metadata["zColumn"],
+    serde_json::json!(["geodisplay", "z"])
+  );
+  assert_eq!(
+    geodisplay_metadata["mColumn"],
+    serde_json::json!(["geodisplay", "m"])
+  );
 }
 
 #[test]
@@ -488,8 +500,8 @@ fn optimized_output_strips_z_and_m_independently() {
       geo["columns"]["geometry"]["geometry_types"][0],
       expected_geometry_type
     );
-    assert_eq!(geodisplay_metadata["index"]["hasZ"], !strip_z);
-    assert_eq!(geodisplay_metadata["index"]["hasM"], !strip_m);
+    assert_eq!(geodisplay_metadata["hasZ"], !strip_z);
+    assert_eq!(geodisplay_metadata["hasM"], !strip_m);
   }
 }
 
@@ -652,14 +664,14 @@ fn optimized_output_writes_dimensional_polygon_pbf_with_absolute_z_and_m() {
   let metadata = kv_map(&output);
   let geodisplay_metadata: serde_json::Value =
     serde_json::from_str(metadata.get("geodisplay").unwrap()).unwrap();
-  assert_eq!(geodisplay_metadata["index"]["hasZ"], true);
-  assert_eq!(geodisplay_metadata["index"]["hasM"], true);
+  assert_eq!(geodisplay_metadata["hasZ"], true);
+  assert_eq!(geodisplay_metadata["hasM"], true);
   assert_eq!(
-    geodisplay_metadata["index"]["levels"][0]["transform"]["scale"][2],
+    geodisplay_metadata["levels"][0]["transform"]["scale"][2],
     1.0
   );
   assert_eq!(
-    geodisplay_metadata["index"]["levels"][0]["transform"]["scale"][3],
+    geodisplay_metadata["levels"][0]["transform"]["scale"][3],
     1.0
   );
 }
@@ -933,9 +945,9 @@ fn optimized_output_reprojects_selected_geoparquet_rows() {
     serde_json::from_str(metadata.get("geodisplay").unwrap()).unwrap();
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
   assert_json_extent(&geo["columns"]["geometry"]["bbox"], [1.0, 1.0, 1.0, 1.0]);
-  assert_json_extent(&geodisplay["index"]["fullExtent"], [1.0, 1.0, 1.0, 1.0]);
-  assert_eq!(geodisplay["index"]["wkid"], 4326);
-  assert!(geodisplay["index"].get("wkt").is_none());
+  assert_json_extent(&geodisplay["fullExtent"], [1.0, 1.0, 1.0, 1.0]);
+  assert_eq!(geodisplay["wkid"], 4326);
+  assert!(geodisplay.get("wkt").is_none());
   assert!(!metadata.get("geo").unwrap().contains("3857"));
   assert!(!metadata.get("geodisplay").unwrap().contains("3857"));
 }
@@ -1014,15 +1026,15 @@ fn optimized_output_writes_complex_geometry_display_struct_and_metadata() {
   let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").unwrap()).unwrap();
   let geodisplay: serde_json::Value =
     serde_json::from_str(metadata.get("geodisplay").unwrap()).unwrap();
-  assert_eq!(geodisplay["parentColumn"], "geodisplay");
-  assert_eq!(geodisplay["index"]["type"], "xz");
-  assert_eq!(geodisplay["index"]["version"], "0.1");
-  assert_eq!(geodisplay["index"]["encoding"], "esriPBF");
-  assert_eq!(geodisplay["index"]["wkid"], 4326);
-  assert!(geodisplay["index"].get("wkt").is_none());
+  assert!(geodisplay.get("parentColumn").is_none());
+  assert_eq!(geodisplay["type"], "xz");
+  assert_eq!(geodisplay["version"], "0.1");
+  assert_eq!(geodisplay["encoding"], "esriPBF");
+  assert_eq!(geodisplay["wkid"], 4326);
+  assert!(geodisplay.get("wkt").is_none());
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["authority"], "EPSG");
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
-  let levels = geodisplay["index"]["levels"].as_array().unwrap();
+  let levels = geodisplay["levels"].as_array().unwrap();
   assert_eq!(levels.len(), 9);
   assert_eq!(levels[0]["level"], 0);
   assert_eq!(levels[0]["resolution"], 0.703125);
@@ -1664,15 +1676,15 @@ fn optimized_output_reprojects_geopackage_polygon() {
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
   assert_covering_metadata(&geo);
   assert_json_extent(&geo["columns"]["geometry"]["bbox"], [0.0, 0.0, 1.0, 1.0]);
-  assert_json_extent(&geodisplay["index"]["fullExtent"], [0.0, 0.0, 1.0, 1.0]);
-  assert_eq!(geodisplay["index"]["wkid"], 4326);
-  assert!(geodisplay["index"].get("wkt").is_none());
-  assert_eq!(geodisplay["index"]["levels"][0]["column"], "level_0");
-  assert_eq!(geodisplay["index"]["levels"][0]["resolution"], 0.703125);
+  assert_json_extent(&geodisplay["fullExtent"], [0.0, 0.0, 1.0, 1.0]);
+  assert_eq!(geodisplay["wkid"], 4326);
+  assert!(geodisplay.get("wkt").is_none());
   assert_eq!(
-    geodisplay["index"]["levels"][0]["transform"]["scale"][0],
-    0.703125
+    geodisplay["levels"][0]["column"],
+    serde_json::json!(["geodisplay", "level_0"])
   );
+  assert_eq!(geodisplay["levels"][0]["resolution"], 0.703125);
+  assert_eq!(geodisplay["levels"][0]["transform"]["scale"][0], 0.703125);
   assert!(!metadata.get("geo").unwrap().contains("3857"));
   assert!(!metadata.get("geodisplay").unwrap().contains("3857"));
 }
@@ -1755,8 +1767,8 @@ fn optimized_output_selects_requested_geopackage_layer() {
   let geodisplay: serde_json::Value =
     serde_json::from_str(metadata.get("geodisplay").unwrap()).unwrap();
   assert_eq!(geo["primary_column"], "geometry");
-  assert_eq!(geodisplay["parentColumn"], "geodisplay");
-  assert_eq!(geodisplay["index"]["type"], "xz");
+  assert!(geodisplay.get("parentColumn").is_none());
+  assert_eq!(geodisplay["type"], "xz");
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["authority"], "EPSG");
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
 }

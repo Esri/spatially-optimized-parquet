@@ -7,7 +7,7 @@ use parquet::arrow::ProjectionMask;
 use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ParquetRecordBatchReaderBuilder};
 
 use crate::input::parquet::{ParquetDatasetFile, PartitionFamily};
-use crate::optimized::GeodisplayIndex;
+use crate::optimized::GeodisplayMetadata;
 
 use super::metadata_validator::{ValidatedDatasetFile, ValidatedMetadata};
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
@@ -54,19 +54,9 @@ impl FileValidator {
       let file = validated_file.file;
       let metadata = &validated_file.metadata;
       Self::validate_geometry_schema(file, metadata, report);
-      match &metadata.geodisplay.index {
-        GeodisplayIndex::Z { index } => ZValidator::validate_schema(
-          index,
-          file,
-          metadata.geodisplay.parent_column.as_deref(),
-          report,
-        ),
-        GeodisplayIndex::Xz { index } => XzValidator::validate_schema(
-          index,
-          file,
-          metadata.geodisplay.parent_column.as_deref(),
-          report,
-        ),
+      match &metadata.geodisplay {
+        GeodisplayMetadata::Z { index } => ZValidator::validate_schema(index, file, report),
+        GeodisplayMetadata::Xz { index } => XzValidator::validate_schema(index, file, report),
       }
       Self::validate_partition_family(file, metadata, report);
       Self::validate_clustering_page_indexes(file, metadata, report);
@@ -81,21 +71,11 @@ impl FileValidator {
     for validated_file in validated_files {
       let file = validated_file.file;
       let metadata = &validated_file.metadata;
-      let range = match &metadata.geodisplay.index {
-        GeodisplayIndex::Z { index } => ZValidator::validate_file(
-          index,
-          file,
-          metadata,
-          metadata.geodisplay.parent_column.as_deref(),
-          report,
-        ),
-        GeodisplayIndex::Xz { index } => XzValidator::validate_file(
-          index,
-          file,
-          metadata,
-          metadata.geodisplay.parent_column.as_deref(),
-          report,
-        ),
+      let range = match &metadata.geodisplay {
+        GeodisplayMetadata::Z { index } => ZValidator::validate_file(index, file, metadata, report),
+        GeodisplayMetadata::Xz { index } => {
+          XzValidator::validate_file(index, file, metadata, report)
+        }
       };
       if let Some(range) = range {
         ranges.push(range);
@@ -228,9 +208,9 @@ impl FileValidator {
     let Some(partition) = file.file.partition else {
       return;
     };
-    let expected = match &contract.geodisplay.index {
-      GeodisplayIndex::Z { .. } => PartitionFamily::Z,
-      GeodisplayIndex::Xz { .. } => PartitionFamily::Xz,
+    let expected = match &contract.geodisplay {
+      GeodisplayMetadata::Z { .. } => PartitionFamily::Z,
+      GeodisplayMetadata::Xz { .. } => PartitionFamily::Xz,
     };
     if partition.family != expected {
       report.push(
@@ -250,13 +230,9 @@ impl FileValidator {
     contract: &ValidatedMetadata,
     report: &mut ValidationReport,
   ) {
-    let column_path = match &contract.geodisplay.index {
-      GeodisplayIndex::Z { index } => {
-        Self::display_column_path(contract.geodisplay.parent_column.as_deref(), &index.code)
-      }
-      GeodisplayIndex::Xz { index } => {
-        Self::display_column_path(contract.geodisplay.parent_column.as_deref(), &index.code)
-      }
+    let column_path = match &contract.geodisplay {
+      GeodisplayMetadata::Z { index } => index.code.dotted(),
+      GeodisplayMetadata::Xz { index } => index.code.dotted(),
     };
     let Some(column_index) = file
       .metadata
@@ -313,28 +289,6 @@ impl FileValidator {
         "missing OffsetIndex",
       );
     }
-  }
-
-  pub(crate) fn display_column_path(parent: Option<&str>, child: &str) -> String {
-    parent.map_or_else(|| child.to_string(), |parent| format!("{parent}.{child}"))
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use super::FileValidator;
-
-  #[test]
-  fn resolves_display_columns_with_any_optional_parent() {
-    assert_eq!(FileValidator::display_column_path(None, "zCode"), "zCode");
-    assert_eq!(
-      FileValidator::display_column_path(Some("display"), "zCode"),
-      "display.zCode"
-    );
-    assert_eq!(
-      FileValidator::display_column_path(Some("customOptimization"), "xzCode"),
-      "customOptimization.xzCode"
-    );
   }
 }
 
