@@ -1,10 +1,23 @@
+mod extent_resolver;
+mod geometry_scan;
+mod normalized_spatial_frame;
 mod pipeline;
 mod progress;
+mod reprojection;
+mod resolved_spatial_source;
 mod result;
+mod spatial_write_context;
+mod strip;
 mod warnings;
 
+pub(crate) use extent_resolver::ExtentResolver;
+pub(crate) use normalized_spatial_frame::NormalizedSpatialFrame;
 pub use pipeline::{InputOptions, OutputOptions, Pipeline, SpatialPipelineOptions};
 pub(crate) use progress::SharedWriteReporter;
 pub use progress::{WriteProgress, WriteReporter};
+pub(crate) use reprojection::ResolvedReprojection;
+pub(crate) use resolved_spatial_source::{ResolvedSpatialSource, resolve_source};
 pub use result::SpatialPipelineResult;
+pub(crate) use spatial_write_context::SpatialWriteContext;
+pub(crate) use strip::StripGeometryDimensionsUdf;
 pub(crate) use warnings::PipelineWarnings;

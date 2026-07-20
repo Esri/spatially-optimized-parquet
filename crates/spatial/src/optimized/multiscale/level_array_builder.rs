@@ -6,7 +6,7 @@ use arrow_schema::DataType;
 use super::MultiscaleEncoding;
 use crate::geometry::GeometryType;
 
-use super::{GEODISPLAY_COLUMN, MultiscaleLevel};
+use super::{GEOLOD_COLUMN, MultiscaleLevel};
 use crate::geometry::{NativeGeometryArrayBuilder, PbfArrayBuilder, QuantizedGeometry};
 
 /// Builds one multiscale level array through its selected physical encoding.
@@ -45,7 +45,7 @@ impl MultiscaleEncoding {
     match self {
       Self::Pbf => Vec::new(),
       Self::QuantizedNative => NativeGeometryArrayBuilder::coordinate_column_paths(
-        GEODISPLAY_COLUMN,
+        GEOLOD_COLUMN,
         &levels
           .iter()
           .map(|level| level.column.clone())

@@ -1,4 +1,4 @@
-//! Resolves state shared by GeoParquet output writers.
+//! Resolves state shared by spatial output writers.
 
 use anyhow::{Context, Result};
 use arrow_schema::Schema;
@@ -8,20 +8,20 @@ use crate::geometry::Extent2D;
 use crate::input::{InputSource, RowRange};
 
 use super::{
-  ExtentResolver, NormalizedSpatialFrame, ResolvedGeoParquetSource, ResolvedReprojection,
+  ExtentResolver, NormalizedSpatialFrame, ResolvedReprojection, ResolvedSpatialSource,
   resolve_source,
 };
 
-/// Owns resolved facts and normalized data for one GeoParquet write.
-pub(crate) struct GeoParquetWriteContext {
-  source: ResolvedGeoParquetSource,
+/// Owns resolved facts and normalized data for one spatial write.
+pub(crate) struct SpatialWriteContext {
+  source: ResolvedSpatialSource,
   reprojection: ResolvedReprojection,
   frame: NormalizedSpatialFrame,
   target_extent: Extent2D,
 }
 
-impl GeoParquetWriteContext {
-  /// Resolve source facts and normalized data for one GeoParquet write.
+impl SpatialWriteContext {
+  /// Resolve source facts and normalized data for one spatial write.
   pub(crate) async fn resolve(
     input: &dyn InputSource,
     input_dataframe: DataFrame,
@@ -69,7 +69,7 @@ impl GeoParquetWriteContext {
   }
 
   /// Return resolved source facts for the selected rows.
-  pub(crate) fn source(&self) -> &ResolvedGeoParquetSource {
+  pub(crate) fn source(&self) -> &ResolvedSpatialSource {
     &self.source
   }
 

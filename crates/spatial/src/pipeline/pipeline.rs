@@ -37,7 +37,7 @@
 //!   },
 //!   output: OutputOptions {
 //!     path: "roads.optimized.parquet".into(),
-//!     mode: OutputMode::OptimizedGeoParquet,
+//!     mode: OutputMode::Optimized,
 //!     compression: Some("gzip".to_string()),
 //!     covering: true,
 //!     overwrite: true,
@@ -60,12 +60,11 @@ use arrow_schema::SchemaRef;
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
 
-use crate::geoparquet::{GeoParquetWriteContext, GeoParquetWriter, SpatialReference};
+use super::SpatialWriteContext;
+use crate::geoparquet::SpatialReference;
 use crate::input::{InputOpenOptions, InputSource, RowRange, SourceFormat, open_input};
-use crate::optimized::{
-  MultiscaleEncoding, OptimizedLayout, partitioned, single, validate_internal_projection_columns,
-};
-use crate::output::{OutputMode, OutputPath};
+use crate::optimized::{MultiscaleEncoding, OptimizedLayout, validate_internal_projection_columns};
+use crate::output::{OutputMode, OutputPath, PlainWriter, partitioned, single};
 use crate::session::DataFusionSession;
 
 use super::{PipelineWarnings, SharedWriteReporter, SpatialPipelineResult, WriteReporter};
@@ -164,6 +163,8 @@ pub struct OutputOptions {
   pub strip_m: bool,
   /// Encoding for optimized complex-geometry multiscale levels.
   pub multiscale_encoding: MultiscaleEncoding,
+  /// Adds draft GeoParquet ordering and level-of-detail metadata to optimized output.
+  pub write_extensions: bool,
 }
 
 impl Default for OutputOptions {
@@ -179,6 +180,7 @@ impl Default for OutputOptions {
       strip_z: false,
       strip_m: false,
       multiscale_encoding: MultiscaleEncoding::default(),
+      write_extensions: false,
     }
   }
 }
@@ -196,7 +198,7 @@ pub struct Pipeline(PipelineExecution);
 /// Selects the writer after shared setup completes.
 enum PipelineExecution {
   /// Runs plain GeoParquet output.
-  GeoParquet(SpatialPipelineState),
+  Plain(SpatialPipelineState),
   /// Runs optimized output for one file.
   OptimizedSingle(SpatialPipelineState),
   /// Runs optimized output across partition files.
@@ -242,6 +244,9 @@ impl Pipeline {
       write_reporter,
     } = options;
     SpatialReference::validate_output_wkid(output_options.output_wkid);
+    if output_options.mode == OutputMode::Plain && output_options.write_extensions {
+      bail!("--write-extensions cannot be combined with --no-optimization");
+    }
     let input_format = SourceFormat::resolve(&input_options.location, input_options.format)?;
     let input_source = open_input(
       input_format,
@@ -280,20 +285,18 @@ impl Pipeline {
     };
 
     match (output_mode, state.output_path.part_count()) {
-      (OutputMode::GeoParquet, 1) => Ok(Self(PipelineExecution::GeoParquet(state))),
-      (OutputMode::GeoParquet, _) => {
+      (OutputMode::Plain, 1) => Ok(Self(PipelineExecution::Plain(state))),
+      (OutputMode::Plain, _) => {
         bail!("plain GeoParquet output does not support --partitions")
       }
-      (OutputMode::OptimizedGeoParquet, 1) => Ok(Self(PipelineExecution::OptimizedSingle(state))),
-      (OutputMode::OptimizedGeoParquet, _) => {
-        Ok(Self(PipelineExecution::OptimizedPartitioned(state)))
-      }
+      (OutputMode::Optimized, 1) => Ok(Self(PipelineExecution::OptimizedSingle(state))),
+      (OutputMode::Optimized, _) => Ok(Self(PipelineExecution::OptimizedPartitioned(state))),
     }
   }
 
   async fn execute(self) -> Result<SpatialPipelineResult> {
     match self.0 {
-      PipelineExecution::GeoParquet(state) => Self::write_geoparquet(state).await,
+      PipelineExecution::Plain(state) => Self::write_plain(state).await,
       PipelineExecution::OptimizedSingle(state) => Self::write_optimized_single(state).await,
       PipelineExecution::OptimizedPartitioned(state) => {
         Self::write_optimized_partitioned(state).await
@@ -301,10 +304,10 @@ impl Pipeline {
     }
   }
 
-  async fn write_geoparquet(state: SpatialPipelineState) -> Result<SpatialPipelineResult> {
+  async fn write_plain(state: SpatialPipelineState) -> Result<SpatialPipelineResult> {
     let options = &state.output_options;
-    let context = Self::resolve_geoparquet_context(&state).await?;
-    let rows_written = GeoParquetWriter::new(
+    let context = Self::resolve_spatial_write_context(&state).await?;
+    let rows_written = PlainWriter::new(
       &context,
       &state.output_path,
       state.source_schema.as_ref(),
@@ -317,7 +320,7 @@ impl Pipeline {
   }
 
   async fn write_optimized_single(state: SpatialPipelineState) -> Result<SpatialPipelineResult> {
-    let context = Self::resolve_geoparquet_context(&state).await?;
+    let context = Self::resolve_spatial_write_context(&state).await?;
     let layout = OptimizedLayout::new(&context, &state.output_options)?;
     let rows_written = single::write(
       &state.output_path,
@@ -337,7 +340,7 @@ impl Pipeline {
   async fn write_optimized_partitioned(
     state: SpatialPipelineState,
   ) -> Result<SpatialPipelineResult> {
-    let context = Self::resolve_geoparquet_context(&state).await?;
+    let context = Self::resolve_spatial_write_context(&state).await?;
     let layout = OptimizedLayout::new(&context, &state.output_options)?;
     let rows_written = partitioned::write(
       &state.output_path,
@@ -354,10 +357,10 @@ impl Pipeline {
     Ok(state.finish(rows_written))
   }
 
-  async fn resolve_geoparquet_context(
+  async fn resolve_spatial_write_context(
     state: &SpatialPipelineState,
-  ) -> Result<GeoParquetWriteContext> {
-    GeoParquetWriteContext::resolve(
+  ) -> Result<SpatialWriteContext> {
+    SpatialWriteContext::resolve(
       state.input_source.as_ref(),
       state.input_dataframe.clone(),
       state.source_schema.as_ref(),
@@ -425,7 +428,7 @@ mod tests {
   fn output_options_default_and_new_preserve_safe_output_policy() {
     for options in [OutputOptions::default(), OutputOptions::new()] {
       assert_eq!(options.path, PathBuf::new());
-      assert_eq!(options.mode, OutputMode::OptimizedGeoParquet);
+      assert_eq!(options.mode, OutputMode::Optimized);
       assert_eq!(options.file_count, None);
       assert_eq!(options.compression, None);
       assert_eq!(options.output_wkid, crate::DEFAULT_OUTPUT_WKID);

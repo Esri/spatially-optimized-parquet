@@ -29,7 +29,7 @@ fn optimized_output_rejects_non_wgs84_before_filesystem_mutation() {
         },
         output: OutputOptions {
           path: output.clone(),
-          mode: OutputMode::OptimizedGeoParquet,
+          mode: OutputMode::Optimized,
           output_wkid,
           overwrite: true,
           ..Default::default()
@@ -72,7 +72,7 @@ fn output_rejects_explicit_geometry_without_crs_metadata() {
     &[],
   );
 
-  for output_mode in [OutputMode::GeoParquet, OutputMode::OptimizedGeoParquet] {
+  for output_mode in [OutputMode::Plain, OutputMode::Optimized] {
     let output = temp.path().join(format!("{output_mode:?}.parquet"));
     let error = runtime()
       .block_on(Pipeline::run(SpatialPipelineOptions {
@@ -104,7 +104,7 @@ fn output_rejects_explicit_geometry_without_crs_metadata() {
       },
       output: OutputOptions {
         path: output.clone(),
-        mode: OutputMode::GeoParquet,
+        mode: OutputMode::Plain,
         overwrite: true,
         ..Default::default()
       },
@@ -151,7 +151,7 @@ fn output_rejects_input_wkid_when_crs_metadata_exists() {
       },
       output: OutputOptions {
         path: output.clone(),
-        mode: OutputMode::OptimizedGeoParquet,
+        mode: OutputMode::Optimized,
         overwrite: true,
         ..Default::default()
       },

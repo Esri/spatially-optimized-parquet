@@ -10,13 +10,13 @@ use arrow_schema::{DataType, Field, Fields};
 use datafusion::common::cast::as_float64_array;
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
 use datafusion::logical_expr::{
-  ColumnarValue, Expr, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature,
-  Volatility,
+  ColumnarValue, Expr, ReturnFieldArgs, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature,
+  TypeSignature, Volatility,
 };
 use datafusion::prelude::{col, lit};
 
 use crate::geometry::{Extent2D, GeometryArray, geometry_signature, to_datafusion_error};
-use crate::optimized::multiscale::TEMP_XZ_CODE_COLUMN;
+use crate::optimized::multiscale::GEOKEY_COLUMN;
 
 use super::ClusterKey;
 
@@ -289,6 +289,10 @@ impl ScalarUDFImpl for ComplexGeometryClusterKeyUdf {
     Ok(DataType::UInt64)
   }
 
+  fn return_field_from_args(&self, _: ReturnFieldArgs) -> DataFusionResult<Arc<Field>> {
+    Ok(Arc::new(Field::new(self.name(), DataType::UInt64, false)))
+  }
+
   fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
     let arrays = ColumnarValue::values_to_arrays(&args.args)?;
     let geometry = arrays
@@ -338,7 +342,7 @@ impl ComplexGeometryBoundsClusterKeyUdf {
         lit(full_extent.xmax),
         lit(full_extent.ymax),
       ])
-      .alias(TEMP_XZ_CODE_COLUMN)
+      .alias(GEOKEY_COLUMN)
   }
 
   fn udf() -> ScalarUDF {
@@ -385,6 +389,10 @@ impl ScalarUDFImpl for ComplexGeometryBoundsClusterKeyUdf {
 
   fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
     Ok(DataType::UInt64)
+  }
+
+  fn return_field_from_args(&self, _: ReturnFieldArgs) -> DataFusionResult<Arc<Field>> {
+    Ok(Arc::new(Field::new(self.name(), DataType::UInt64, false)))
   }
 
   fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {

@@ -88,7 +88,7 @@ fn partitioned_output_writes_sorted_range_partitions() {
       },
       output: OutputOptions {
         path: output.clone(),
-        mode: OutputMode::OptimizedGeoParquet,
+        mode: OutputMode::Optimized,
         file_count: Some(2),
         overwrite: true,
         ..Default::default()
@@ -118,19 +118,19 @@ fn partitioned_output_writes_sorted_range_partitions() {
   let batches = runtime().block_on(dataframe.collect()).unwrap();
   assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 3);
   for batch in &batches {
-    let geodisplay = batch
-      .column_by_name("geodisplay")
+    let sop_geometry = batch
+      .column_by_name("sop_geometry")
       .unwrap()
       .as_any()
       .downcast_ref::<StructArray>()
       .unwrap();
-    let x = geodisplay
+    let x = sop_geometry
       .column_by_name("x")
       .unwrap()
       .as_any()
       .downcast_ref::<Float64Array>()
       .unwrap();
-    let y = geodisplay
+    let y = sop_geometry
       .column_by_name("y")
       .unwrap()
       .as_any()
@@ -176,11 +176,11 @@ fn partitioned_output_writes_sorted_range_partitions() {
   assert_eq!(files.len(), 2);
   for file in &files {
     let schema = raw_parquet_schema(file);
-    let geodisplay = schema.field_with_name("geodisplay").unwrap();
-    let DataType::Struct(fields) = geodisplay.data_type() else {
-      panic!("geodisplay must be a struct");
+    let sop_geometry = schema.field_with_name("sop_geometry").unwrap();
+    let DataType::Struct(fields) = sop_geometry.data_type() else {
+      panic!("sop_geometry must be a struct");
     };
-    assert!(fields.find("zCode").is_some());
+    assert!(schema.field_with_name("geokey").is_ok());
     assert!(fields.find("x").is_some());
     assert!(fields.find("y").is_some());
     assert!(schema.field_with_name("z_order").is_err());
@@ -203,19 +203,13 @@ fn partitioned_output_writes_sorted_range_partitions() {
     let z_codes = batches
       .iter()
       .flat_map(|batch| {
-        let geodisplay = batch
-          .column_by_name("geodisplay")
-          .unwrap()
-          .as_any()
-          .downcast_ref::<StructArray>()
-          .unwrap();
-        let z_codes = geodisplay
-          .column_by_name("zCode")
+        let geokey = batch
+          .column_by_name("geokey")
           .unwrap()
           .as_any()
           .downcast_ref::<UInt64Array>()
           .unwrap();
-        (0..batch.num_rows()).map(move |index| z_codes.value(index))
+        (0..batch.num_rows()).map(move |index| geokey.value(index))
       })
       .collect::<Vec<_>>();
     assert!(z_codes.windows(2).all(|pair| pair[0] <= pair[1]));
@@ -282,7 +276,7 @@ fn assert_partitioned_multiscale_integer_leaves(
       },
       output: OutputOptions {
         path: output.clone(),
-        mode: OutputMode::OptimizedGeoParquet,
+        mode: OutputMode::Optimized,
         file_count: Some(2),
         overwrite: true,
         multiscale_encoding: encoding,
@@ -334,7 +328,7 @@ fn partitioned_output_combines_row_range_covering_and_compression() {
       },
       output: OutputOptions {
         path: output.clone(),
-        mode: OutputMode::OptimizedGeoParquet,
+        mode: OutputMode::Optimized,
         file_count: Some(2),
         compression: Some("zstd".to_string()),
         covering: true,
@@ -417,7 +411,7 @@ fn partitioned_output_requires_overwrite_for_existing_destination() {
       },
       output: OutputOptions {
         path: output.clone(),
-        mode: OutputMode::OptimizedGeoParquet,
+        mode: OutputMode::Optimized,
         file_count: Some(2),
         ..Default::default()
       },
@@ -454,7 +448,7 @@ fn partitioned_output_replaces_existing_destination() {
       },
       output: OutputOptions {
         path: output.clone(),
-        mode: OutputMode::OptimizedGeoParquet,
+        mode: OutputMode::Optimized,
         file_count: Some(2),
         overwrite: true,
         ..Default::default()

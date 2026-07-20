@@ -145,8 +145,7 @@ mod tests {
   use arrow_schema::{DataType, Field, Schema};
   use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
 
-  use crate::optimized::geometry_info::ClusteringFamily;
-  use crate::optimized::multiscale::POINT_Z_CODE_COLUMN;
+  use crate::optimized::{ClusteringFamily, GEOKEY_COLUMN};
   use crate::session::DataFusionSession;
 
   #[test]
@@ -154,7 +153,7 @@ mod tests {
     let point_range_column = ClusteringFamily::PointGeometry.cluster_partition_column();
     let batch = RecordBatch::try_new(
       Arc::new(Schema::new(vec![
-        Field::new(POINT_Z_CODE_COLUMN, DataType::UInt64, false),
+        Field::new(GEOKEY_COLUMN, DataType::UInt64, false),
         Field::new(point_range_column, DataType::UInt64, false),
       ])),
       vec![
@@ -168,7 +167,7 @@ mod tests {
       let session = DataFusionSession::new(None, None).unwrap();
       let dataframe = session.context().read_batch(batch).unwrap();
       let physical_plan = dataframe.create_physical_plan().await.unwrap();
-      let rewritten = PartitionedSortConfig::new(point_range_column, POINT_Z_CODE_COLUMN, 2, false)
+      let rewritten = PartitionedSortConfig::new(point_range_column, GEOKEY_COLUMN, 2, false)
         .insert_into(physical_plan)
         .unwrap();
 

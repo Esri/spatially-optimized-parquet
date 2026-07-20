@@ -1,9 +1,8 @@
 //! Persists globally ordered optimized output into one Parquet file.
 
-use crate::geoparquet::GeoParquetWriteContext;
 use crate::optimized::OptimizedLayout;
 use crate::output::{OutputPath, Writer, WriterOptions};
-use crate::pipeline::{PipelineWarnings, SharedWriteReporter};
+use crate::pipeline::{PipelineWarnings, SharedWriteReporter, SpatialWriteContext};
 use anyhow::{Context, Result};
 
 use super::dataframe;
@@ -12,7 +11,7 @@ use super::dataframe;
 pub(crate) async fn write(
   output_path: &OutputPath,
   source_schema: &arrow_schema::Schema,
-  context: &GeoParquetWriteContext,
+  context: &SpatialWriteContext,
   layout: &OptimizedLayout,
   covering: bool,
   compression: Option<&str>,
@@ -32,11 +31,6 @@ pub(crate) async fn write(
     .to_string_lossy()
     .into_owned();
   Writer::new(total_input_rows, write_reporter)
-    .write_single(
-      dataframe,
-      output_path,
-      writer_options,
-      vec![layout.geometry().clustering_family.cluster_key_column()],
-    )
+    .write_single(dataframe, output_path, writer_options, Vec::new())
     .await
 }

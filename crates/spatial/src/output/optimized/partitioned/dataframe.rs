@@ -4,14 +4,13 @@ use anyhow::Result;
 use datafusion::dataframe::DataFrame;
 use datafusion::logical_expr::expr_fn::ident;
 
-use crate::geoparquet::{COVERING_BBOX_COLUMN, GeoParquetWriteContext};
-use crate::optimized::OptimizedLayout;
-use crate::optimized::clustering::ClusterRangeBoundaries;
-use crate::pipeline::PipelineWarnings;
+use crate::geoparquet::COVERING_BBOX_COLUMN;
+use crate::optimized::{ClusterRangeBoundaries, OptimizedLayout};
+use crate::pipeline::{PipelineWarnings, SpatialWriteContext};
 
 /// Build the narrow cluster-key dataframe consumed by partition-boundary analysis.
 pub(super) fn range_source(
-  context: &GeoParquetWriteContext,
+  context: &SpatialWriteContext,
   layout: &OptimizedLayout,
 ) -> Result<DataFrame> {
   let dataframe = context.frame().dataframe().select(vec![
@@ -26,7 +25,7 @@ pub(super) fn range_source(
 /// Build optimized output with one range partition value per row.
 pub(super) fn dataframe(
   source_schema: &arrow_schema::Schema,
-  context: &GeoParquetWriteContext,
+  context: &SpatialWriteContext,
   layout: &OptimizedLayout,
   boundaries: &ClusterRangeBoundaries,
   covering: bool,
@@ -52,6 +51,5 @@ pub(super) fn dataframe(
     )?;
   let mut expressions = layout.output_expressions(source_schema, covering, warnings);
   expressions.push(ident(partition_column));
-  expressions.push(ident(clustering_family.cluster_key_column()));
   dataframe.select(expressions).map_err(Into::into)
 }

@@ -5,12 +5,12 @@ use arrow_schema::Schema;
 
 use crate::geometry::{Extent2D, GeometryColumn, GeometryEncoding, GeometryKind, GeometryType};
 use crate::geoparquet::SpatialReference;
-use crate::geoparquet::geometry_scan::scan_geometry_metadata;
 use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata};
+use crate::pipeline::geometry_scan::scan_geometry_metadata;
 
-/// Represents normalized source geometry facts required by either GeoParquet output workflow.
+/// Represents normalized source geometry facts required by output workflows.
 #[derive(Debug, Clone)]
-pub(crate) struct ResolvedGeoParquetSource {
+pub(crate) struct ResolvedSpatialSource {
   /// Identifies the selected WKB geometry column.
   pub(crate) geometry: GeometryColumn,
   /// Defines the exact source geometry kinds.
@@ -29,7 +29,7 @@ pub(crate) struct ResolvedGeoParquetSource {
   pub(crate) source_metadata: SourceDatasetMetadata,
 }
 
-impl ResolvedGeoParquetSource {
+impl ResolvedSpatialSource {
   pub(crate) fn strip_dimensions(&mut self, strip_z: bool, strip_m: bool) {
     self.has_z &= !strip_z;
     self.has_m &= !strip_m;
@@ -70,7 +70,7 @@ pub(crate) async fn resolve_source(
   explicit_geometry_column: Option<&str>,
   input_wkid: Option<u32>,
   row_range: RowRange,
-) -> Result<ResolvedGeoParquetSource> {
+) -> Result<ResolvedSpatialSource> {
   let geometry = GeometryColumn::resolve(
     schema,
     input.inferred_geometry_column()?,
@@ -114,7 +114,7 @@ pub(crate) async fn resolve_source(
     has_m,
   });
 
-  Ok(ResolvedGeoParquetSource {
+  Ok(ResolvedSpatialSource {
     geometry,
     geometry_types,
     source_extent,

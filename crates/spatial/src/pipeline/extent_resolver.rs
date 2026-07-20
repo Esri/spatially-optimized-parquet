@@ -9,9 +9,8 @@ use crate::diagnostics::Diagnostics;
 use crate::geometry::Extent2D;
 use crate::input::{InputSource, RowRange};
 
-use super::{
-  NormalizedSpatialFrame, ResolvedGeoParquetSource, ResolvedReprojection, bbox_field_expr,
-};
+use crate::geoparquet::bbox_field_expr;
+use crate::pipeline::{NormalizedSpatialFrame, ResolvedReprojection, ResolvedSpatialSource};
 
 const EXTENT_XMIN_COLUMN: &str = "__extent_xmin";
 const EXTENT_YMIN_COLUMN: &str = "__extent_ymin";
@@ -33,7 +32,7 @@ impl<'a> ExtentResolver<'a> {
   /// Resolve the selected-row extent in the output coordinate reference system.
   pub(crate) async fn resolve(
     self,
-    source: &ResolvedGeoParquetSource,
+    source: &ResolvedSpatialSource,
     normalized: &NormalizedSpatialFrame,
     reprojection: &ResolvedReprojection,
   ) -> Result<Extent2D> {

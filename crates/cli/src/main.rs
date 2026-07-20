@@ -143,6 +143,11 @@ struct WriteCommand {
   no_optimization: bool,
   #[arg(
     long,
+    help = "EXPERIMENTAL: Add draft GeoParquet ordering and level-of-detail metadata"
+  )]
+  write_extensions: bool,
+  #[arg(
+    long,
     value_enum,
     default_value_t,
     help = "EXPERIMENTAL: Select the optimized multiscale geometry encoding"
@@ -196,9 +201,9 @@ async fn run(cli: Cli) -> Result<()> {
 impl From<WriteCommand> for SpatialPipelineOptions {
   fn from(args: WriteCommand) -> Self {
     let output_mode = if args.no_optimization {
-      OutputMode::GeoParquet
+      OutputMode::Plain
     } else {
-      OutputMode::OptimizedGeoParquet
+      OutputMode::Optimized
     };
     Self {
       input: InputOptions {
@@ -220,6 +225,7 @@ impl From<WriteCommand> for SpatialPipelineOptions {
         strip_z: args.strip_z,
         strip_m: args.strip_m,
         multiscale_encoding: args.multiscale_encoding.into(),
+        write_extensions: args.write_extensions,
       },
       memory_limit_bytes: args.memory_limit_bytes,
       target_partitions: args.sort_concurrency,

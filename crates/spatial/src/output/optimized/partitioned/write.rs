@@ -1,10 +1,8 @@
 //! Persists range-partitioned optimized output through custom physical sink planning.
 
-use crate::geoparquet::GeoParquetWriteContext;
-use crate::optimized::OptimizedLayout;
-use crate::optimized::clustering::ClusterRangeBoundaries;
+use crate::optimized::{ClusterRangeBoundaries, OptimizedLayout};
 use crate::output::{OutputPath, Writer, WriterOptions};
-use crate::pipeline::{PipelineWarnings, SharedWriteReporter};
+use crate::pipeline::{PipelineWarnings, SharedWriteReporter, SpatialWriteContext};
 use anyhow::Result;
 
 use super::dataframe;
@@ -14,7 +12,7 @@ use super::sort::PartitionedSortConfig;
 pub(crate) async fn write(
   output_path: &OutputPath,
   source_schema: &arrow_schema::Schema,
-  context: &GeoParquetWriteContext,
+  context: &SpatialWriteContext,
   layout: &OptimizedLayout,
   covering: bool,
   compression: Option<&str>,
@@ -47,7 +45,7 @@ pub(crate) async fn write(
     partition_column,
     clustering_family.cluster_key_column(),
     output_path.part_count(),
-    true,
+    false,
   );
   Writer::new(total_input_rows, write_reporter)
     .write_partitioned(

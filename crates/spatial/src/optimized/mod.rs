@@ -6,16 +6,18 @@ mod geometry_info;
 mod layout;
 mod metadata;
 mod multiscale;
-pub(crate) mod partitioned;
 mod select;
-pub(crate) mod single;
 
-pub(crate) use clustering::{BoundsUdf, ClusterKey, DEFAULT_XZ_MAX_LEVEL, PointGeometryUdf};
+pub(crate) use clustering::{
+  BoundsUdf, ClusterKey, ClusterRangeBoundaries, DEFAULT_XZ_MAX_LEVEL, PointGeometryUdf,
+};
 pub(crate) use geodisplay_metadata::{
   ClusteringIndexXZ, ClusteringIndexZ, ColumnPath, GEODISPLAY_VERSION, GeodisplayEncoding,
   GeodisplayMetadata, MultiscaleLevel,
 };
 pub(crate) use layout::OptimizedLayout;
+#[cfg(test)]
+pub(crate) use multiscale::GEOKEY_COLUMN;
 pub use multiscale::MultiscaleEncoding;
 pub(crate) use multiscale::{
   GeometryPartRole, GeometryPartSink, validate_internal_projection_columns,

@@ -1,11 +1,11 @@
 //! Resolves optimized GeoParquet layout decisions.
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 
-use crate::geoparquet::GeoParquetWriteContext;
 use crate::optimized::MultiscaleEncoding;
 use crate::optimized::multiscale::MultiscaleLevel;
 use crate::pipeline::OutputOptions;
+use crate::pipeline::SpatialWriteContext;
 
 use super::{ClusteringFamily, GeometryInfo};
 
@@ -15,14 +15,12 @@ pub(crate) struct OptimizedLayout {
   geometry: GeometryInfo,
   levels: Vec<MultiscaleLevel>,
   multiscale_encoding: MultiscaleEncoding,
+  write_extensions: bool,
 }
 
 impl OptimizedLayout {
   /// Resolve optimized layout decisions from prepared GeoParquet data.
-  pub(crate) fn new(
-    context: &GeoParquetWriteContext,
-    output_options: &OutputOptions,
-  ) -> Result<Self> {
+  pub(crate) fn new(context: &SpatialWriteContext, output_options: &OutputOptions) -> Result<Self> {
     let geometry = GeometryInfo::resolve(context.source())?;
     let levels = match geometry.clustering_family {
       ClusteringFamily::PointGeometry => Vec::new(),
@@ -30,10 +28,20 @@ impl OptimizedLayout {
         MultiscaleLevel::create_all(output_options.output_wkid, geometry.ty)?
       }
     };
+    if output_options.write_extensions
+      && matches!(
+        geometry.ty,
+        crate::geometry::GeometryType::Polyline | crate::geometry::GeometryType::Polygon
+      )
+      && output_options.multiscale_encoding != MultiscaleEncoding::Pbf
+    {
+      bail!("--write-extensions requires PBF multiscale encoding for line and polygon output");
+    }
     Ok(Self {
       geometry,
       levels,
       multiscale_encoding: output_options.multiscale_encoding,
+      write_extensions: output_options.write_extensions,
     })
   }
 
@@ -50,6 +58,19 @@ impl OptimizedLayout {
   /// Return the selected multiscale payload encoding.
   pub(crate) fn multiscale_encoding(&self) -> MultiscaleEncoding {
     self.multiscale_encoding
+  }
+
+  /// Return whether this layout writes extension level-of-detail metadata.
+  pub(crate) fn writes_extension_lod(&self) -> bool {
+    matches!(
+      self.geometry.ty,
+      crate::geometry::GeometryType::Polyline | crate::geometry::GeometryType::Polygon
+    )
+  }
+
+  /// Return whether this layout emits draft GeoParquet extension metadata.
+  pub(crate) fn writes_extensions(&self) -> bool {
+    self.write_extensions
   }
 
   /// Return payload columns that require delta-binary-packed Parquet encoding.

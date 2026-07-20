@@ -70,7 +70,7 @@ fn run_optimized_multiscale(
     },
     output: OutputOptions {
       path: output.to_path_buf(),
-      mode: OutputMode::OptimizedGeoParquet,
+      mode: OutputMode::Optimized,
       overwrite: true,
       multiscale_encoding: encoding,
       ..Default::default()
@@ -102,7 +102,7 @@ fn run_optimized_with_stripping(
     },
     output: OutputOptions {
       path: output.to_path_buf(),
-      mode: OutputMode::OptimizedGeoParquet,
+      mode: OutputMode::Optimized,
       covering,
       overwrite: true,
       strip_z,
@@ -153,7 +153,7 @@ fn optimized_output_sorts_points_and_writes_metadata() {
       },
       output: OutputOptions {
         path: output.clone(),
-        mode: OutputMode::OptimizedGeoParquet,
+        mode: OutputMode::Optimized,
         overwrite: true,
         ..Default::default()
       },
@@ -170,7 +170,7 @@ fn optimized_output_sorts_points_and_writes_metadata() {
   assert_eq!(progress.last().map(|update| update.rows_written()), Some(2));
   assert_eq!(progress.last().map(|update| update.total_rows()), Some(2));
   let explicit_report = validate(&output).unwrap();
-  assert!(!explicit_report.has_errors());
+  assert!(!explicit_report.has_errors(), "{explicit_report}");
   assert!(
     explicit_report
       .findings()
@@ -184,12 +184,17 @@ fn optimized_output_sorts_points_and_writes_metadata() {
   let output_schema = Arc::new(dataframe.schema().as_arrow().clone());
   let batches = runtime().block_on(dataframe.collect()).unwrap();
   let batch = &batches[0];
-  let geodisplay = output_schema.field_with_name("geodisplay").unwrap();
-  assert!(geodisplay.is_nullable());
-  let DataType::Struct(fields) = geodisplay.data_type() else {
-    panic!("geodisplay must be a struct");
+  let sop_geometry = output_schema.field_with_name("sop_geometry").unwrap();
+  assert!(sop_geometry.is_nullable());
+  let DataType::Struct(fields) = sop_geometry.data_type() else {
+    panic!("sop_geometry must be a struct");
   };
-  assert!(!fields.find("zCode").unwrap().1.is_nullable());
+  assert!(
+    !output_schema
+      .field_with_name("geokey")
+      .unwrap()
+      .is_nullable()
+  );
   assert!(!fields.find("x").unwrap().1.is_nullable());
   assert!(!fields.find("y").unwrap().1.is_nullable());
   assert_eq!(
@@ -212,11 +217,11 @@ fn optimized_output_sorts_points_and_writes_metadata() {
   assert_eq!(geodisplay["geometryType"], "point");
   assert_eq!(
     geodisplay["xColumn"],
-    serde_json::json!(["geodisplay", "x"])
+    serde_json::json!(["sop_geometry", "x"])
   );
   assert_eq!(
     geodisplay["yColumn"],
-    serde_json::json!(["geodisplay", "y"])
+    serde_json::json!(["sop_geometry", "y"])
   );
   assert_eq!(geodisplay["wkid"], 4326);
   assert!(geodisplay.get("wkt").is_none());
@@ -225,7 +230,7 @@ fn optimized_output_sorts_points_and_writes_metadata() {
 }
 
 #[test]
-fn optimized_output_uses_null_geodisplay_for_null_points() {
+fn optimized_output_uses_null_sop_geometry_for_null_points() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("nullable-points.parquet");
   let output = temp.path().join("nullable-points-optimized.parquet");
@@ -275,22 +280,21 @@ fn optimized_output_uses_null_geodisplay_for_null_points() {
         .map(|index| (batch, index))
     })
     .unwrap();
-  let geodisplay_field = output_schema.field_with_name("geodisplay").unwrap();
-  let DataType::Struct(fields) = geodisplay_field.data_type() else {
-    panic!("geodisplay must be a struct");
+  let sop_geometry_field = output_schema.field_with_name("sop_geometry").unwrap();
+  let DataType::Struct(fields) = sop_geometry_field.data_type() else {
+    panic!("sop_geometry must be a struct");
   };
-  let geodisplay = batch
-    .column_by_name("geodisplay")
+  let sop_geometry = batch
+    .column_by_name("sop_geometry")
     .unwrap()
     .as_any()
     .downcast_ref::<StructArray>()
     .unwrap();
 
-  assert!(geodisplay_field.is_nullable());
-  assert!(!fields.find("zCode").unwrap().1.is_nullable());
+  assert!(sop_geometry_field.is_nullable());
   assert!(!fields.find("x").unwrap().1.is_nullable());
   assert!(!fields.find("y").unwrap().1.is_nullable());
-  assert!(geodisplay.is_null(missing_index));
+  assert!(sop_geometry.is_null(missing_index));
 }
 
 #[test]
@@ -340,16 +344,16 @@ fn optimized_output_keeps_point_z_and_m_in_wkb_columns_and_metadata() {
     binary_value(batch.column_by_name("geometry").unwrap().as_ref(), 0),
     point
   );
-  let geodisplay = batch
-    .column_by_name("geodisplay")
+  let sop_geometry = batch
+    .column_by_name("sop_geometry")
     .unwrap()
     .as_any()
     .downcast_ref::<StructArray>()
     .unwrap();
-  assert_eq!(struct_f64_value(geodisplay, "x", 0), 1.0);
-  assert_eq!(struct_f64_value(geodisplay, "y", 0), 2.0);
-  assert_eq!(struct_f64_value(geodisplay, "z", 0), 30.0);
-  assert_eq!(struct_f64_value(geodisplay, "m", 0), 40.0);
+  assert_eq!(struct_f64_value(sop_geometry, "x", 0), 1.0);
+  assert_eq!(struct_f64_value(sop_geometry, "y", 0), 2.0);
+  assert_eq!(struct_f64_value(sop_geometry, "z", 0), 30.0);
+  assert_eq!(struct_f64_value(sop_geometry, "m", 0), 40.0);
 
   let metadata = kv_map(&output);
   let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").unwrap()).unwrap();
@@ -360,11 +364,11 @@ fn optimized_output_keeps_point_z_and_m_in_wkb_columns_and_metadata() {
   assert_eq!(geodisplay_metadata["hasM"], true);
   assert_eq!(
     geodisplay_metadata["zColumn"],
-    serde_json::json!(["geodisplay", "z"])
+    serde_json::json!(["sop_geometry", "z"])
   );
   assert_eq!(
     geodisplay_metadata["mColumn"],
-    serde_json::json!(["geodisplay", "m"])
+    serde_json::json!(["sop_geometry", "m"])
   );
 }
 
@@ -414,19 +418,19 @@ fn optimized_output_supports_point_xyz_and_point_xym() {
       .block_on(scan_parquet(output.to_str().unwrap()))
       .unwrap();
     let batches = runtime().block_on(dataframe.collect()).unwrap();
-    let geodisplay = batches[0]
-      .column_by_name("geodisplay")
+    let sop_geometry = batches[0]
+      .column_by_name("sop_geometry")
       .unwrap()
       .as_any()
       .downcast_ref::<StructArray>()
       .unwrap();
-    assert_eq!(geodisplay.column_by_name("z").is_some(), z.is_some());
-    assert_eq!(geodisplay.column_by_name("m").is_some(), m.is_some());
+    assert_eq!(sop_geometry.column_by_name("z").is_some(), z.is_some());
+    assert_eq!(sop_geometry.column_by_name("m").is_some(), m.is_some());
     if let Some(z) = z {
-      assert_eq!(struct_f64_value(geodisplay, "z", 0), z);
+      assert_eq!(struct_f64_value(sop_geometry, "z", 0), z);
     }
     if let Some(m) = m {
-      assert_eq!(struct_f64_value(geodisplay, "m", 0), m);
+      assert_eq!(struct_f64_value(sop_geometry, "m", 0), m);
     }
   }
 }
@@ -483,14 +487,14 @@ fn optimized_output_strips_z_and_m_independently() {
       u32::from_le_bytes(geometry[1..5].try_into().unwrap()),
       expected_type
     );
-    let geodisplay = batches[0]
-      .column_by_name("geodisplay")
+    let sop_geometry = batches[0]
+      .column_by_name("sop_geometry")
       .unwrap()
       .as_any()
       .downcast_ref::<StructArray>()
       .unwrap();
-    assert_eq!(geodisplay.column_by_name("z").is_some(), !strip_z);
-    assert_eq!(geodisplay.column_by_name("m").is_some(), !strip_m);
+    assert_eq!(sop_geometry.column_by_name("z").is_some(), !strip_z);
+    assert_eq!(sop_geometry.column_by_name("m").is_some(), !strip_m);
 
     let metadata = kv_map(&output);
     let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").unwrap()).unwrap();
@@ -642,13 +646,13 @@ fn optimized_output_writes_dimensional_polygon_pbf_with_absolute_z_and_m() {
     .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let batches = runtime().block_on(dataframe.collect()).unwrap();
-  let geodisplay = batches[0]
-    .column_by_name("geodisplay")
+  let geolod = batches[0]
+    .column_by_name("geolod")
     .unwrap()
     .as_any()
     .downcast_ref::<StructArray>()
     .unwrap();
-  let level_16 = binary_value(geodisplay.column_by_name("level_16").unwrap().as_ref(), 0);
+  let level_16 = binary_value(geolod.column_by_name("level_16").unwrap().as_ref(), 0);
   let decoded = PbfGeometry::decode(level_16.as_slice()).unwrap();
   assert_eq!(decoded.lengths, vec![5]);
   assert_eq!(decoded.coords.len(), 20);
@@ -737,13 +741,13 @@ fn optimized_output_strips_polygon_pbf_dimensions() {
       .block_on(scan_parquet(output.to_str().unwrap()))
       .unwrap();
     let batches = runtime().block_on(dataframe.collect()).unwrap();
-    let geodisplay = batches[0]
-      .column_by_name("geodisplay")
+    let geolod = batches[0]
+      .column_by_name("geolod")
       .unwrap()
       .as_any()
       .downcast_ref::<StructArray>()
       .unwrap();
-    let payload = binary_value(geodisplay.column_by_name("level_16").unwrap().as_ref(), 0);
+    let payload = binary_value(geolod.column_by_name("level_16").unwrap().as_ref(), 0);
     let decoded = PbfGeometry::decode(payload.as_slice()).unwrap();
     assert_eq!(decoded.coords.len(), 12);
     assert_eq!(
@@ -850,16 +854,16 @@ fn optimized_output_reprojects_point_xy_and_preserves_point_z_and_m() {
     .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let batches = runtime().block_on(dataframe.collect()).unwrap();
-  let geodisplay = batches[0]
-    .column_by_name("geodisplay")
+  let sop_geometry = batches[0]
+    .column_by_name("sop_geometry")
     .unwrap()
     .as_any()
     .downcast_ref::<StructArray>()
     .unwrap();
-  assert_close(struct_f64_value(geodisplay, "x", 0), 1.0);
-  assert_close(struct_f64_value(geodisplay, "y", 0), 2.0);
-  assert_eq!(struct_f64_value(geodisplay, "z", 0), 30.0);
-  assert_eq!(struct_f64_value(geodisplay, "m", 0), 40.0);
+  assert_close(struct_f64_value(sop_geometry, "x", 0), 1.0);
+  assert_close(struct_f64_value(sop_geometry, "y", 0), 2.0);
+  assert_eq!(struct_f64_value(sop_geometry, "z", 0), 30.0);
+  assert_eq!(struct_f64_value(sop_geometry, "m", 0), 40.0);
 }
 
 #[test]
@@ -914,19 +918,19 @@ fn optimized_output_reprojects_selected_geoparquet_rows() {
     string_value(batch.column_by_name("name").unwrap().as_ref(), 0),
     "selected"
   );
-  let geodisplay = batch
-    .column_by_name("geodisplay")
+  let sop_geometry = batch
+    .column_by_name("sop_geometry")
     .unwrap()
     .as_any()
     .downcast_ref::<StructArray>()
     .unwrap();
-  let x = geodisplay
+  let x = sop_geometry
     .column_by_name("x")
     .unwrap()
     .as_any()
     .downcast_ref::<Float64Array>()
     .unwrap();
-  let y = geodisplay
+  let y = sop_geometry
     .column_by_name("y")
     .unwrap()
     .as_any()
@@ -1011,16 +1015,16 @@ fn optimized_output_writes_complex_geometry_display_struct_and_metadata() {
     .as_any()
     .downcast_ref::<Int32Array>()
     .unwrap();
-  let geodisplay_column = batch
-    .column_by_name("geodisplay")
+  let geolod = batch
+    .column_by_name("geolod")
     .unwrap()
     .as_any()
     .downcast_ref::<StructArray>()
     .unwrap();
-  assert!(output_schema.index_of("geodisplay").is_ok());
+  assert!(output_schema.index_of("geolod").is_ok());
+  assert!(output_schema.index_of("geokey").is_ok());
   assert_eq!(ids.value(0), 1);
-  assert!(geodisplay_column.column_by_name("xzCode").is_some());
-  assert!(geodisplay_column.column_by_name("bounds").is_none());
+  assert!(geolod.column_by_name("bounds").is_none());
 
   let metadata = kv_map(&output);
   let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").unwrap()).unwrap();
@@ -1081,13 +1085,13 @@ fn optimized_output_writes_native_quantized_multiscale_geometry() {
     .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let batches = runtime().block_on(dataframe.collect()).unwrap();
-  let geodisplay = batches[0]
-    .column_by_name("geodisplay")
+  let geolod = batches[0]
+    .column_by_name("geolod")
     .unwrap()
     .as_any()
     .downcast_ref::<StructArray>()
     .unwrap();
-  let geometries = geodisplay
+  let geometries = geolod
     .column_by_name("level_16")
     .unwrap()
     .as_any()
@@ -1173,13 +1177,13 @@ fn optimized_native_output_writes_missing_values_as_nullable_components_zm() {
     .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let batches = runtime().block_on(dataframe.collect()).unwrap();
-  let geodisplay = batches[0]
-    .column_by_name("geodisplay")
+  let geolod = batches[0]
+    .column_by_name("geolod")
     .unwrap()
     .as_any()
     .downcast_ref::<StructArray>()
     .unwrap();
-  let geometries = geodisplay
+  let geometries = geolod
     .column_by_name("level_16")
     .unwrap()
     .as_any()
@@ -1251,7 +1255,7 @@ fn optimized_output_writes_covering_bbox_for_complex_geometry() {
     .unwrap();
   let output_schema = Arc::new(dataframe.schema().as_arrow().clone());
   assert!(output_schema.index_of("bbox").is_ok());
-  assert!(output_schema.index_of("geodisplay").is_ok());
+  assert!(output_schema.index_of("geolod").is_ok());
   let batches = runtime().block_on(dataframe.collect()).unwrap();
   let bbox = batches[0]
     .column_by_name("bbox")
@@ -1268,14 +1272,14 @@ fn optimized_output_writes_covering_bbox_for_complex_geometry() {
 }
 
 #[test]
-fn optimized_output_replaces_existing_display_column() {
+fn optimized_output_rejects_existing_geolod_column() {
   let temp = TempDir::new().unwrap();
-  let input = temp.path().join("polygons-with-geodisplay.parquet");
+  let input = temp.path().join("polygons-with-geolod.parquet");
   let output = temp.path().join("polygons-regenerated.parquet");
   let schema = Arc::new(Schema::new(vec![
     Field::new("id", DataType::Int32, false),
     Field::new("geometry", DataType::Binary, true),
-    Field::new("geodisplay", DataType::Utf8, true),
+    Field::new("geolod", DataType::Utf8, true),
   ]));
   let polygon = wkb_polygon(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 0.0)]);
   let batch = RecordBatch::try_new(
@@ -1283,7 +1287,7 @@ fn optimized_output_replaces_existing_display_column() {
     vec![
       Arc::new(Int32Array::from(vec![1])),
       Arc::new(BinaryArray::from(vec![Some(polygon.as_slice())])),
-      Arc::new(StringArray::from(vec![Some("stale-geodisplay")])),
+      Arc::new(StringArray::from(vec![Some("stale-geolod")])),
     ],
   )
   .unwrap();
@@ -1294,7 +1298,7 @@ fn optimized_output_replaces_existing_display_column() {
     parquet::basic::Compression::SNAPPY,
     &[geoparquet_kv("geometry", &["Polygon"])],
   );
-  run_optimized(
+  let error = run_optimized(
     &input,
     &output,
     RowRange::default(),
@@ -1303,27 +1307,12 @@ fn optimized_output_replaces_existing_display_column() {
     None,
     false,
   )
-  .unwrap();
-
-  let dataframe = runtime()
-    .block_on(scan_parquet(output.to_str().unwrap()))
-    .unwrap();
-  let output_schema = Arc::new(dataframe.schema().as_arrow().clone());
-  let geodisplay_fields = output_schema
-    .fields()
-    .iter()
-    .filter(|field| field.name() == "geodisplay")
-    .count();
-  let batches = runtime().block_on(dataframe.collect()).unwrap();
-  let geodisplay_column = batches[0]
-    .column_by_name("geodisplay")
-    .unwrap()
-    .as_any()
-    .downcast_ref::<StructArray>()
-    .unwrap();
-  assert_eq!(geodisplay_fields, 1);
-  assert!(geodisplay_column.column_by_name("xzCode").is_some());
-  assert!(geodisplay_column.column_by_name("bounds").is_none());
+  .unwrap_err();
+  assert!(
+    error
+      .to_string()
+      .contains("input column 'geolod' conflicts with an internal projection column")
+  );
 }
 
 #[test]
@@ -1386,19 +1375,13 @@ fn optimized_output_sorts_complex_geometry_rows_across_input_batches() {
   let xz_codes = batches
     .iter()
     .flat_map(|batch| {
-      let geodisplay_column = batch
-        .column_by_name("geodisplay")
-        .unwrap()
-        .as_any()
-        .downcast_ref::<StructArray>()
-        .unwrap();
-      let xz_codes = geodisplay_column
-        .column_by_name("xzCode")
+      let geokey = batch
+        .column_by_name("geokey")
         .unwrap()
         .as_any()
         .downcast_ref::<UInt64Array>()
         .unwrap();
-      (0..batch.num_rows()).map(move |index| xz_codes.value(index))
+      (0..batch.num_rows()).map(move |index| geokey.value(index))
     })
     .collect::<Vec<_>>();
   assert!(xz_codes.windows(2).all(|pair| pair[0] <= pair[1]));
@@ -1595,8 +1578,8 @@ fn optimized_output_accepts_single_layer_geopackage() {
   let output_schema = Arc::new(dataframe.schema().as_arrow().clone());
   let batches = runtime().block_on(dataframe.collect()).unwrap();
   let batch = &batches[0];
-  let geodisplay = output_schema.field_with_name("geodisplay").unwrap();
-  assert!(matches!(geodisplay.data_type(), DataType::Struct(_)));
+  let sop_geometry = output_schema.field_with_name("sop_geometry").unwrap();
+  assert!(matches!(sop_geometry.data_type(), DataType::Struct(_)));
   assert_eq!(
     string_value(batch.column_by_name("name").unwrap().as_ref(), 0),
     "early"
@@ -1648,14 +1631,14 @@ fn optimized_output_reprojects_geopackage_polygon() {
     assert_close(actual, expected);
   }
 
-  let geodisplay_column = batch
-    .column_by_name("geodisplay")
+  let geolod = batch
+    .column_by_name("geolod")
     .unwrap()
     .as_any()
     .downcast_ref::<StructArray>()
     .unwrap();
-  assert!(geodisplay_column.column_by_name("bounds").is_none());
-  let level_zero = geodisplay_column.column_by_name("level_0").unwrap();
+  assert!(geolod.column_by_name("bounds").is_none());
+  let level_zero = geolod.column_by_name("level_0").unwrap();
   assert!(!binary_value(level_zero.as_ref(), 0).is_empty());
 
   let covering = batch
@@ -1681,7 +1664,7 @@ fn optimized_output_reprojects_geopackage_polygon() {
   assert!(geodisplay.get("wkt").is_none());
   assert_eq!(
     geodisplay["levels"][0]["column"],
-    serde_json::json!(["geodisplay", "level_0"])
+    serde_json::json!(["geolod", "level_0"])
   );
   assert_eq!(geodisplay["levels"][0]["resolution"], 0.703125);
   assert_eq!(geodisplay["levels"][0]["transform"]["scale"][0], 0.703125);
@@ -1751,16 +1734,16 @@ fn optimized_output_selects_requested_geopackage_layer() {
     .as_any()
     .downcast_ref::<Int32Array>()
     .unwrap();
-  let geodisplay_column = batch
-    .column_by_name("geodisplay")
+  let geolod = batch
+    .column_by_name("geolod")
     .unwrap()
     .as_any()
     .downcast_ref::<StructArray>()
     .unwrap();
-  assert!(output_schema.index_of("geodisplay").is_ok());
+  assert!(output_schema.index_of("geolod").is_ok());
+  assert!(output_schema.index_of("geokey").is_ok());
   assert_eq!(ids.value(0), 1);
-  assert!(geodisplay_column.column_by_name("xzCode").is_some());
-  assert!(geodisplay_column.column_by_name("bounds").is_none());
+  assert!(geolod.column_by_name("bounds").is_none());
 
   let metadata = kv_map(&output);
   let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").unwrap()).unwrap();

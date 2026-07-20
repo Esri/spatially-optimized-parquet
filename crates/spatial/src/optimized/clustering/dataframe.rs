@@ -7,8 +7,7 @@ use datafusion::functions::core::expr_ext::FieldAccessor;
 use crate::geometry::Extent2D;
 use crate::geoparquet::bbox_field_expr;
 use crate::optimized::multiscale::{
-  POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_CODE_COLUMN, POINT_Z_COLUMN,
-  TEMP_XZ_CODE_COLUMN,
+  GEOKEY_COLUMN, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_COLUMN,
 };
 
 use super::{ComplexGeometryBoundsClusterKeyUdf, PointGeometryClusterKeyUdf, PointGeometryUdf};
@@ -49,7 +48,7 @@ impl GeometryInfo {
   ) -> Result<DataFrame> {
     match self.clustering_family {
       ClusteringFamily::PointGeometry => Ok(dataframe.with_column(
-        POINT_Z_CODE_COLUMN,
+        GEOKEY_COLUMN,
         PointGeometryClusterKeyUdf::expression(
           bbox_field_expr("xmin"),
           bbox_field_expr("ymin"),
@@ -57,7 +56,7 @@ impl GeometryInfo {
         ),
       )?),
       ClusteringFamily::ComplexGeometry => Ok(dataframe.with_column(
-        TEMP_XZ_CODE_COLUMN,
+        GEOKEY_COLUMN,
         ComplexGeometryBoundsClusterKeyUdf::expression(
           bbox_field_expr("xmin"),
           bbox_field_expr("ymin"),

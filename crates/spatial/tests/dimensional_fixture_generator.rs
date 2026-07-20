@@ -195,7 +195,7 @@ fn optimize_fixture(input: &Path, output: &Path) {
       },
       output: OutputOptions {
         path: output.to_path_buf(),
-        mode: OutputMode::OptimizedGeoParquet,
+        mode: OutputMode::Optimized,
         overwrite: true,
         ..Default::default()
       },

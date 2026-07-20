@@ -9,10 +9,10 @@ mod traversal;
 
 pub(crate) use columns::validate_internal_projection_columns;
 pub(crate) use columns::{
-  GEODISPLAY_COLUMN, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_CODE_COLUMN,
-  POINT_Z_COLUMN, TEMP_XZ_CODE_COLUMN, XZ_CODE_COLUMN,
+  GEOKEY_COLUMN, GEOLOD_COLUMN, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_COLUMN,
+  SOP_GEOMETRY_COLUMN,
 };
-pub(crate) use datafusion::{ComplexGeometryGeodisplayUdf, PointGeometryGeodisplayUdf};
+pub(crate) use datafusion::{GeolodUdf, SopGeometryUdf};
 pub use encoding::MultiscaleEncoding;
 pub(crate) use levels::MultiscaleLevel;
 pub(crate) use traversal::{GeometryPartRole, GeometryPartSink};

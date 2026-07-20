@@ -6,7 +6,7 @@ use datafusion::logical_expr::{Expr, SortExpr, when};
 use datafusion::prelude::lit;
 
 use crate::optimized::ClusteringFamily;
-use crate::optimized::multiscale::{POINT_Z_CODE_COLUMN, TEMP_XZ_CODE_COLUMN};
+use crate::optimized::multiscale::GEOKEY_COLUMN;
 
 use super::ClusterKey;
 
@@ -27,10 +27,7 @@ impl ClusteringFamily {
 
   /// Return the generated cluster-key column for this clustering strategy.
   pub(crate) fn cluster_key_column(self) -> &'static str {
-    match self {
-      Self::PointGeometry => POINT_Z_CODE_COLUMN,
-      Self::ComplexGeometry => TEMP_XZ_CODE_COLUMN,
-    }
+    GEOKEY_COLUMN
   }
 
   /// Return the generated range-partition column for this clustering strategy.

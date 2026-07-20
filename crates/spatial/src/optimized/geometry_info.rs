@@ -3,7 +3,7 @@
 use anyhow::Result;
 
 use crate::geometry::{GeometryColumn, GeometryType};
-use crate::geoparquet::ResolvedGeoParquetSource;
+use crate::pipeline::ResolvedSpatialSource;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Groups optimized geometry types by their clustering strategy.
@@ -31,7 +31,7 @@ pub(crate) struct GeometryInfo {
 
 impl GeometryInfo {
   /// Resolve optimized geometry from normalized source geometry facts.
-  pub(crate) fn resolve(source: &ResolvedGeoParquetSource) -> Result<Self> {
+  pub(crate) fn resolve(source: &ResolvedSpatialSource) -> Result<Self> {
     let ty = source.geometry_type;
     Ok(Self {
       geometry: source.geometry.clone(),

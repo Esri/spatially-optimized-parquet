@@ -8,20 +8,21 @@ use datafusion::logical_expr::expr_fn::ident;
 use crate::output::{OutputPath, Writer, WriterOptions};
 use crate::pipeline::SharedWriteReporter;
 
-use super::{COVERING_BBOX_COLUMN, GeoMetadata, GeoMetadataInput, GeoParquetWriteContext};
+use crate::geoparquet::{COVERING_BBOX_COLUMN, GeoMetadata, GeoMetadataInput};
+use crate::pipeline::SpatialWriteContext;
 
-pub(crate) struct GeoParquetWriter<'a> {
-  context: &'a GeoParquetWriteContext,
+pub(crate) struct PlainWriter<'a> {
+  context: &'a SpatialWriteContext,
   output_path: &'a OutputPath,
   source_schema: &'a Schema,
   total_rows: u64,
   write_reporter: Option<SharedWriteReporter>,
 }
 
-impl<'a> GeoParquetWriter<'a> {
+impl<'a> PlainWriter<'a> {
   /// Construct one plain GeoParquet writer for prepared spatial data.
   pub(crate) fn new(
-    context: &'a GeoParquetWriteContext,
+    context: &'a SpatialWriteContext,
     output_path: &'a OutputPath,
     source_schema: &'a Schema,
     total_rows: u64,
@@ -61,6 +62,8 @@ impl<'a> GeoParquetWriter<'a> {
       has_m: self.context.source().has_m,
       covering,
       covering_column: COVERING_BBOX_COLUMN,
+      ordering: None,
+      lod: None,
     };
     let metadata = GeoMetadata::parquet_entries(
       self.context.source().source_metadata.passthrough_kv.clone(),

@@ -24,7 +24,7 @@ use crate::input::{
   SourceGeometryMetadata, open_input,
 };
 
-use super::{GeoParquetWriteContext, resolve_source};
+use crate::pipeline::{SpatialWriteContext, resolve_source};
 
 fn runtime() -> Runtime {
   Runtime::new().unwrap()
@@ -373,7 +373,7 @@ fn write_context_reuses_complete_source_metadata_for_normalized_output() {
   };
 
   let context = runtime()
-    .block_on(GeoParquetWriteContext::resolve(
+    .block_on(SpatialWriteContext::resolve(
       &input,
       empty_dataframe(input.schema().unwrap()),
       input.schema().unwrap().as_ref(),

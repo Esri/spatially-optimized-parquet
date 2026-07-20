@@ -16,7 +16,7 @@ use datafusion::prelude::{col, lit};
 use crate::geometry::WkbCoordinate;
 use crate::geometry::{Extent2D, GeometryArray, geometry_signature, to_datafusion_error};
 use crate::optimized::multiscale::{
-  POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_CODE_COLUMN, POINT_Z_COLUMN,
+  GEOKEY_COLUMN, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_COLUMN,
 };
 
 use super::ClusterKey;
@@ -201,7 +201,7 @@ impl PointGeometryClusterKeyUdf {
         lit(full_extent.xmax),
         lit(full_extent.ymax),
       ])
-      .alias(POINT_Z_CODE_COLUMN)
+      .alias(GEOKEY_COLUMN)
   }
 
   fn udf() -> ScalarUDF {
@@ -251,7 +251,7 @@ impl ScalarUDFImpl for PointGeometryClusterKeyUdf {
   }
 
   fn return_field_from_args(&self, _: ReturnFieldArgs) -> DataFusionResult<Arc<Field>> {
-    Ok(Arc::new(Field::new(self.name(), DataType::UInt64, true)))
+    Ok(Arc::new(Field::new(self.name(), DataType::UInt64, false)))
   }
 
   fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
@@ -262,21 +262,19 @@ impl ScalarUDFImpl for PointGeometryClusterKeyUdf {
     let mut values = Vec::with_capacity(x.len());
     for index in 0..x.len() {
       values.push(if x.is_null(index) || y.is_null(index) {
-        None
+        0
       } else {
-        Some(
-          ClusterKey::from_z_coordinates(
-            full_extent,
-            x.value(index),
-            y.value(index),
-            DEFAULT_COORDINATE_PRECISION,
-          )
-          .value(),
+        ClusterKey::from_z_coordinates(
+          full_extent,
+          x.value(index),
+          y.value(index),
+          DEFAULT_COORDINATE_PRECISION,
         )
+        .value()
       });
     }
     Ok(ColumnarValue::Array(
-      Arc::new(UInt64Array::from(values)) as ArrayRef
+      Arc::new(UInt64Array::from_iter_values(values)) as ArrayRef,
     ))
   }
 }

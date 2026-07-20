@@ -10,7 +10,7 @@ use datafusion::prelude::lit;
 
 use crate::diagnostics::Diagnostics;
 
-use crate::optimized::clustering::ClusterRangeBoundaries;
+use crate::optimized::ClusterRangeBoundaries;
 
 impl ClusterRangeBoundaries {
   /// Compute balanced cluster-key ranges from one dataframe and target bucket count.

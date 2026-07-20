@@ -773,7 +773,7 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
         },
         output: OutputOptions {
           path: output.clone(),
-          mode: OutputMode::OptimizedGeoParquet,
+          mode: OutputMode::Optimized,
           overwrite: true,
           ..Default::default()
         },

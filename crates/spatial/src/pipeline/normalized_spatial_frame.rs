@@ -8,10 +8,8 @@ use arrow_schema::{DataType, Schema};
 use datafusion::dataframe::DataFrame;
 use datafusion::logical_expr::expr_fn::ident;
 
-use crate::geoparquet::{
-  COVERING_BBOX_COLUMN, ResolvedGeoParquetSource, ResolvedReprojection, StripGeometryDimensionsUdf,
-  geometry_bbox_expr,
-};
+use crate::geoparquet::{COVERING_BBOX_COLUMN, geometry_bbox_expr};
+use crate::pipeline::{ResolvedReprojection, ResolvedSpatialSource, StripGeometryDimensionsUdf};
 
 #[derive(Clone)]
 pub(crate) struct NormalizedSpatialFrame {
@@ -23,7 +21,7 @@ impl NormalizedSpatialFrame {
   pub(crate) fn new(
     mut dataframe: DataFrame,
     source_schema: &Schema,
-    source: &ResolvedGeoParquetSource,
+    source: &ResolvedSpatialSource,
     reprojection: &ResolvedReprojection,
     strip_z: bool,
     strip_m: bool,

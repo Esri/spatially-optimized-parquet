@@ -3,7 +3,7 @@
 pub enum OutputMode {
   /// Writes Spatially Optimized GeoParquet.
   #[default]
-  OptimizedGeoParquet,
+  Optimized,
   /// Writes GeoParquet without optimized clustering columns or spatial sorting.
-  GeoParquet,
+  Plain,
 }

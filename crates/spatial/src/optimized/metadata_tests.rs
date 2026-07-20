@@ -5,7 +5,10 @@ use serde_json::{Value, json};
 
 use crate::geometry::{Extent2D, GeometryKind, GeometryType};
 use crate::geoparquet::SpatialReference;
-use crate::geoparquet::{GeoMetadata, GeoMetadataInput};
+use crate::geoparquet::{
+  GeoMetadata, GeoMetadataInput, LodEncoding, LodLevel, LodMetadata, LodTransform,
+  OrderingMetadata, XzOrderingMetadata,
+};
 
 use super::{
   ClusteringIndexXZInput, ClusteringIndexZInput, ColumnPath, GeodisplayEncoding,
@@ -46,6 +49,8 @@ fn geo_input<'a>(
     has_m: true,
     covering,
     covering_column: "bbox",
+    ordering: None,
+    lod: None,
   }
 }
 
@@ -104,6 +109,41 @@ fn geo_metadata_serializes_crs_extent_wkb_and_covering() {
         }
       }
     })
+  );
+}
+
+#[test]
+fn geo_metadata_serializes_ordering_and_lod_extensions() {
+  let spatial_reference = spatial_reference();
+  let geometry_types = [GeometryKind::Polygon];
+  let mut input = geo_input(&geometry_types, &spatial_reference, false);
+  input.ordering = Some(OrderingMetadata::Xz(XzOrderingMetadata {
+    geometry_column: "geometry".to_string(),
+    extent: [-180.0, -90.0, 180.0, 90.0],
+    max_level: 20,
+  }));
+  input.lod = Some(LodMetadata {
+    geometry_column: "geometry".to_string(),
+    encoding: LodEncoding::Pbf,
+    orientation: Some("clockwise".to_string()),
+    levels: vec![LodLevel {
+      column: ["geolod".to_string(), "level_0".to_string()],
+      scale: 1.0,
+      transform: LodTransform {
+        scale: [1.0; 4],
+        translate: [0.0; 4],
+      },
+    }],
+  });
+
+  let values = metadata_values(GeoMetadata::parquet_entries(Vec::new(), input).unwrap());
+
+  assert_eq!(values["geo"]["ordering"]["type"], "xz");
+  assert_eq!(values["geo"]["ordering"]["geometry_column"], "geometry");
+  assert_eq!(values["geo"]["lod"]["encoding"], "pbf");
+  assert_eq!(
+    values["geo"]["lod"]["levels"][0]["column"],
+    json!(["geolod", "level_0"])
   );
 }
 

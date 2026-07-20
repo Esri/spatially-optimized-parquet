@@ -8,6 +8,7 @@ use serde_json::Value;
 
 use crate::geometry::{Extent2D, GeometryKind};
 use crate::geoparquet::SpatialReference;
+use crate::geoparquet::{LodMetadata, OrderingMetadata};
 
 use ::parquet::file::metadata::KeyValue;
 
@@ -29,6 +30,10 @@ pub(crate) struct GeoMetadataInput<'a> {
   pub(crate) covering: bool,
   /// Identifies the covering struct column.
   pub(crate) covering_column: &'a str,
+  /// Adds draft spatial ordering metadata when requested.
+  pub(crate) ordering: Option<OrderingMetadata>,
+  /// Adds draft level-of-detail metadata when requested.
+  pub(crate) lod: Option<LodMetadata>,
 }
 
 /// Represents the GeoParquet 1.1 file metadata contract.
@@ -37,6 +42,10 @@ pub(crate) struct GeoMetadata {
   pub(crate) version: String,
   pub(crate) primary_column: String,
   pub(crate) columns: BTreeMap<String, GeoColumnMetadata>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub(crate) ordering: Option<OrderingMetadata>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub(crate) lod: Option<LodMetadata>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -92,6 +101,8 @@ impl GeoMetadata {
       version: "1.1.0".to_string(),
       primary_column: input.geometry_column.to_string(),
       columns: BTreeMap::from([(input.geometry_column.to_string(), column)]),
+      ordering: input.ordering,
+      lod: input.lod,
     })
   }
 

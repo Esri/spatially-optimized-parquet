@@ -74,7 +74,7 @@ fn plain_output_preserves_wkb_rows_and_passthrough_metadata() {
       },
       output: OutputOptions {
         path: output.clone(),
-        mode: OutputMode::GeoParquet,
+        mode: OutputMode::Plain,
         overwrite: true,
         ..Default::default()
       },
@@ -165,7 +165,7 @@ fn plain_output_strips_z_and_m_independently() {
         },
         output: OutputOptions {
           path: output.clone(),
-          mode: OutputMode::GeoParquet,
+          mode: OutputMode::Plain,
           overwrite: true,
           strip_z,
           strip_m,
@@ -227,7 +227,7 @@ fn plain_output_writes_covering_bbox() {
       },
       output: OutputOptions {
         path: output.clone(),
-        mode: OutputMode::GeoParquet,
+        mode: OutputMode::Plain,
         covering: true,
         overwrite: true,
         ..Default::default()
@@ -287,7 +287,7 @@ fn plain_output_reprojects_selected_rows_and_covering_extent() {
       },
       output: OutputOptions {
         path: output.clone(),
-        mode: OutputMode::GeoParquet,
+        mode: OutputMode::Plain,
         covering: true,
         overwrite: true,
         ..Default::default()
@@ -354,7 +354,7 @@ fn plain_output_rejects_non_wgs84_before_filesystem_mutation() {
         },
         output: OutputOptions {
           path: output.clone(),
-          mode: OutputMode::GeoParquet,
+          mode: OutputMode::Plain,
           output_wkid,
           overwrite: true,
           ..Default::default()
@@ -400,7 +400,7 @@ fn plain_output_rejects_partition_count() {
       },
       output: OutputOptions {
         path: output.clone(),
-        mode: OutputMode::GeoParquet,
+        mode: OutputMode::Plain,
         file_count: Some(2),
         overwrite: true,
         ..Default::default()

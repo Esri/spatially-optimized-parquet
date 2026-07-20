@@ -4,14 +4,14 @@ use anyhow::Result;
 use datafusion::dataframe::DataFrame;
 use datafusion::logical_expr::expr_fn::ident;
 
-use crate::geoparquet::{COVERING_BBOX_COLUMN, GeoParquetWriteContext};
+use crate::geoparquet::COVERING_BBOX_COLUMN;
 use crate::optimized::OptimizedLayout;
-use crate::pipeline::PipelineWarnings;
+use crate::pipeline::{PipelineWarnings, SpatialWriteContext};
 
 /// Build globally sorted optimized output while retaining the cluster key for the physical sink.
 pub(super) fn dataframe(
   source_schema: &arrow_schema::Schema,
-  context: &GeoParquetWriteContext,
+  context: &SpatialWriteContext,
   layout: &OptimizedLayout,
   covering: bool,
   warnings: PipelineWarnings,
@@ -30,7 +30,7 @@ pub(super) fn dataframe(
     .geometry()
     .clustering_dataframe(dataframe, context.target_extent())?
     .sort(vec![clustering_family.sort_expr()])?;
-  let mut expressions = layout.output_expressions(source_schema, covering, warnings);
-  expressions.push(ident(clustering_family.cluster_key_column()));
-  dataframe.select(expressions).map_err(Into::into)
+  dataframe
+    .select(layout.output_expressions(source_schema, covering, warnings))
+    .map_err(Into::into)
 }

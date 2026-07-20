@@ -5,9 +5,9 @@ use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
-use arrow_array::{Array, ArrayRef, Float64Array, StructArray, UInt64Array};
+use arrow_array::{Array, ArrayRef, Float64Array, StructArray};
 use arrow_schema::{DataType, Field, FieldRef, Fields};
-use datafusion::common::cast::{as_float64_array, as_uint64_array};
+use datafusion::common::cast::as_float64_array;
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
 use datafusion::logical_expr::{
   ColumnarValue, Expr, ReturnFieldArgs, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature,
@@ -23,8 +23,8 @@ use crate::geometry::{
 use crate::pipeline::PipelineWarnings;
 
 use super::{
-  GEODISPLAY_COLUMN, MultiscaleLevel, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN,
-  POINT_Z_CODE_COLUMN, POINT_Z_COLUMN, TEMP_XZ_CODE_COLUMN, XZ_CODE_COLUMN,
+  GEOLOD_COLUMN, MultiscaleLevel, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_COLUMN,
+  SOP_GEOMETRY_COLUMN,
 };
 
 #[derive(Debug, Clone)]
@@ -32,18 +32,18 @@ use super::{
 ///
 /// Equality and hashing include every encoding parameter because DataFusion uses UDF
 /// identity when comparing and optimizing logical expressions.
-pub(crate) struct ComplexGeometryGeodisplayUdf {
+pub(crate) struct GeolodUdf {
   ty: GeometryType,
   has_z: bool,
   has_m: bool,
   levels: Vec<MultiscaleLevel>,
   multiscale_encoding: MultiscaleEncoding,
-  geodisplay_fields: Fields,
+  geolod_fields: Fields,
   dimension_warning_emitted: Arc<AtomicBool>,
   warnings: PipelineWarnings,
 }
 
-impl ComplexGeometryGeodisplayUdf {
+impl GeolodUdf {
   /// Build the geodisplay expression for complex geometry output.
   pub(crate) fn expression(
     geometry_column: &str,
@@ -62,8 +62,8 @@ impl ComplexGeometryGeodisplayUdf {
       multiscale_encoding,
       warnings,
     )
-    .call(vec![col(geometry_column), col(TEMP_XZ_CODE_COLUMN)])
-    .alias(GEODISPLAY_COLUMN)
+    .call(vec![col(geometry_column)])
+    .alias(GEOLOD_COLUMN)
   }
 
   /// Construct stable output fields for the selected geometry type and multiscale levels.
@@ -87,13 +87,9 @@ impl ComplexGeometryGeodisplayUdf {
     multiscale_encoding: MultiscaleEncoding,
     warnings: PipelineWarnings,
   ) -> Self {
-    let mut geodisplay_fields = vec![Arc::new(Field::new(
-      XZ_CODE_COLUMN,
-      DataType::UInt64,
-      false,
-    ))];
+    let mut geolod_fields = Vec::new();
     for encoding in &levels {
-      geodisplay_fields.push(Arc::new(Field::new(
+      geolod_fields.push(Arc::new(Field::new(
         &encoding.column,
         multiscale_encoding.geometry_data_type(ty, has_z, has_m),
         true,
@@ -106,7 +102,7 @@ impl ComplexGeometryGeodisplayUdf {
       has_m,
       levels,
       multiscale_encoding,
-      geodisplay_fields: Fields::from(geodisplay_fields),
+      geolod_fields: Fields::from(geolod_fields),
       dimension_warning_emitted: Arc::new(AtomicBool::new(false)),
       warnings,
     }
@@ -140,7 +136,7 @@ impl ComplexGeometryGeodisplayUdf {
           DataType::BinaryView,
         ]
         .into_iter()
-        .map(|geometry_type| TypeSignature::Exact(vec![geometry_type, DataType::UInt64]))
+        .map(|geometry_type| TypeSignature::Exact(vec![geometry_type]))
         .collect(),
         Volatility::Immutable,
       )
@@ -148,11 +144,7 @@ impl ComplexGeometryGeodisplayUdf {
   }
 
   /// Decode each non-null WKB value once and encode every configured multiscale level.
-  fn encode_geodisplay(
-    &self,
-    geometry: &GeometryArray<'_>,
-    xz_code: &UInt64Array,
-  ) -> DataFusionResult<StructArray> {
+  fn encode_geolod(&self, geometry: &GeometryArray<'_>) -> DataFusionResult<StructArray> {
     let mut level_builders = self
       .levels
       .iter()
@@ -178,12 +170,16 @@ impl ComplexGeometryGeodisplayUdf {
     for value in geometry.values() {
       match value {
         Some(bytes) => {
-          let geometry = Geometry::from_wkb(bytes).map_err(to_datafusion_error)?;
+          let mut geometry = Geometry::from_wkb(bytes).map_err(to_datafusion_error)?;
           if geometry.ty != self.ty {
             return Err(DataFusionError::Execution(format!(
               "WKB geometry type {:?} does not match expected type {:?}",
               geometry.ty, self.ty
             )));
+          }
+          if self.multiscale_encoding == MultiscaleEncoding::Pbf && self.ty == GeometryType::Polygon
+          {
+            reverse_polygon_parts(&mut geometry);
           }
           let source_has_z = geometry
             .coordinates
@@ -224,17 +220,26 @@ impl ComplexGeometryGeodisplayUdf {
       }
     }
 
-    let mut geodisplay_columns: Vec<ArrayRef> = vec![Arc::new(xz_code.clone())];
+    let mut geolod_columns = Vec::new();
     for builder in level_builders {
-      geodisplay_columns.push(builder.finish());
+      geolod_columns.push(builder.finish());
     }
 
-    StructArray::try_new(self.geodisplay_fields.clone(), geodisplay_columns, None)
+    StructArray::try_new(self.geolod_fields.clone(), geolod_columns, None)
       .map_err(to_datafusion_error)
   }
 }
 
-impl PartialEq for ComplexGeometryGeodisplayUdf {
+fn reverse_polygon_parts(geometry: &mut Geometry) {
+  let mut part_start = 0;
+  for part_length in &geometry.lengths {
+    let part_end = part_start + *part_length as usize;
+    geometry.coordinates[part_start..part_end].reverse();
+    part_start = part_end;
+  }
+}
+
+impl PartialEq for GeolodUdf {
   fn eq(&self, other: &Self) -> bool {
     self.ty == other.ty
       && self.has_z == other.has_z
@@ -269,9 +274,9 @@ impl PartialEq for ComplexGeometryGeodisplayUdf {
   }
 }
 
-impl Eq for ComplexGeometryGeodisplayUdf {}
+impl Eq for GeolodUdf {}
 
-impl Hash for ComplexGeometryGeodisplayUdf {
+impl Hash for GeolodUdf {
   fn hash<H: Hasher>(&self, state: &mut H) {
     match self.ty {
       GeometryType::Point => 0u8,
@@ -300,7 +305,7 @@ impl Hash for ComplexGeometryGeodisplayUdf {
   }
 }
 
-impl ScalarUDFImpl for ComplexGeometryGeodisplayUdf {
+impl ScalarUDFImpl for GeolodUdf {
   fn as_any(&self) -> &dyn Any {
     self
   }
@@ -314,13 +319,13 @@ impl ScalarUDFImpl for ComplexGeometryGeodisplayUdf {
   }
 
   fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
-    Ok(DataType::Struct(self.geodisplay_fields.clone()))
+    Ok(DataType::Struct(self.geolod_fields.clone()))
   }
 
   fn return_field_from_args(&self, _: ReturnFieldArgs) -> DataFusionResult<FieldRef> {
     Ok(Arc::new(Field::new(
       self.name(),
-      DataType::Struct(self.geodisplay_fields.clone()),
+      DataType::Struct(self.geolod_fields.clone()),
       false,
     )))
   }
@@ -330,10 +335,8 @@ impl ScalarUDFImpl for ComplexGeometryGeodisplayUdf {
     let geometry = arrays
       .first()
       .ok_or_else(|| DataFusionError::Execution("missing geometry argument".to_string()))?;
-    let xz_code = as_uint64_array(arrays[1].as_ref())?;
-
     let geometry = GeometryArray::try_new(geometry.as_ref())?;
-    let output = self.encode_geodisplay(&geometry, xz_code)?;
+    let output = self.encode_geolod(&geometry)?;
 
     Ok(ColumnarValue::Array(Arc::new(output) as ArrayRef))
   }
@@ -341,20 +344,16 @@ impl ScalarUDFImpl for ComplexGeometryGeodisplayUdf {
 
 #[derive(Debug)]
 /// Packs generated point index columns into the geodisplay struct.
-pub(crate) struct PointGeometryGeodisplayUdf {
+pub(crate) struct SopGeometryUdf {
   has_z: bool,
   has_m: bool,
   signature: Signature,
 }
 
-impl PointGeometryGeodisplayUdf {
+impl SopGeometryUdf {
   /// Build the geodisplay expression for generated point index columns.
   pub(crate) fn expression(has_z: bool, has_m: bool) -> Expr {
-    let mut arguments = vec![
-      datafusion::logical_expr::expr_fn::ident(POINT_Z_CODE_COLUMN),
-      col(POINT_X_COLUMN),
-      col(POINT_Y_COLUMN),
-    ];
+    let mut arguments = vec![col(POINT_X_COLUMN), col(POINT_Y_COLUMN)];
     if has_z {
       arguments.push(col(POINT_Z_COLUMN));
     }
@@ -363,11 +362,11 @@ impl PointGeometryGeodisplayUdf {
     }
     ScalarUDF::new_from_impl(Self::new(has_z, has_m))
       .call(arguments)
-      .alias(GEODISPLAY_COLUMN)
+      .alias(SOP_GEOMETRY_COLUMN)
   }
 
   fn new(has_z: bool, has_m: bool) -> Self {
-    let mut types = vec![DataType::UInt64, DataType::Float64, DataType::Float64];
+    let mut types = vec![DataType::Float64, DataType::Float64];
     types.extend(std::iter::repeat_n(
       DataType::Float64,
       usize::from(has_z) + usize::from(has_m),
@@ -381,7 +380,6 @@ impl PointGeometryGeodisplayUdf {
 
   fn fields(has_z: bool, has_m: bool) -> Fields {
     let mut fields = vec![
-      Arc::new(Field::new(POINT_Z_CODE_COLUMN, DataType::UInt64, false)),
       Arc::new(Field::new(POINT_X_COLUMN, DataType::Float64, false)),
       Arc::new(Field::new(POINT_Y_COLUMN, DataType::Float64, false)),
     ];
@@ -403,28 +401,28 @@ impl PointGeometryGeodisplayUdf {
   }
 }
 
-impl PartialEq for PointGeometryGeodisplayUdf {
+impl PartialEq for SopGeometryUdf {
   fn eq(&self, other: &Self) -> bool {
     self.has_z == other.has_z && self.has_m == other.has_m
   }
 }
 
-impl Eq for PointGeometryGeodisplayUdf {}
+impl Eq for SopGeometryUdf {}
 
-impl Hash for PointGeometryGeodisplayUdf {
+impl Hash for SopGeometryUdf {
   fn hash<H: Hasher>(&self, state: &mut H) {
     self.has_z.hash(state);
     self.has_m.hash(state);
   }
 }
 
-impl ScalarUDFImpl for PointGeometryGeodisplayUdf {
+impl ScalarUDFImpl for SopGeometryUdf {
   fn as_any(&self) -> &dyn Any {
     self
   }
 
   fn name(&self) -> &str {
-    "geodisplay_point_geometry"
+    "sop_geometry"
   }
 
   fn signature(&self) -> &Signature {
@@ -445,31 +443,24 @@ impl ScalarUDFImpl for PointGeometryGeodisplayUdf {
 
   fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
     let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-    let z_code = as_uint64_array(
-      arrays
-        .first()
-        .ok_or_else(|| DataFusionError::Execution("missing Z code argument".to_string()))?
-        .as_ref(),
-    )?;
     let x = as_float64_array(
       arrays
-        .get(1)
+        .first()
         .ok_or_else(|| DataFusionError::Execution("missing x argument".to_string()))?
         .as_ref(),
     )?;
     let y = as_float64_array(
       arrays
-        .get(2)
+        .get(1)
         .ok_or_else(|| DataFusionError::Execution("missing y argument".to_string()))?
         .as_ref(),
     )?;
-    let nulls = z_code.nulls().cloned();
+    let nulls = x.nulls().cloned();
     let mut columns: Vec<ArrayRef> = vec![
-      Arc::new(UInt64Array::new(z_code.values().clone(), None)),
       Arc::new(Float64Array::new(x.values().clone(), None)),
       Arc::new(Float64Array::new(y.values().clone(), None)),
     ];
-    let mut argument_index = 3;
+    let mut argument_index = 2;
     if self.has_z {
       let z = as_float64_array(arrays[argument_index].as_ref())?;
       columns.push(Arc::new(Float64Array::new(z.values().clone(), None)));
@@ -513,7 +504,7 @@ mod tests {
     bytes
   }
 
-  fn hash_udf(udf: &ComplexGeometryGeodisplayUdf) -> u64 {
+  fn hash_udf(udf: &GeolodUdf) -> u64 {
     let mut hasher = DefaultHasher::new();
     udf.hash(&mut hasher);
     hasher.finish()
@@ -525,12 +516,10 @@ mod tests {
       GeometryType::Polygon,
     )
     .expect("levels");
-    let original =
-      ComplexGeometryGeodisplayUdf::new(GeometryType::Polygon, false, false, levels.clone());
+    let original = GeolodUdf::new(GeometryType::Polygon, false, false, levels.clone());
     let mut changed_levels = levels;
     mutate(&mut changed_levels[0]);
-    let changed =
-      ComplexGeometryGeodisplayUdf::new(GeometryType::Polygon, false, false, changed_levels);
+    let changed = GeolodUdf::new(GeometryType::Polygon, false, false, changed_levels);
     assert_ne!(original, changed);
   }
 
@@ -568,29 +557,26 @@ mod tests {
       GeometryType::Polygon,
     )
     .expect("levels");
-    let original =
-      ComplexGeometryGeodisplayUdf::new(GeometryType::Polygon, false, false, levels.clone());
-    let equal =
-      ComplexGeometryGeodisplayUdf::new(GeometryType::Polygon, false, false, levels.clone());
+    let original = GeolodUdf::new(GeometryType::Polygon, false, false, levels.clone());
+    let equal = GeolodUdf::new(GeometryType::Polygon, false, false, levels.clone());
     assert_eq!(original, equal);
     assert_eq!(hash_udf(&original), hash_udf(&equal));
 
-    let different_type =
-      ComplexGeometryGeodisplayUdf::new(GeometryType::Polyline, false, false, levels.clone());
+    let different_type = GeolodUdf::new(GeometryType::Polyline, false, false, levels.clone());
     assert_ne!(original, different_type);
 
     let mut reordered = levels.clone();
     reordered.swap(0, 1);
     assert_ne!(
       original,
-      ComplexGeometryGeodisplayUdf::new(GeometryType::Polygon, false, false, reordered)
+      GeolodUdf::new(GeometryType::Polygon, false, false, reordered)
     );
 
     let mut shortened = levels;
     shortened.pop();
     assert_ne!(
       original,
-      ComplexGeometryGeodisplayUdf::new(GeometryType::Polygon, false, false, shortened,)
+      GeolodUdf::new(GeometryType::Polygon, false, false, shortened,)
     );
   }
 
@@ -602,7 +588,7 @@ mod tests {
     )
     .expect("levels");
     let warnings = PipelineWarnings::default();
-    let udf = ComplexGeometryGeodisplayUdf::new_with_warnings(
+    let udf = GeolodUdf::new_with_warnings(
       GeometryType::Polyline,
       true,
       true,
@@ -612,12 +598,9 @@ mod tests {
     );
     let wkb = multiline_z_wkb();
     let geometry = BinaryArray::from(vec![Some(wkb.as_slice())]);
-    let xz_code = UInt64Array::from(vec![0]);
 
     let geometry = GeometryArray::try_new(&geometry).expect("geometry");
-    let geodisplay = udf
-      .encode_geodisplay(&geometry, &xz_code)
-      .expect("geodisplay");
+    let geodisplay = udf.encode_geolod(&geometry).expect("geodisplay");
     let encoded = geodisplay
       .column(1)
       .as_any()
@@ -639,7 +622,7 @@ mod tests {
     )
     .expect("levels");
     let warnings = PipelineWarnings::default();
-    let udf = ComplexGeometryGeodisplayUdf::new_with_warnings(
+    let udf = GeolodUdf::new_with_warnings(
       GeometryType::Polyline,
       true,
       true,
@@ -649,12 +632,9 @@ mod tests {
     );
     let wkb = multiline_z_wkb();
     let geometry = BinaryArray::from(vec![Some(wkb.as_slice())]);
-    let xz_code = UInt64Array::from(vec![0]);
 
     let geometry = GeometryArray::try_new(&geometry).expect("geometry");
-    let geodisplay = udf
-      .encode_geodisplay(&geometry, &xz_code)
-      .expect("geodisplay");
+    let geodisplay = udf.encode_geolod(&geometry).expect("geodisplay");
     let geometries = geodisplay
       .column(1)
       .as_any()
