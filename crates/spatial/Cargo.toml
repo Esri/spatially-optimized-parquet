@@ -35,6 +35,10 @@ sysinfo = { version = "0.37.2", default-features = false, features = ["system"] 
 [dev-dependencies]
 criterion = "0.7"
 
+[[bin]]
+name = "sop-test-data"
+path = "src/bin/sop_test_data.rs"
+
 [[bench]]
 name = "writer"
 harness = false

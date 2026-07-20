@@ -230,6 +230,66 @@ fn optimized_output_sorts_points_and_writes_metadata() {
 }
 
 #[test]
+fn optimized_output_writes_extensions_without_sop_metadata() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("points.parquet");
+  let output = temp.path().join("points-extensions.parquet");
+  let schema = Arc::new(Schema::new(vec![Field::new(
+    "geometry",
+    DataType::Binary,
+    true,
+  )]));
+  let point_a = wkb_point(0.0, 0.0);
+  let point_b = wkb_point(1.0, 1.0);
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![Arc::new(BinaryArray::from(vec![
+      Some(point_a.as_slice()),
+      Some(point_b.as_slice()),
+    ]))],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv("geometry", &["Point"])],
+  );
+
+  let result = runtime()
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::Optimized,
+        overwrite: true,
+        write_sop: false,
+        write_extensions: true,
+        ..Default::default()
+      },
+      ..Default::default()
+    }))
+    .unwrap();
+
+  assert_eq!(result.rows_written(), 2);
+  let metadata = kv_map(&output);
+  assert!(!metadata.contains_key("geodisplay"));
+  let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").unwrap()).unwrap();
+  assert_eq!(geo["ordering"]["type"], "z");
+  assert_eq!(geo["ordering"]["geometry_column"], "geometry");
+
+  let dataframe = runtime()
+    .block_on(scan_parquet(output.to_str().unwrap()))
+    .unwrap();
+  let batches = runtime().block_on(dataframe.collect()).unwrap();
+  assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 2);
+}
+
+#[test]
 fn optimized_output_uses_null_sop_geometry_for_null_points() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("nullable-points.parquet");

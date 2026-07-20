@@ -141,6 +141,8 @@ struct WriteCommand {
     help = "Pass through the selected input rows without sorting, display optimization, or geodisplay metadata changes"
   )]
   no_optimization: bool,
+  #[arg(long, help = "Omit SOP geodisplay metadata from optimized output")]
+  no_write_sop: bool,
   #[arg(
     long,
     help = "EXPERIMENTAL: Add draft GeoParquet ordering and level-of-detail metadata"
@@ -225,6 +227,7 @@ impl From<WriteCommand> for SpatialPipelineOptions {
         strip_z: args.strip_z,
         strip_m: args.strip_m,
         multiscale_encoding: args.multiscale_encoding.into(),
+        write_sop: !args.no_write_sop,
         write_extensions: args.write_extensions,
       },
       memory_limit_bytes: args.memory_limit_bytes,
@@ -306,6 +309,41 @@ mod tests {
     };
     assert!(args.strip_z);
     assert!(args.strip_m);
+  }
+
+  #[test]
+  fn write_subcommand_writes_sop_by_default_and_accepts_extension_only_metadata() {
+    let default_cli = Cli::try_parse_from([
+      "sop",
+      "write",
+      "input.parquet",
+      "--output",
+      "output.parquet",
+    ])
+    .unwrap();
+    let Command::Write(default_args) = default_cli.command else {
+      panic!("expected write command");
+    };
+    let default_options = SpatialPipelineOptions::from(default_args);
+    assert!(default_options.output.write_sop);
+    assert!(!default_options.output.write_extensions);
+
+    let extension_cli = Cli::try_parse_from([
+      "sop",
+      "write",
+      "input.parquet",
+      "--output",
+      "output.parquet",
+      "--write-extensions",
+      "--no-write-sop",
+    ])
+    .unwrap();
+    let Command::Write(extension_args) = extension_cli.command else {
+      panic!("expected write command");
+    };
+    let extension_options = SpatialPipelineOptions::from(extension_args);
+    assert!(!extension_options.output.write_sop);
+    assert!(extension_options.output.write_extensions);
   }
 
   #[test]

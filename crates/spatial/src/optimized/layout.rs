@@ -15,6 +15,7 @@ pub(crate) struct OptimizedLayout {
   geometry: GeometryInfo,
   levels: Vec<MultiscaleLevel>,
   multiscale_encoding: MultiscaleEncoding,
+  write_sop: bool,
   write_extensions: bool,
 }
 
@@ -41,6 +42,7 @@ impl OptimizedLayout {
       geometry,
       levels,
       multiscale_encoding: output_options.multiscale_encoding,
+      write_sop: output_options.write_sop,
       write_extensions: output_options.write_extensions,
     })
   }
@@ -66,6 +68,11 @@ impl OptimizedLayout {
       self.geometry.ty,
       crate::geometry::GeometryType::Polyline | crate::geometry::GeometryType::Polygon
     )
+  }
+
+  /// Return whether this layout emits SOP `geodisplay` metadata.
+  pub(crate) fn writes_sop(&self) -> bool {
+    self.write_sop
   }
 
   /// Return whether this layout emits draft GeoParquet extension metadata.

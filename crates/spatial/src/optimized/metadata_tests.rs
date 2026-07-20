@@ -68,6 +68,27 @@ fn metadata_values(entries: Vec<KeyValue>) -> HashMap<String, Value> {
     .collect()
 }
 
+fn point_index_input() -> ClusteringIndexZInput {
+  ClusteringIndexZInput {
+    code: ColumnPath::nested("geodisplay", "zCode"),
+    x_column: ColumnPath::nested("geodisplay", "x"),
+    y_column: ColumnPath::nested("geodisplay", "y"),
+    z_column: None,
+    m_column: None,
+    coordinate_precision: 20,
+    full_extent: Extent2D {
+      xmin: -180.0,
+      ymin: -90.0,
+      xmax: 180.0,
+      ymax: 90.0,
+    },
+    wkid: Some(4326),
+    wkt: None,
+    has_z: false,
+    has_m: false,
+  }
+}
+
 #[test]
 fn geo_metadata_serializes_crs_extent_wkb_and_covering() {
   let spatial_reference = spatial_reference();
@@ -178,24 +199,7 @@ fn point_geometry_geodisplay_metadata_serializes_z_clustering() {
     OptimizedLayout::optimized_point_metadata(
       Vec::new(),
       geo_input(&geometry_types, &spatial_reference, false),
-      ClusteringIndexZInput {
-        code: ColumnPath::nested("geodisplay", "zCode"),
-        x_column: ColumnPath::nested("geodisplay", "x"),
-        y_column: ColumnPath::nested("geodisplay", "y"),
-        z_column: None,
-        m_column: None,
-        coordinate_precision: 20,
-        full_extent: Extent2D {
-          xmin: -180.0,
-          ymin: -90.0,
-          xmax: 180.0,
-          ymax: 90.0,
-        },
-        wkid: Some(4326),
-        wkt: None,
-        has_z: false,
-        has_m: false,
-      },
+      Some(point_index_input()),
     )
     .unwrap(),
   );
@@ -232,6 +236,40 @@ fn point_geometry_geodisplay_metadata_serializes_z_clustering() {
 }
 
 #[test]
+fn optimized_metadata_selects_sop_and_extensions_independently() {
+  let spatial_reference = spatial_reference();
+  let geometry_types = [GeometryKind::Point];
+
+  for (write_sop, write_extensions) in [(false, false), (true, false), (false, true), (true, true)]
+  {
+    let mut input = geo_input(&geometry_types, &spatial_reference, false);
+    input.ordering = write_extensions.then(|| {
+      OrderingMetadata::Z(crate::geoparquet::ZOrderingMetadata {
+        geometry_column: "geometry".to_string(),
+        extent: [-180.0, -90.0, 180.0, 90.0],
+        bit_width: 32,
+      })
+    });
+    let values = metadata_values(
+      OptimizedLayout::optimized_point_metadata(
+        vec![
+          KeyValue::new("geo".to_string(), Some("\"stale\"".to_string())),
+          KeyValue::new("geodisplay".to_string(), Some("\"stale\"".to_string())),
+          KeyValue::new("source".to_string(), Some("\"census\"".to_string())),
+        ],
+        input,
+        write_sop.then(point_index_input),
+      )
+      .unwrap(),
+    );
+
+    assert_eq!(values.contains_key("geodisplay"), write_sop);
+    assert_eq!(values["geo"].get("ordering").is_some(), write_extensions);
+    assert_eq!(values["source"], json!("census"));
+  }
+}
+
+#[test]
 fn xz_geodisplay_metadata_serializes_multiscale_clustering() {
   let spatial_reference = spatial_reference();
   let geometry_types = [GeometryKind::Polygon];
@@ -239,7 +277,7 @@ fn xz_geodisplay_metadata_serializes_multiscale_clustering() {
     OptimizedLayout::optimized_xz_metadata(
       Vec::new(),
       geo_input(&geometry_types, &spatial_reference, false),
-      ClusteringIndexXZInput {
+      Some(ClusteringIndexXZInput {
         code: ColumnPath::nested("geodisplay", "xzCode"),
         encoding: GeodisplayEncoding::EsriPbf,
         geometry_type: GeometryType::Polygon,
@@ -262,7 +300,7 @@ fn xz_geodisplay_metadata_serializes_multiscale_clustering() {
           transform_scale: [0.703125, 0.703125, 1.0, 1.0],
           transform_translate: [0.0, 0.0, 0.0, 0.0],
         }],
-      },
+      }),
     )
     .unwrap(),
   );

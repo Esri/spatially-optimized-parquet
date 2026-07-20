@@ -60,7 +60,7 @@ impl OptimizedLayout {
       ClusteringFamily::PointGeometry => Self::optimized_point_metadata(
         source_entries,
         geo_metadata,
-        ClusteringIndexZInput {
+        self.writes_sop().then(|| ClusteringIndexZInput {
           code: ColumnPath::Root(GEOKEY_COLUMN.to_string()),
           x_column: ColumnPath::nested(SOP_GEOMETRY_COLUMN, POINT_X_COLUMN),
           y_column: ColumnPath::nested(SOP_GEOMETRY_COLUMN, POINT_Y_COLUMN),
@@ -78,12 +78,12 @@ impl OptimizedLayout {
           wkt: None,
           has_z: self.geometry().has_z,
           has_m: self.geometry().has_m,
-        },
+        }),
       ),
       ClusteringFamily::ComplexGeometry => Self::optimized_xz_metadata(
         source_entries,
         geo_metadata,
-        ClusteringIndexXZInput {
+        self.writes_sop().then(|| ClusteringIndexXZInput {
           code: ColumnPath::Root(GEOKEY_COLUMN.to_string()),
           encoding: GeodisplayEncoding::from(self.multiscale_encoding()),
           geometry_type: self.geometry().ty,
@@ -105,7 +105,7 @@ impl OptimizedLayout {
               transform_translate: encoding.transform.translate,
             })
             .collect(),
-        },
+        }),
       ),
     }
   }
@@ -170,34 +170,37 @@ impl OptimizedLayout {
   fn optimized_point_metadata(
     source_entries: Vec<KeyValue>,
     geo_input: GeoMetadataInput<'_>,
-    index_input: ClusteringIndexZInput,
+    index_input: Option<ClusteringIndexZInput>,
   ) -> Result<Vec<KeyValue>> {
     Self::optimized_metadata(
       source_entries,
       geo_input,
-      GeodisplayMetadata::point(ClusteringIndexZ::new(index_input)),
+      index_input.map(|input| GeodisplayMetadata::point(ClusteringIndexZ::new(input))),
     )
   }
 
   fn optimized_xz_metadata(
     source_entries: Vec<KeyValue>,
     geo_input: GeoMetadataInput<'_>,
-    index_input: ClusteringIndexXZInput,
+    index_input: Option<ClusteringIndexXZInput>,
   ) -> Result<Vec<KeyValue>> {
     Self::optimized_metadata(
       source_entries,
       geo_input,
-      GeodisplayMetadata::xz(ClusteringIndexXZ::new(index_input)),
+      index_input.map(|input| GeodisplayMetadata::xz(ClusteringIndexXZ::new(input))),
     )
   }
 
   fn optimized_metadata(
     mut source_entries: Vec<KeyValue>,
     geo_input: GeoMetadataInput<'_>,
-    geodisplay: GeodisplayMetadata,
+    geodisplay: Option<GeodisplayMetadata>,
   ) -> Result<Vec<KeyValue>> {
+    source_entries.retain(|entry| entry.key != "geo" && entry.key != "geodisplay");
     Self::replace_metadata_entry(&mut source_entries, GeoMetadata::parquet_entry(geo_input)?);
-    Self::replace_metadata_entry(&mut source_entries, geodisplay.parquet_entry()?);
+    if let Some(geodisplay) = geodisplay {
+      Self::replace_metadata_entry(&mut source_entries, geodisplay.parquet_entry()?);
+    }
     Ok(source_entries)
   }
 

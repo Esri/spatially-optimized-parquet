@@ -163,6 +163,8 @@ pub struct OutputOptions {
   pub strip_m: bool,
   /// Encoding for optimized complex-geometry multiscale levels.
   pub multiscale_encoding: MultiscaleEncoding,
+  /// Adds SOP `geodisplay` metadata to optimized output.
+  pub write_sop: bool,
   /// Adds draft GeoParquet ordering and level-of-detail metadata to optimized output.
   pub write_extensions: bool,
 }
@@ -180,6 +182,7 @@ impl Default for OutputOptions {
       strip_z: false,
       strip_m: false,
       multiscale_encoding: MultiscaleEncoding::default(),
+      write_sop: true,
       write_extensions: false,
     }
   }
@@ -437,6 +440,8 @@ mod tests {
       assert!(!options.strip_z);
       assert!(!options.strip_m);
       assert_eq!(options.multiscale_encoding, MultiscaleEncoding::Pbf);
+      assert!(options.write_sop);
+      assert!(!options.write_extensions);
     }
   }
 }
