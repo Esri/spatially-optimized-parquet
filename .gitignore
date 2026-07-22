@@ -1,3 +1,5 @@
 /target
 /data
 /test-data
+/app/dist
+/app/node_modules
