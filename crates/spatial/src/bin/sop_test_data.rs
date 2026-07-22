@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::f64::consts::TAU;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -27,12 +26,10 @@ use spatial::{
 const OUTPUT_DIRECTORY: &str = "test-data";
 const SOP_DIRECTORY: &str = "sop";
 const GEOPARQUET_EXTENSIONS_DIRECTORY: &str = "geoparquet-extensions";
-const START_LONGITUDE: f64 = -117.25;
-const START_LATITUDE: f64 = 34.05;
-const LONGITUDE_STEP: f64 = 0.000_020;
-const LATITUDE_STEP: f64 = 0.000_015;
-const COMPLEX_VERTEX_COUNT: usize = 1_000;
-const MULTIPOLYGON_RING_VERTEX_COUNT: usize = 250;
+const START_LONGITUDE: f64 = -117.195_645_8;
+const START_LATITUDE: f64 = 34.055_953_3;
+const NORMALIZATION_EXTENT: [f64; 4] = [-180.0, -90.0, 180.0, 90.0];
+const CLUSTER_DEPTH: u32 = 20;
 
 type Coordinate = (f64, f64, Option<f64>, Option<f64>);
 
@@ -139,10 +136,9 @@ impl FixtureGeometry {
 
   fn source_vertex_count(self) -> usize {
     match self {
-      Self::LineString => COMPLEX_VERTEX_COUNT,
-      Self::MultiLineString => COMPLEX_VERTEX_COUNT,
-      Self::Polygon => MULTIPOLYGON_RING_VERTEX_COUNT * 2,
-      Self::MultiPolygon => MULTIPOLYGON_RING_VERTEX_COUNT * 4,
+      Self::LineString | Self::MultiLineString => 6,
+      Self::Polygon => 10,
+      Self::MultiPolygon => 15,
       Self::Point | Self::MultiPoint => 0,
     }
   }
@@ -267,7 +263,7 @@ fn write_input_fixture(
     Arc::clone(&schema),
     vec![
       Arc::new(Int32Array::from(vec![1])),
-      Arc::new(StringArray::from(vec!["redlands-feature"])),
+      Arc::new(StringArray::from(vec!["feature"])),
       Arc::new(BinaryArray::from(vec![Some(geometry_value.as_slice())])),
     ],
   )
@@ -303,6 +299,8 @@ fn optimize_fixture(
         overwrite: true,
         write_sop,
         write_extensions,
+        normalization_extent: Some(NORMALIZATION_EXTENT),
+        cluster_depth: CLUSTER_DEPTH,
         ..Default::default()
       },
       ..Default::default()
@@ -525,22 +523,10 @@ fn fixture_geometry(geometry: FixtureGeometry, layout: CoordinateLayout) -> Vec<
       encode_point(longitude, latitude, z, m)
     }
     FixtureGeometry::MultiPoint => encode_multi_point(&[
-      layout.coordinate(0, START_LONGITUDE, START_LATITUDE),
-      layout.coordinate(
-        1,
-        START_LONGITUDE + LONGITUDE_STEP * 20.0,
-        START_LATITUDE + LATITUDE_STEP * 12.0,
-      ),
-      layout.coordinate(
-        2,
-        START_LONGITUDE + LONGITUDE_STEP * 40.0,
-        START_LATITUDE - LATITUDE_STEP * 8.0,
-      ),
-      layout.coordinate(
-        3,
-        START_LONGITUDE + LONGITUDE_STEP * 60.0,
-        START_LATITUDE + LATITUDE_STEP * 16.0,
-      ),
+      offset_coordinate(layout, 0, 0.000, 0.000),
+      offset_coordinate(layout, 1, 0.003, 0.002),
+      offset_coordinate(layout, 2, 0.006, -0.001),
+      offset_coordinate(layout, 3, 0.009, 0.003),
     ]),
     FixtureGeometry::LineString => encode_line_string(&redlands_line_string(layout)),
     FixtureGeometry::MultiLineString => {
@@ -555,81 +541,101 @@ fn fixture_geometry(geometry: FixtureGeometry, layout: CoordinateLayout) -> Vec<
 }
 
 fn redlands_line_string(layout: CoordinateLayout) -> Vec<Coordinate> {
-  (0..COMPLEX_VERTEX_COUNT)
-    .map(|index| {
-      let wave_position = (index % 80) as f64;
-      let wave = if wave_position <= 40.0 {
-        wave_position
-      } else {
-        80.0 - wave_position
-      };
-      let latitude = START_LATITUDE + (wave - 20.0) * LATITUDE_STEP;
-      let longitude = START_LONGITUDE + index as f64 * LONGITUDE_STEP;
-      layout.coordinate(index, longitude, latitude)
-    })
-    .collect()
+  [
+    (0.000, 0.000),
+    (0.002, 0.002),
+    (0.004, -0.001),
+    (0.006, 0.003),
+    (0.008, 0.000),
+    (0.010, 0.002),
+  ]
+  .into_iter()
+  .enumerate()
+  .map(|(index, (longitude_offset, latitude_offset))| {
+    offset_coordinate(layout, index, longitude_offset, latitude_offset)
+  })
+  .collect()
 }
 
 fn redlands_multi_line_string(layout: CoordinateLayout) -> Vec<Vec<Coordinate>> {
   let line = redlands_line_string(layout);
-  vec![
-    line[..COMPLEX_VERTEX_COUNT / 2].to_vec(),
-    line[COMPLEX_VERTEX_COUNT / 2..]
-      .iter()
-      .enumerate()
-      .map(|(index, coordinate)| {
-        layout.coordinate(
-          COMPLEX_VERTEX_COUNT / 2 + index,
-          coordinate.0,
-          coordinate.1 + LATITUDE_STEP * 60.0,
-        )
-      })
-      .collect(),
-  ]
+  vec![line[..3].to_vec(), line[3..].to_vec()]
 }
 
 fn redlands_multi_polygon(layout: CoordinateLayout) -> Vec<Vec<Vec<Coordinate>>> {
-  let second_center = (START_LONGITUDE + 0.014, START_LATITUDE + 0.001);
   vec![
     redlands_polygon(layout),
-    vec![
-      redlands_ring(layout, 500, second_center, 0.0034, 0.0025, false),
-      redlands_ring(layout, 750, second_center, 0.0013, 0.0009, true),
-    ],
+    vec![offset_ring(
+      layout,
+      10,
+      &[
+        (0.012, -0.001),
+        (0.012, 0.003),
+        (0.018, 0.003),
+        (0.018, -0.001),
+        (0.012, -0.001),
+      ],
+    )],
   ]
 }
 
 fn redlands_polygon(layout: CoordinateLayout) -> Vec<Vec<Coordinate>> {
-  let center = (START_LONGITUDE + 0.004, START_LATITUDE);
   vec![
-    redlands_ring(layout, 0, center, 0.0036, 0.0027, false),
-    redlands_ring(layout, 250, center, 0.0014, 0.0010, true),
+    offset_ring(
+      layout,
+      0,
+      &[
+        (0.000, -0.002),
+        (0.000, 0.004),
+        (0.008, 0.004),
+        (0.008, -0.002),
+        (0.000, -0.002),
+      ],
+    ),
+    offset_ring(
+      layout,
+      5,
+      &[
+        (0.002, 0.000),
+        (0.006, 0.000),
+        (0.006, 0.002),
+        (0.002, 0.002),
+        (0.002, 0.000),
+      ],
+    ),
   ]
 }
 
-fn redlands_ring(
+fn offset_coordinate(
   layout: CoordinateLayout,
-  component_offset: usize,
-  center: (f64, f64),
-  longitude_radius: f64,
-  latitude_radius: f64,
-  reverse: bool,
+  index: usize,
+  longitude_offset: f64,
+  latitude_offset: f64,
+) -> Coordinate {
+  layout.coordinate(
+    index,
+    START_LONGITUDE + longitude_offset,
+    START_LATITUDE + latitude_offset,
+  )
+}
+
+fn offset_ring(
+  layout: CoordinateLayout,
+  index_offset: usize,
+  offsets: &[(f64, f64)],
 ) -> Vec<Coordinate> {
-  let unique_vertex_count = MULTIPOLYGON_RING_VERTEX_COUNT - 1;
-  let mut ring = (0..unique_vertex_count)
-    .map(|index| {
-      let direction = if reverse { -1.0 } else { 1.0 };
-      let angle = direction * TAU * index as f64 / unique_vertex_count as f64;
-      let detail = 1.0 + 0.08 * (angle * 7.0).sin();
-      layout.coordinate(
-        component_offset + index,
-        center.0 + longitude_radius * detail * angle.cos(),
-        center.1 + latitude_radius * detail * angle.sin(),
+  offsets
+    .iter()
+    .enumerate()
+    .map(|(index, (longitude_offset, latitude_offset))| {
+      offset_coordinate(
+        layout,
+        index_offset + index,
+        *longitude_offset,
+        *latitude_offset,
       )
     })
-    .collect::<Vec<_>>();
-  ring.push(ring[0]);
-  ring
+    .collect()
 }
 
 fn encode_point(x: f64, y: f64, z: Option<f64>, m: Option<f64>) -> Vec<u8> {

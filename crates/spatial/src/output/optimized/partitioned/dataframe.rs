@@ -19,7 +19,7 @@ pub(super) fn range_source(
   ])?;
   layout
     .geometry()
-    .clustering_dataframe(dataframe, context.target_extent())
+    .clustering_dataframe(dataframe, context.target_extent(), layout.cluster_depth())
 }
 
 /// Build optimized output with one range partition value per row.
@@ -44,7 +44,7 @@ pub(super) fn dataframe(
   let partition_column = clustering_family.cluster_partition_column();
   let dataframe = layout
     .geometry()
-    .clustering_dataframe(dataframe, context.target_extent())?
+    .clustering_dataframe(dataframe, context.target_extent(), layout.cluster_depth())?
     .with_column(
       partition_column,
       boundaries.partition_expr(clustering_family.cluster_key_column())?,

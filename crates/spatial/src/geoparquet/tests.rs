@@ -383,6 +383,7 @@ fn write_context_reuses_complete_source_metadata_for_normalized_output() {
       4326,
       true,
       false,
+      None,
     ))
     .unwrap();
 

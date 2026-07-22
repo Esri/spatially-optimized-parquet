@@ -32,6 +32,7 @@ impl SpatialWriteContext {
     output_wkid: u32,
     strip_z: bool,
     strip_m: bool,
+    normalization_extent: Option<[f64; 4]>,
   ) -> Result<Self> {
     let mut source = resolve_source(
       input,
@@ -57,9 +58,19 @@ impl SpatialWriteContext {
       strip_z,
       strip_m,
     )?;
-    let target_extent = ExtentResolver::new(input, row_range)
-      .resolve(&source, &frame, &reprojection)
-      .await?;
+    let target_extent = match normalization_extent {
+      Some([xmin, ymin, xmax, ymax]) => Extent2D {
+        xmin,
+        ymin,
+        xmax,
+        ymax,
+      },
+      None => {
+        ExtentResolver::new(input, row_range)
+          .resolve(&source, &frame, &reprojection)
+          .await?
+      }
+    };
     Ok(Self {
       source,
       reprojection,

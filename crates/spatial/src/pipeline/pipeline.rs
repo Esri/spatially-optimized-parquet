@@ -153,6 +153,10 @@ pub struct OutputOptions {
   pub compression: Option<String>,
   /// EPSG WKID written to output geometry and metadata.
   pub output_wkid: u32,
+  /// Optional extent used to normalize spatial cluster keys.
+  pub normalization_extent: Option<[f64; 4]>,
+  /// Z bit width for points or XZ maximum level for non-point geometry.
+  pub cluster_depth: u32,
   /// Include the canonical GeoParquet bounding-box covering column.
   pub covering: bool,
   /// Allow replacement of an existing destination.
@@ -177,6 +181,8 @@ impl Default for OutputOptions {
       file_count: None,
       compression: None,
       output_wkid: crate::DEFAULT_OUTPUT_WKID,
+      normalization_extent: None,
+      cluster_depth: 20,
       covering: false,
       overwrite: false,
       strip_z: false,
@@ -247,6 +253,20 @@ impl Pipeline {
       write_reporter,
     } = options;
     SpatialReference::validate_output_wkid(output_options.output_wkid);
+    if output_options.cluster_depth == 0 || output_options.cluster_depth > 32 {
+      bail!("cluster depth must be between 1 and 32");
+    }
+    if let Some([xmin, ymin, xmax, ymax]) = output_options.normalization_extent
+      && (![xmin, ymin, xmax, ymax]
+        .iter()
+        .all(|value| value.is_finite())
+        || xmin >= xmax
+        || ymin >= ymax)
+    {
+      bail!(
+        "normalization extent must contain finite xmin ymin xmax ymax values with positive width and height"
+      );
+    }
     if output_options.mode == OutputMode::Plain && output_options.write_extensions {
       bail!("--write-extensions cannot be combined with --no-optimization");
     }
@@ -373,6 +393,7 @@ impl Pipeline {
       state.output_options.output_wkid,
       state.output_options.strip_z,
       state.output_options.strip_m,
+      state.output_options.normalization_extent,
     )
     .await
   }

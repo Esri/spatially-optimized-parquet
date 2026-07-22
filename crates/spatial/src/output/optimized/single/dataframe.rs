@@ -28,7 +28,7 @@ pub(super) fn dataframe(
   let clustering_family = layout.geometry().clustering_family;
   let dataframe = layout
     .geometry()
-    .clustering_dataframe(dataframe, context.target_extent())?
+    .clustering_dataframe(dataframe, context.target_extent(), layout.cluster_depth())?
     .sort(vec![clustering_family.sort_expr()])?;
   dataframe
     .select(layout.output_expressions(source_schema, covering, warnings))

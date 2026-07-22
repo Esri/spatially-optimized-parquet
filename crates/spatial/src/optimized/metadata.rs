@@ -8,7 +8,6 @@ use crate::geoparquet::{
   COVERING_BBOX_COLUMN, GeoMetadata, GeoMetadataInput, LodEncoding, LodLevel, LodMetadata,
   LodTransform, OrderingMetadata, XzOrderingMetadata, ZOrderingMetadata,
 };
-use crate::optimized::clustering::{DEFAULT_COORDINATE_PRECISION, DEFAULT_XZ_MAX_LEVEL};
 use crate::optimized::geodisplay_metadata::{
   ClusteringIndexXZ, ClusteringIndexXZInput, ClusteringIndexZ, ClusteringIndexZInput, ColumnPath,
   GeodisplayEncoding, GeodisplayMetadata, MultiscaleLevelInput,
@@ -72,7 +71,7 @@ impl OptimizedLayout {
             .geometry()
             .has_m
             .then(|| ColumnPath::nested(SOP_GEOMETRY_COLUMN, POINT_M_COLUMN)),
-          coordinate_precision: DEFAULT_COORDINATE_PRECISION,
+          coordinate_precision: self.cluster_depth(),
           full_extent: context.target_extent(),
           wkid: context.reprojection().target_spatial_reference().wkid,
           wkt: None,
@@ -88,7 +87,7 @@ impl OptimizedLayout {
           encoding: GeodisplayEncoding::from(self.multiscale_encoding()),
           geometry_type: self.geometry().ty,
           full_extent: context.target_extent(),
-          max_level: DEFAULT_XZ_MAX_LEVEL,
+          max_level: self.cluster_depth(),
           wkid: context.reprojection().target_spatial_reference().wkid,
           wkt: None,
           has_z: self.geometry().has_z,
@@ -131,12 +130,12 @@ impl OptimizedLayout {
       ClusteringFamily::PointGeometry => OrderingMetadata::Z(ZOrderingMetadata {
         geometry_column,
         extent,
-        bit_width: 32,
+        bit_width: self.cluster_depth() as u8,
       }),
       ClusteringFamily::ComplexGeometry => OrderingMetadata::Xz(XzOrderingMetadata {
         geometry_column,
         extent,
-        max_level: DEFAULT_XZ_MAX_LEVEL as u8,
+        max_level: self.cluster_depth() as u8,
       }),
     })
   }

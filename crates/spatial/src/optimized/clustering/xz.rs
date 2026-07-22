@@ -20,9 +20,6 @@ use crate::optimized::multiscale::GEOKEY_COLUMN;
 
 use super::ClusterKey;
 
-/// Defines the default maximum depth of the XZ hierarchy.
-pub(crate) const DEFAULT_XZ_MAX_LEVEL: u32 = 20;
-
 impl ClusterKey {
   /// Encode a feature extent at an XZ hierarchy level that preserves containment.
   pub(crate) fn from_xz_extent(
@@ -220,11 +217,13 @@ impl ScalarUDFImpl for BoundsUdf {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct ComplexGeometryClusterKeyUdf;
+struct ComplexGeometryClusterKeyUdf {
+  cluster_depth: u32,
+}
 
 impl ComplexGeometryClusterKeyUdf {
-  fn udf() -> ScalarUDF {
-    ScalarUDF::new_from_impl(Self)
+  fn udf(cluster_depth: u32) -> ScalarUDF {
+    ScalarUDF::new_from_impl(Self { cluster_depth })
   }
 
   fn signature() -> &'static Signature {
@@ -307,7 +306,7 @@ impl ScalarUDFImpl for ComplexGeometryClusterKeyUdf {
           ClusterKey::from_xz_extent(
             full_extent,
             Extent2D::from_wkb(bytes).map_err(to_datafusion_error)?,
-            DEFAULT_XZ_MAX_LEVEL,
+            self.cluster_depth,
           )
           .value(),
         ),
@@ -320,7 +319,9 @@ impl ScalarUDFImpl for ComplexGeometryClusterKeyUdf {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct ComplexGeometryBoundsClusterKeyUdf;
+pub(crate) struct ComplexGeometryBoundsClusterKeyUdf {
+  cluster_depth: u32,
+}
 
 impl ComplexGeometryBoundsClusterKeyUdf {
   /// Build the complex-geometry cluster-key expression from bounds and full extent.
@@ -330,8 +331,9 @@ impl ComplexGeometryBoundsClusterKeyUdf {
     xmax: Expr,
     ymax: Expr,
     full_extent: Extent2D,
+    cluster_depth: u32,
   ) -> Expr {
-    Self::udf()
+    Self::udf(cluster_depth)
       .call(vec![
         xmin,
         ymin,
@@ -345,8 +347,8 @@ impl ComplexGeometryBoundsClusterKeyUdf {
       .alias(GEOKEY_COLUMN)
   }
 
-  fn udf() -> ScalarUDF {
-    ScalarUDF::new_from_impl(Self)
+  fn udf(cluster_depth: u32) -> ScalarUDF {
+    ScalarUDF::new_from_impl(Self { cluster_depth })
   }
 
   fn signature() -> &'static Signature {
@@ -417,7 +419,7 @@ impl ScalarUDFImpl for ComplexGeometryBoundsClusterKeyUdf {
               xmax: xmax.value(index),
               ymax: ymax.value(index),
             },
-            DEFAULT_XZ_MAX_LEVEL,
+            self.cluster_depth,
           )
           .value()
         },

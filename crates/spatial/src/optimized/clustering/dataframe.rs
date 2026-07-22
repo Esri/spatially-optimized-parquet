@@ -19,9 +19,10 @@ impl GeometryInfo {
     &self,
     dataframe: DataFrame,
     target_extent: Extent2D,
+    cluster_depth: u32,
   ) -> Result<DataFrame> {
     let dataframe = self.add_point_columns(dataframe)?;
-    self.add_cluster_key_column(dataframe, target_extent)
+    self.add_cluster_key_column(dataframe, target_extent, cluster_depth)
   }
 
   fn add_point_columns(&self, mut dataframe: DataFrame) -> Result<DataFrame> {
@@ -45,6 +46,7 @@ impl GeometryInfo {
     &self,
     dataframe: DataFrame,
     target_extent: Extent2D,
+    cluster_depth: u32,
   ) -> Result<DataFrame> {
     match self.clustering_family {
       ClusteringFamily::PointGeometry => Ok(dataframe.with_column(
@@ -53,6 +55,7 @@ impl GeometryInfo {
           bbox_field_expr("xmin"),
           bbox_field_expr("ymin"),
           target_extent,
+          cluster_depth,
         ),
       )?),
       ClusteringFamily::ComplexGeometry => Ok(dataframe.with_column(
@@ -63,6 +66,7 @@ impl GeometryInfo {
           bbox_field_expr("xmax"),
           bbox_field_expr("ymax"),
           target_extent,
+          cluster_depth,
         ),
       )?),
     }

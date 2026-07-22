@@ -21,9 +21,6 @@ use crate::optimized::multiscale::{
 
 use super::ClusterKey;
 
-/// Defines the default number of quantization bits per point coordinate axis.
-pub(crate) const DEFAULT_COORDINATE_PRECISION: u32 = 20;
-
 impl ClusterKey {
   /// Encode a point within the full extent through interleaved x/y quantization bits.
   pub(crate) fn from_z_coordinates(
@@ -187,12 +184,15 @@ impl ScalarUDFImpl for PointGeometryUdf {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct PointGeometryClusterKeyUdf;
+pub(crate) struct PointGeometryClusterKeyUdf {
+  cluster_depth: u32,
+}
 
 impl PointGeometryClusterKeyUdf {
   /// Build the point cluster-key expression from x/y values and the full extent.
-  pub(crate) fn expression(x: Expr, y: Expr, full_extent: Extent2D) -> Expr {
-    Self::udf()
+  pub(crate) fn expression(x: Expr, y: Expr, full_extent: Extent2D, cluster_depth: u32) -> Expr {
+    Self::new(cluster_depth)
+      .udf()
       .call(vec![
         x,
         y,
@@ -204,8 +204,12 @@ impl PointGeometryClusterKeyUdf {
       .alias(GEOKEY_COLUMN)
   }
 
-  fn udf() -> ScalarUDF {
-    ScalarUDF::new_from_impl(Self)
+  fn new(cluster_depth: u32) -> Self {
+    Self { cluster_depth }
+  }
+
+  fn udf(self) -> ScalarUDF {
+    ScalarUDF::new_from_impl(self)
   }
 
   fn signature() -> &'static Signature {
@@ -268,7 +272,7 @@ impl ScalarUDFImpl for PointGeometryClusterKeyUdf {
           full_extent,
           x.value(index),
           y.value(index),
-          DEFAULT_COORDINATE_PRECISION,
+          self.cluster_depth,
         )
         .value()
       });

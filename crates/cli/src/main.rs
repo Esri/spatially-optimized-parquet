@@ -118,6 +118,21 @@ struct WriteCommand {
   out_sr: u32,
   #[arg(
     long,
+    value_names = ["XMIN", "YMIN", "XMAX", "YMAX"],
+    num_args = 4,
+    allow_hyphen_values = true,
+    help = "Set the extent used to normalize Z or XZ cluster keys"
+  )]
+  normalization_extent: Option<Vec<f64>>,
+  #[arg(
+    long,
+    default_value_t = 20,
+    value_parser = parse_cluster_depth,
+    help = "Set the point Z bit width or non-point XZ maximum level"
+  )]
+  cluster_depth: u32,
+  #[arg(
+    long,
     help = "Write a root bbox struct column and GeoParquet 1.1 covering metadata"
   )]
   covering: bool,
@@ -222,6 +237,12 @@ impl From<WriteCommand> for SpatialPipelineOptions {
         file_count: args.partitions,
         compression: args.compression,
         output_wkid: args.out_sr,
+        normalization_extent: args.normalization_extent.map(|extent| {
+          extent
+            .try_into()
+            .expect("clap enforces four normalization extent values")
+        }),
+        cluster_depth: args.cluster_depth,
         covering: args.covering,
         overwrite: args.overwrite,
         strip_z: args.strip_z,
@@ -287,6 +308,16 @@ fn parse_positive_usize(value: &str, option: &str) -> Result<usize, String> {
   Ok(parsed)
 }
 
+fn parse_cluster_depth(value: &str) -> Result<u32, String> {
+  let depth = value
+    .parse::<u32>()
+    .map_err(|_| format!("invalid value for --cluster-depth: {value}"))?;
+  if !(1..=32).contains(&depth) {
+    return Err("--cluster-depth must be between 1 and 32".to_string());
+  }
+  Ok(depth)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -309,6 +340,53 @@ mod tests {
     };
     assert!(args.strip_z);
     assert!(args.strip_m);
+  }
+
+  #[test]
+  fn write_subcommand_accepts_normalization_extent_and_cluster_depth() {
+    let cli = Cli::try_parse_from([
+      "sop",
+      "write",
+      "input.parquet",
+      "--output",
+      "output.parquet",
+      "--normalization-extent",
+      "-180",
+      "-90",
+      "180",
+      "90",
+      "--cluster-depth",
+      "32",
+    ])
+    .unwrap();
+
+    let Command::Write(args) = cli.command else {
+      panic!("expected write command");
+    };
+    let options = SpatialPipelineOptions::from(args);
+    assert_eq!(
+      options.output.normalization_extent,
+      Some([-180.0, -90.0, 180.0, 90.0])
+    );
+    assert_eq!(options.output.cluster_depth, 32);
+  }
+
+  #[test]
+  fn write_subcommand_rejects_cluster_depth_outside_supported_range() {
+    for depth in ["0", "33"] {
+      let error = Cli::try_parse_from([
+        "sop",
+        "write",
+        "input.parquet",
+        "--output",
+        "output.parquet",
+        "--cluster-depth",
+        depth,
+      ])
+      .unwrap_err();
+
+      assert!(error.to_string().contains("between 1 and 32"));
+    }
   }
 
   #[test]

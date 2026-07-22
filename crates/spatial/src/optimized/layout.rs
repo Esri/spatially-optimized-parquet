@@ -13,6 +13,7 @@ use super::{ClusteringFamily, GeometryInfo};
 #[derive(Debug, Clone)]
 pub(crate) struct OptimizedLayout {
   geometry: GeometryInfo,
+  cluster_depth: u32,
   levels: Vec<MultiscaleLevel>,
   multiscale_encoding: MultiscaleEncoding,
   write_sop: bool,
@@ -23,6 +24,11 @@ impl OptimizedLayout {
   /// Resolve optimized layout decisions from prepared GeoParquet data.
   pub(crate) fn new(context: &SpatialWriteContext, output_options: &OutputOptions) -> Result<Self> {
     let geometry = GeometryInfo::resolve(context.source())?;
+    if geometry.clustering_family == ClusteringFamily::ComplexGeometry
+      && output_options.cluster_depth > 31
+    {
+      bail!("XZ cluster depth must be between 1 and 31");
+    }
     let levels = match geometry.clustering_family {
       ClusteringFamily::PointGeometry => Vec::new(),
       ClusteringFamily::ComplexGeometry => {
@@ -40,6 +46,7 @@ impl OptimizedLayout {
     }
     Ok(Self {
       geometry,
+      cluster_depth: output_options.cluster_depth,
       levels,
       multiscale_encoding: output_options.multiscale_encoding,
       write_sop: output_options.write_sop,
@@ -50,6 +57,11 @@ impl OptimizedLayout {
   /// Return geometry facts that select the clustering strategy.
   pub(crate) fn geometry(&self) -> &GeometryInfo {
     &self.geometry
+  }
+
+  /// Return the Z bit width or XZ maximum level used by this layout.
+  pub(crate) fn cluster_depth(&self) -> u32 {
+    self.cluster_depth
   }
 
   /// Return multiscale levels for complex geometry output.

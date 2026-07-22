@@ -8,9 +8,7 @@ mod metadata;
 mod multiscale;
 mod select;
 
-pub(crate) use clustering::{
-  BoundsUdf, ClusterKey, ClusterRangeBoundaries, DEFAULT_XZ_MAX_LEVEL, PointGeometryUdf,
-};
+pub(crate) use clustering::{BoundsUdf, ClusterKey, ClusterRangeBoundaries, PointGeometryUdf};
 pub(crate) use geodisplay_metadata::{
   ClusteringIndexXZ, ClusteringIndexZ, ColumnPath, GEODISPLAY_VERSION, GeodisplayEncoding,
   GeodisplayMetadata, MultiscaleLevel,

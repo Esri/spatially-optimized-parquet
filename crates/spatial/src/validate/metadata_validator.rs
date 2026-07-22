@@ -5,7 +5,7 @@ use serde::de::DeserializeOwned;
 use crate::geometry::{Extent2D, GeometryType};
 use crate::geoparquet::GeoMetadata;
 use crate::optimized::{
-  ClusteringIndexXZ, ClusteringIndexZ, DEFAULT_XZ_MAX_LEVEL, GEODISPLAY_VERSION, GeodisplayMetadata,
+  ClusteringIndexXZ, ClusteringIndexZ, GEODISPLAY_VERSION, GeodisplayMetadata,
 };
 
 use super::file_validator::FileValidator;
@@ -398,13 +398,13 @@ impl MetadataValidator {
         ),
       );
     }
-    if index.max_level != DEFAULT_XZ_MAX_LEVEL {
+    if !(1..=31).contains(&index.max_level) {
       report.push(
         ValidationRule::XzMetadata,
         ValidationSeverity::Error,
         location.clone(),
         format!(
-          "maxLevel must be {DEFAULT_XZ_MAX_LEVEL}, found {}",
+          "maxLevel must be between 1 and 31, found {}",
           index.max_level
         ),
       );
