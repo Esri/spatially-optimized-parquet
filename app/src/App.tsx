@@ -15,21 +15,35 @@ const datasetView = {
   },
 } as const;
 
-const stubChunkState = Array.from({ length: 60 }, (_, index) => {
-  if (index < 15) {
-    return "cached";
-  }
-
-  if (index < 18) {
-    return "active";
-  }
-
-  if (index < 21) {
-    return "loading";
-  }
-
-  return "empty";
-});
+const stubRowGroup = [
+  {
+    label: "RG0",
+    column: [
+      { label: "C0", range: ["cached", "cached", "active"] },
+      { label: "C1", range: ["cached", "loading"] },
+      { label: "C2", range: ["cached", "cached", "cached", "empty"] },
+      { label: "C3", range: ["empty", "empty"] },
+    ],
+  },
+  {
+    label: "RG1",
+    column: [
+      { label: "C0", range: ["active", "active", "cached"] },
+      { label: "C1", range: ["loading", "empty", "empty"] },
+      { label: "C2", range: ["cached", "cached"] },
+      { label: "C3", range: ["empty", "empty", "empty", "empty"] },
+    ],
+  },
+  {
+    label: "RG2",
+    column: [
+      { label: "C0", range: ["cached", "cached"] },
+      { label: "C1", range: ["empty", "empty", "empty"] },
+      { label: "C2", range: ["empty", "empty"] },
+      { label: "C3", range: ["empty", "empty", "empty"] },
+    ],
+  },
+] as const;
 
 export function App() {
   const [dataset, setDataset] = useState<Dataset>("usa");
@@ -142,22 +156,6 @@ export function App() {
             54
           </calcite-chip>
           <calcite-block
-            heading="About"
-            iconStart="map"
-            expanded
-            collapsible
-          >
-            <calcite-label layout="inline-space-between">
-              Center
-              <strong>{activeView.label}</strong>
-            </calcite-label>
-            <calcite-label layout="inline-space-between">
-              Initial zoom
-              <strong>{activeView.zoom}</strong>
-            </calcite-label>
-          </calcite-block>
-
-          <calcite-block
             heading="File download"
             iconStart="grid"
             expanded
@@ -165,17 +163,36 @@ export function App() {
           >
             <div className="occupancy-grid-frame">
               <div
-                className="occupancy-grid"
+                className="occupancy-flow"
                 role="img"
-                aria-label="Stub grid showing Parquet chunk occupancy"
+                aria-label="Stub map of Parquet row groups, columns, and downloaded byte ranges"
               >
-                {stubChunkState.map((state, index) => (
-                  <span
-                    className={`chunk ${state}`}
-                    title={`Chunk ${index + 1}: ${state}`}
-                    key={index}
-                  />
+                {stubRowGroup.map((rowGroup) => (
+                  <section className="row-group" key={rowGroup.label}>
+                    <strong className="row-group-label">{rowGroup.label}</strong>
+                    <div className="row-group-flow">
+                      {rowGroup.column.map((column) => (
+                        <span className="column-range" key={column.label}>
+                          <span className="column-label">{column.label}</span>
+                          {column.range.map((state, index) => (
+                            <span
+                              className={`chunk ${state}`}
+                              title={`${rowGroup.label} ${column.label} range ${index + 1}: ${state}`}
+                              key={index}
+                            />
+                          ))}
+                        </span>
+                      ))}
+                    </div>
+                  </section>
                 ))}
+                <section className="footer-range">
+                  <strong className="column-label">FT</strong>
+                  <span
+                    className="chunk cached"
+                    title="Parquet footer byte range: cached"
+                  />
+                </section>
               </div>
             </div>
 
