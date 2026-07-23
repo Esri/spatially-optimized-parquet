@@ -36,7 +36,7 @@ pub(crate) struct GeoMetadataInput<'a> {
   pub(crate) lod: Option<LodMetadata>,
 }
 
-/// Represents the GeoParquet 1.1 file metadata contract.
+/// Represents the GeoParquet 2.0 file metadata contract.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct GeoMetadata {
   pub(crate) version: String,
@@ -98,7 +98,7 @@ impl GeoMetadata {
         .then(|| GeoCovering::new(input.covering_column)),
     };
     Ok(Self {
-      version: "1.1.0".to_string(),
+      version: "2.0.0".to_string(),
       primary_column: input.geometry_column.to_string(),
       columns: BTreeMap::from([(input.geometry_column.to_string(), column)]),
       ordering: input.ordering,

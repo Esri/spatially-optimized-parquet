@@ -1,6 +1,5 @@
 //! Builds lazy WKB dimension-stripping expressions for normalized spatial geometry.
 
-use std::any::Any;
 use std::sync::Arc;
 
 use arrow_array::ArrayRef;
@@ -29,10 +28,6 @@ impl StripGeometryDimensionsUdf {
 }
 
 impl ScalarUDFImpl for StripGeometryDimensionsUdf {
-  fn as_any(&self) -> &dyn Any {
-    self
-  }
-
   fn name(&self) -> &str {
     "strip_geometry_dimensions"
   }

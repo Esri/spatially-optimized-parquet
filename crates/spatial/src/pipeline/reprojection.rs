@@ -16,7 +16,6 @@ use datafusion::prelude::col;
 use gdal::spatial_ref::{CoordTransform, SpatialRef};
 use gdal::vector::Geometry;
 use serde_json::Value;
-use std::any::Any;
 use std::sync::Arc;
 
 use crate::geometry::{GeometryArray, geometry_signature, to_datafusion_error};
@@ -112,10 +111,6 @@ impl ReprojectGeometryUdf {
 }
 
 impl ScalarUDFImpl for ReprojectGeometryUdf {
-  fn as_any(&self) -> &dyn Any {
-    self
-  }
-
   fn name(&self) -> &str {
     "reprojection_geometry"
   }

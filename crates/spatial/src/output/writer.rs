@@ -27,6 +27,7 @@ use crate::diagnostics::Diagnostics;
 use crate::pipeline::SharedWriteReporter;
 
 use super::partition_plan::PartitionPlan;
+use super::geometry_schema::GeometrySchemaExec;
 use super::reporter::WriteReporter;
 use super::tracking_sink::TrackingSink;
 
@@ -38,6 +39,8 @@ const WRITE_BATCH_SIZE_ENV: &str = "OPT_PARQUET_WRITE_BATCH_SIZE";
 /// Owns the configured DataFusion options for one Parquet write.
 pub(crate) struct WriterOptions {
   options: TableParquetOptions,
+  geometry_column: Option<String>,
+  geometry_crs: Option<String>,
 }
 
 impl WriterOptions {
@@ -55,12 +58,33 @@ impl WriterOptions {
       .iter()
       .map(|kv| (kv.key.clone(), kv.value.clone()))
       .collect();
-    Ok(Self { options })
+    Ok(Self {
+      options,
+      geometry_column: None,
+      geometry_crs: None,
+    })
   }
 
-  /// Consume the typed options for a custom DataFusion Parquet sink.
-  fn into_datafusion(self) -> TableParquetOptions {
-    self.options
+  /// Configure the primary WKB column as a native Parquet GEOMETRY type.
+  pub(crate) fn with_geometry_column(mut self, column: &str, crs: String) -> Self {
+    self.geometry_column = Some(column.to_string());
+    self.geometry_crs = Some(crs);
+    self
+  }
+
+  fn apply_geometry_schema(
+    &self,
+    input: Arc<dyn ExecutionPlan>,
+  ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
+    match (&self.geometry_column, &self.geometry_crs) {
+      (Some(column), Some(crs)) => {
+        Ok(Arc::new(GeometrySchemaExec::try_new(input, column, crs)?))
+      }
+      (None, None) => Ok(input),
+      _ => Err(datafusion::common::DataFusionError::Plan(
+        "geometry column and CRS must be configured together".to_string(),
+      )),
+    }
   }
 
   /// Apply integer delta packing to selected physical coordinate leaves.
@@ -176,11 +200,12 @@ impl Writer {
       input = Self::project_without_columns(input, &hidden_columns)?;
       None
     };
+    input = writer_options.apply_geometry_schema(input)?;
     let sink = TrackingSink::create(
       write_path,
       input.schema(),
       Vec::new(),
-      writer_options.into_datafusion(),
+      writer_options.options,
       Arc::clone(&self.reporter),
     )?;
     let plan: Arc<dyn ExecutionPlan> =
@@ -223,11 +248,12 @@ impl Writer {
     let (state, logical_plan) = dataframe.into_parts();
     let context = Arc::new(TaskContext::from(&state));
     let input = rewrite_plan(state.create_physical_plan(&logical_plan).await?)?;
+    let input = writer_options.apply_geometry_schema(input)?;
     let sink = TrackingSink::create(
       write_path,
       input.schema(),
       partition_by,
-      writer_options.into_datafusion(),
+      writer_options.options,
       Arc::clone(&self.reporter),
     )?;
     let plan: Arc<dyn ExecutionPlan> = Arc::new(PartitionPlan::new(input, Arc::clone(&sink)));

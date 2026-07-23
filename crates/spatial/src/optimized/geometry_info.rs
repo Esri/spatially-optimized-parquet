@@ -70,5 +70,9 @@ mod tests {
       ClusteringFamily::from_geometry_type(GeometryType::Point),
       ClusteringFamily::PointGeometry
     );
+    assert_eq!(
+      ClusteringFamily::from_geometry_type(GeometryType::MultiPoint),
+      ClusteringFamily::ComplexGeometry
+    );
   }
 }

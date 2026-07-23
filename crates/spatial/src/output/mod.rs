@@ -5,6 +5,7 @@
 mod mode;
 mod optimized;
 mod partition_plan;
+mod geometry_schema;
 mod path;
 mod plain;
 mod reporter;

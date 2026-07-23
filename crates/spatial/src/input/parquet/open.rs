@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use object_store::ObjectStore;
+use object_store::ObjectStoreExt;
 use object_store::http::HttpBuilder;
 use object_store::path::Path as ObjectPath;
 use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions};

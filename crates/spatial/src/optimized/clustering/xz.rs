@@ -2,7 +2,6 @@
 
 #![allow(dead_code)]
 
-use std::any::Any;
 use std::sync::{Arc, OnceLock};
 
 use arrow_array::{Array, ArrayRef, Float64Array, StructArray, UInt64Array};
@@ -189,10 +188,6 @@ impl BoundsUdf {
 }
 
 impl ScalarUDFImpl for BoundsUdf {
-  fn as_any(&self) -> &dyn Any {
-    self
-  }
-
   fn name(&self) -> &str {
     "clustering_bounds"
   }
@@ -272,10 +267,6 @@ impl ComplexGeometryClusterKeyUdf {
 }
 
 impl ScalarUDFImpl for ComplexGeometryClusterKeyUdf {
-  fn as_any(&self) -> &dyn Any {
-    self
-  }
-
   fn name(&self) -> &str {
     "clustering_complex_geometry_xzcode"
   }
@@ -377,10 +368,6 @@ impl ComplexGeometryBoundsClusterKeyUdf {
 }
 
 impl ScalarUDFImpl for ComplexGeometryBoundsClusterKeyUdf {
-  fn as_any(&self) -> &dyn Any {
-    self
-  }
-
   fn name(&self) -> &str {
     "clustering_complex_geometry_xzcode_from_bounds"
   }

@@ -11,7 +11,7 @@ use crate::optimized::{
 use super::file_validator::FileValidator;
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
 
-const GEO_VERSION: &str = "1.1.0";
+const SUPPORTED_GEO_VERSIONS: &[&str] = &["1.1.0", "2.0.0"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ValidatedCrs {
@@ -196,13 +196,14 @@ impl MetadataValidator {
 
   fn validate_geo_contract(geo: &GeoMetadata, file: &FileValidator, report: &mut ValidationReport) {
     let location = ValidationLocation::file(file.file.relative_path.clone()).with_column("geo");
-    if geo.version != GEO_VERSION {
+    if !SUPPORTED_GEO_VERSIONS.contains(&geo.version.as_str()) {
       report.push(
         ValidationRule::MetadataVersion,
         ValidationSeverity::Error,
         location.clone(),
         format!(
-          "GeoParquet version must be {GEO_VERSION}, found {}",
+          "GeoParquet version must be one of {}, found {}",
+          SUPPORTED_GEO_VERSIONS.join(", "),
           geo.version
         ),
       );
@@ -417,7 +418,7 @@ impl MetadataValidator {
         "code must not be empty",
       );
     }
-    if index.levels.is_empty() {
+    if index.geometry_type != GeometryType::MultiPoint && index.levels.is_empty() {
       report.push(
         ValidationRule::XzMetadata,
         ValidationSeverity::Error,

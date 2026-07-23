@@ -9,10 +9,10 @@ print-plan = []
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
-arrow-array = { version = "57.1.0", features = ["ffi"] }
-arrow-schema = "57.1.0"
-datafusion = "52.1.0"
-datafusion-execution = "52.1.0"
+arrow-array = { version = "58.3.0", features = ["ffi"] }
+arrow-schema = { version = "58.3.0", features = ["canonical_extension_types"] }
+datafusion = "54.1.0"
+datafusion-execution = "54.1.0"
 futures-util = "0.3"
 gdal = "0.19"
 gdal-src = { version = "0.3", features = ["driver_gpkg"] }
@@ -21,14 +21,15 @@ geo = "0.32.0"
 geo-traits = "0.3.0"
 geo-types = "0.7.16"
 geoparquet = "0.7.0"
-parquet = { version = "57.1.0", features = ["arrow", "brotli", "flate2", "lz4", "snap", "zstd"] }
+parquet = { version = "58.3.0", features = ["arrow", "brotli", "flate2", "geospatial", "lz4", "object_store", "snap", "zstd"] }
+parquet-geospatial = "58.3.0"
 prost = "0.13"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
 tempfile = "3.13"
 tokio = { version = "1.48", features = ["rt-multi-thread"] }
-object_store = { version = "0.12", features = ["http"] }
+object_store = { version = "0.13", features = ["http"] }
 url = "2.5"
 sysinfo = { version = "0.37.2", default-features = false, features = ["system"] }
 

@@ -14,7 +14,7 @@ tokio = { version = "1.48", features = ["macros", "rt-multi-thread"] }
 spatial = { path = "../spatial" }
 
 [dev-dependencies]
-arrow-array = "57.1.0"
-arrow-schema = "57.1.0"
-parquet = { version = "57.1.0", features = ["arrow"] }
+arrow-array = "58.3.0"
+arrow-schema = "58.3.0"
+parquet = { version = "58.3.0", features = ["arrow", "geospatial"] }
 tempfile = "3.13"

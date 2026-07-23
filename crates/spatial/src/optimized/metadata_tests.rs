@@ -104,7 +104,7 @@ fn geo_metadata_serializes_crs_extent_wkb_and_covering() {
   assert_eq!(
     values["geo"],
     json!({
-      "version": "1.1.0",
+      "version": "2.0.0",
       "primary_column": "geometry",
       "columns": {
         "geometry": {

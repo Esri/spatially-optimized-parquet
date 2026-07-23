@@ -46,15 +46,17 @@ impl OptimizedLayout {
       }
       ClusteringFamily::ComplexGeometry => {
         expressions.push(ident(GEOKEY_COLUMN));
-        expressions.push(GeolodUdf::expression(
-          &self.geometry().geometry.column,
-          self.geometry().ty,
-          self.geometry().has_z,
-          self.geometry().has_m,
-          self.levels(),
-          self.multiscale_encoding(),
-          warnings,
-        ))
+        if self.writes_lod_columns() {
+          expressions.push(GeolodUdf::expression(
+            &self.geometry().geometry.column,
+            self.geometry().ty,
+            self.geometry().has_z,
+            self.geometry().has_m,
+            self.levels(),
+            self.multiscale_encoding(),
+            warnings,
+          ));
+        }
       }
     }
     expressions

@@ -3,7 +3,7 @@
 use crate::optimized::{ClusterRangeBoundaries, OptimizedLayout};
 use crate::output::{OutputPath, Writer, WriterOptions};
 use crate::pipeline::{PipelineWarnings, SharedWriteReporter, SpatialWriteContext};
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use super::dataframe;
 use super::sort::PartitionedSortConfig;
@@ -39,8 +39,17 @@ pub(crate) async fn write(
     warnings,
   )?;
   let metadata = layout.parquet_metadata(context, covering)?;
+  let geometry_crs = format!(
+    "srid:{}",
+    context
+      .reprojection()
+      .target_spatial_reference()
+      .wkid
+      .context("missing output spatial-reference WKID")?
+  );
   let writer_options = WriterOptions::new(compression.unwrap_or("snappy"), &metadata)?
-    .with_delta_binary_packed_columns(layout.delta_binary_packed_column_paths());
+    .with_delta_binary_packed_columns(layout.delta_binary_packed_column_paths())
+    .with_geometry_column(&layout.geometry().geometry.column, geometry_crs);
   let partitioned_sort = PartitionedSortConfig::new(
     partition_column,
     clustering_family.cluster_key_column(),

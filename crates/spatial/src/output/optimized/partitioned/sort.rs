@@ -175,11 +175,11 @@ mod tests {
       let mut saw_repartition = false;
       rewritten
         .apply(|plan| {
-          if let Some(sort) = plan.as_any().downcast_ref::<SortExec>() {
+          if let Some(sort) = plan.downcast_ref::<SortExec>() {
             saw_sort = true;
             assert!(sort.preserve_partitioning());
           }
-          if let Some(repartition) = plan.as_any().downcast_ref::<RepartitionExec>() {
+          if let Some(repartition) = plan.downcast_ref::<RepartitionExec>() {
             saw_repartition = true;
             assert!(matches!(
               repartition.partitioning(),

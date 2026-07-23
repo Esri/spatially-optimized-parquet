@@ -1,6 +1,5 @@
 //! Computes Morton Z-order codes and DataFusion expressions for point clustering.
 
-use std::any::Any;
 use std::sync::{Arc, OnceLock};
 
 use arrow_array::{Array, ArrayRef, Float64Array, StructArray, UInt64Array};
@@ -148,10 +147,6 @@ impl PointGeometryUdf {
 }
 
 impl ScalarUDFImpl for PointGeometryUdf {
-  fn as_any(&self) -> &dyn Any {
-    self
-  }
-
   fn name(&self) -> &str {
     "clustering_point_geometry"
   }
@@ -238,10 +233,6 @@ impl PointGeometryClusterKeyUdf {
 }
 
 impl ScalarUDFImpl for PointGeometryClusterKeyUdf {
-  fn as_any(&self) -> &dyn Any {
-    self
-  }
-
   fn name(&self) -> &str {
     "clustering_point_geometry_zcode_from_xy"
   }

@@ -1,6 +1,5 @@
 //! Implements point and complex geometry geodisplay encoding.
 
-use std::any::Any;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -306,10 +305,6 @@ impl Hash for GeolodUdf {
 }
 
 impl ScalarUDFImpl for GeolodUdf {
-  fn as_any(&self) -> &dyn Any {
-    self
-  }
-
   fn name(&self) -> &str {
     "geodisplay_complex_geometry"
   }
@@ -417,10 +412,6 @@ impl Hash for SopGeometryUdf {
 }
 
 impl ScalarUDFImpl for SopGeometryUdf {
-  fn as_any(&self) -> &dyn Any {
-    self
-  }
-
   fn name(&self) -> &str {
     "sop_geometry"
   }

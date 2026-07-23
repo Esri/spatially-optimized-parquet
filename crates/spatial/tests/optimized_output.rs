@@ -10,6 +10,7 @@ use arrow_array::{
 };
 use arrow_schema::{DataType, Field, Schema};
 use gdal_sys::OGRwkbGeometryType;
+use parquet::basic::LogicalType;
 use spatial::{
   InputOptions, MultiscaleEncoding, OutputMode, OutputOptions, Pipeline, RowRange,
   SpatialPipelineOptions, SpatialPipelineResult, ValidationRule, WriteProgress, validate,
@@ -226,6 +227,22 @@ fn optimized_output_sorts_points_and_writes_metadata() {
   assert_eq!(geodisplay["wkid"], 4326);
   assert!(geodisplay.get("wkt").is_none());
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["authority"], "EPSG");
+  assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
+  assert_eq!(geo["version"], "2.0.0");
+
+  let parquet_metadata = reader_metadata(&output);
+  let geometry_column = parquet_metadata
+    .metadata()
+    .file_metadata()
+    .schema_descr()
+    .columns()
+    .iter()
+    .find(|column| column.path().string() == "geometry")
+    .expect("geometry parquet column");
+  let Some(LogicalType::Geometry { crs }) = geometry_column.logical_type_ref() else {
+    panic!("geometry must use the Parquet GEOMETRY logical type");
+  };
+  assert_eq!(crs.as_deref(), Some("\"srid:4326\""));
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
 }
 

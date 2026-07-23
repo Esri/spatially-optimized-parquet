@@ -1,6 +1,5 @@
 //! Owns tracked Parquet sink construction and failed-write cleanup.
 
-use std::any::Any;
 use std::fmt;
 use std::sync::Arc;
 
@@ -15,6 +14,7 @@ use datafusion::datasource::listing::ListingTableUrl;
 use datafusion::datasource::physical_plan::FileSinkConfig;
 use datafusion::datasource::sink::DataSink;
 use datafusion::execution::TaskContext;
+use datafusion::object_store::ObjectStoreExt;
 use datafusion::logical_expr::dml::InsertOp;
 use datafusion::physical_plan::{
   DisplayAs, DisplayFormatType, SendableRecordBatchStream, stream::RecordBatchStreamAdapter,
@@ -53,6 +53,7 @@ impl TrackingSink {
       insert_op: InsertOp::Append,
       keep_partition_by_columns: false,
       file_extension: "parquet".to_string(),
+      file_output_mode: Default::default(),
     };
     Ok(Arc::new(Self::new(config, writer_options, reporter)))
   }
@@ -108,10 +109,6 @@ impl DisplayAs for TrackingSink {
 
 #[async_trait]
 impl DataSink for TrackingSink {
-  fn as_any(&self) -> &dyn Any {
-    self
-  }
-
   fn schema(&self) -> &SchemaRef {
     self.inner.schema()
   }

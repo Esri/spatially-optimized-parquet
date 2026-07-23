@@ -29,11 +29,11 @@ impl OptimizedLayout {
     {
       bail!("XZ cluster depth must be between 1 and 31");
     }
-    let levels = match geometry.clustering_family {
-      ClusteringFamily::PointGeometry => Vec::new(),
-      ClusteringFamily::ComplexGeometry => {
+    let levels = match geometry.ty {
+      crate::geometry::GeometryType::Polyline | crate::geometry::GeometryType::Polygon => {
         MultiscaleLevel::create_all(output_options.output_wkid, geometry.ty)?
       }
+      crate::geometry::GeometryType::Point | crate::geometry::GeometryType::MultiPoint => Vec::new(),
     };
     if output_options.write_extensions
       && matches!(
@@ -74,12 +74,17 @@ impl OptimizedLayout {
     self.multiscale_encoding
   }
 
-  /// Return whether this layout writes extension level-of-detail metadata.
-  pub(crate) fn writes_extension_lod(&self) -> bool {
+  /// Return whether this layout writes multiscale level-of-detail columns.
+  pub(crate) fn writes_lod_columns(&self) -> bool {
     matches!(
       self.geometry.ty,
       crate::geometry::GeometryType::Polyline | crate::geometry::GeometryType::Polygon
     )
+  }
+
+  /// Return whether this layout writes extension level-of-detail metadata.
+  pub(crate) fn writes_extension_lod(&self) -> bool {
+    self.writes_lod_columns()
   }
 
   /// Return whether this layout emits SOP `geodisplay` metadata.

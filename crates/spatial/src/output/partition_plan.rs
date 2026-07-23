@@ -1,6 +1,5 @@
 //! Executes partition-local Parquet sinks concurrently.
 
-use std::any::Any;
 use std::fmt;
 use std::sync::Arc;
 
@@ -25,7 +24,7 @@ pub(super) struct PartitionPlan {
   input: Arc<dyn ExecutionPlan>,
   sink: Arc<TrackingSink>,
   count_schema: SchemaRef,
-  cache: PlanProperties,
+  cache: Arc<PlanProperties>,
 }
 
 impl PartitionPlan {
@@ -43,7 +42,7 @@ impl PartitionPlan {
       input,
       sink,
       count_schema,
-      cache,
+      cache: Arc::new(cache),
     }
   }
 
@@ -119,11 +118,7 @@ impl ExecutionPlan for PartitionPlan {
     "PartitionPlan"
   }
 
-  fn as_any(&self) -> &dyn Any {
-    self
-  }
-
-  fn properties(&self) -> &PlanProperties {
+  fn properties(&self) -> &Arc<PlanProperties> {
     &self.cache
   }
 

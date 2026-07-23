@@ -69,7 +69,18 @@ impl<'a> PlainWriter<'a> {
       self.context.source().source_metadata.passthrough_kv.clone(),
       geo_metadata,
     )?;
-    let writer_options = WriterOptions::new(compression.unwrap_or("snappy"), &metadata)?;
+    let geometry_column = &self.context.source().geometry.column;
+    let geometry_crs = format!(
+      "srid:{}",
+      self
+        .context
+        .reprojection()
+        .target_spatial_reference()
+        .wkid
+        .context("missing output spatial-reference WKID")?
+    );
+    let writer_options = WriterOptions::new(compression.unwrap_or("snappy"), &metadata)?
+      .with_geometry_column(geometry_column, geometry_crs);
     let output_path = self
       .output_path
       .paths()?

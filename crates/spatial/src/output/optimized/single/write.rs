@@ -21,8 +21,17 @@ pub(crate) async fn write(
 ) -> Result<u64> {
   let dataframe = dataframe::dataframe(source_schema, context, layout, covering, warnings)?;
   let metadata = layout.parquet_metadata(context, covering)?;
+  let geometry_crs = format!(
+    "srid:{}",
+    context
+      .reprojection()
+      .target_spatial_reference()
+      .wkid
+      .context("missing output spatial-reference WKID")?
+  );
   let writer_options = WriterOptions::new(compression.unwrap_or("snappy"), &metadata)?
-    .with_delta_binary_packed_columns(layout.delta_binary_packed_column_paths());
+    .with_delta_binary_packed_columns(layout.delta_binary_packed_column_paths())
+    .with_geometry_column(&layout.geometry().geometry.column, geometry_crs);
   let output_path = output_path
     .paths()?
     .into_iter()

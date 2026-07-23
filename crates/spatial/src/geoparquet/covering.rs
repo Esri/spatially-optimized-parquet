@@ -1,6 +1,5 @@
 //! Creates GeoParquet covering bbox structs through typed DataFusion expressions.
 
-use std::any::Any;
 use std::sync::{Arc, OnceLock};
 
 use arrow_array::{ArrayRef, Float64Array, StructArray};
@@ -83,10 +82,6 @@ impl FeatureBboxUdf {
 }
 
 impl ScalarUDFImpl for FeatureBboxUdf {
-  fn as_any(&self) -> &dyn Any {
-    self
-  }
-
   fn name(&self) -> &str {
     "geoparquet_feature_bbox"
   }

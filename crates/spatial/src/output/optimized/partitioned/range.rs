@@ -1,7 +1,7 @@
 //! Computes balanced cluster-key ranges for exact multi-file output.
 
-use anyhow::{Context, Result};
-use arrow_array::{Array, UInt64Array};
+use anyhow::Result;
+use arrow_array::{Array, ArrayRef, Float64Array, UInt64Array};
 use datafusion::dataframe::DataFrame;
 use datafusion::functions_aggregate::approx_percentile_cont::approx_percentile_cont;
 use datafusion::functions_aggregate::expr_fn::min;
@@ -43,28 +43,31 @@ impl ClusterRangeBoundaries {
       return Ok(Self::new(0, Vec::new()));
     }
 
-    let minimum_values = batch
-      .column(0)
-      .as_any()
-      .downcast_ref::<UInt64Array>()
-      .context("range partition minimum aggregate did not return UInt64")?;
-    let min_value = if minimum_values.is_null(0) {
-      0
-    } else {
-      minimum_values.value(0)
-    };
+    let min_value = aggregate_u64(batch.column(0))?.unwrap_or(0);
 
     let mut boundaries = Vec::with_capacity(batch.num_columns().saturating_sub(1));
     for column in batch.columns().iter().skip(1) {
-      let values = column
-        .as_any()
-        .downcast_ref::<UInt64Array>()
-        .context("range boundary aggregate did not return UInt64")?;
-      if !values.is_null(0) {
-        boundaries.push(values.value(0));
+      if let Some(value) = aggregate_u64(column)? {
+        boundaries.push(value);
       }
     }
     boundaries.sort_unstable();
     Ok(Self::new(min_value, boundaries))
   }
+}
+
+fn aggregate_u64(values: &ArrayRef) -> Result<Option<u64>> {
+  if values.is_null(0) {
+    return Ok(None);
+  }
+  if let Some(values) = values.as_any().downcast_ref::<UInt64Array>() {
+    return Ok(Some(values.value(0)));
+  }
+  if let Some(values) = values.as_any().downcast_ref::<Float64Array>() {
+    return Ok(Some(values.value(0) as u64));
+  }
+  anyhow::bail!(
+    "range aggregate returned unsupported type {}",
+    values.data_type()
+  )
 }
