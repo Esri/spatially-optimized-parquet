@@ -15,14 +15,14 @@ export interface Dataset {
   outSpatialReference?: 3857;
   bookmarks?: Bookmark[];
   center: [number, number];
-  scale: number;
+  zoom: number;
   byteSize: number;
 }
 
 export interface Bookmark {
   name: string;
   center: [number, number];
-  scale: number;
+  zoom: number;
 }
 
 export const datasets: Dataset[] = [
@@ -32,30 +32,29 @@ export const datasets: Dataset[] = [
     source: "United States Census",
     count: 0,
     url: "https://fd-stgeadlsv278968f2d-g4hrhshhhuaxgqc7.a02.azurefd.net/sop/0.1/census_blocks.parquet",
-    // url: "https://fd-stgeadlsv278968f2d-g4hrhshhhuaxgqc7.a02.azurefd.net/sop/0.1/census-blocks.parquet",
     center: [-74.006, 40.68],
-    scale: 400000,
+    zoom: 10,
     byteSize: 1024,
     bookmarks: [
       {
         name: "New York City, NY",
         center: [-74.006, 40.7128], 
-        scale: 100000,
+        zoom: 12,
       },
       {
         name: "Washington, D.C.",
         center: [-77.03637, 38.89511],
-        scale: 100000,
+        zoom: 12,
       },
       {
         name: "Dallas, TX",
         center: [-96.797, 32.7767],
-        scale: 100000,
+        zoom: 12,
       },
       {
         name: "Los Angeles, CA",
         center: [-118.2437, 34.0522],
-        scale: 100000,
+        zoom: 12,
       }
     ]
   },
@@ -65,10 +64,10 @@ export const datasets: Dataset[] = [
     source: "OpenStreetMap contributors, Overture Maps Foundation",
     sourceUrl: "https://overturemaps.org/",
     count: 0,
-    url: "",
+    url: "https://fd-stgeadlsv278968f2d-g4hrhshhhuaxgqc7.a02.azurefd.net/sop/0.1/japan_buildings.parquet",
     bookmarks: [],
-    center: [-74.006, 40.7128],
-    scale: 100000,
+    center: [139.6917, 35.6895],
+    zoom: 12,
     byteSize: 1024,
   },
 
@@ -79,8 +78,8 @@ export const datasets: Dataset[] = [
     sourceUrl: "https://www.data.gouv.fr/datasets/base-de-donnees-nationale-des-batiments",
     count: 0,
     url: "https://stgeadlsv278968f2d.blob.core.windows.net/parquet/baitment_groupe_compile.parquet",
-    center: [-74.006, 40.7128],
-    scale: 100000,
+    center: [2.3522, 48.8566],
+    zoom: 12,
     byteSize: 1024,
   },
 
@@ -92,7 +91,7 @@ export const datasets: Dataset[] = [
     count: 0,
     url: "",
     center: [-74.006, 40.7128],
-    scale: 100000,
+    zoom: 12,
     byteSize: 1024,
   },
 ]

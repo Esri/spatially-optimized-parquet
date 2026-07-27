@@ -44,8 +44,43 @@ import {
 } from "./parquetRowGroupBounds";
 
 const defaultCenter: [number, number] = [-98, 39];
-const defaultScale = 25_000_000;
+const defaultZoom = 4.565;
 const censusDatasetName = "Census Blocks, Demographics";
+
+function resolveScaleForZoom(mapElement: HTMLArcgisMapElement, zoom: number): number {
+  const levels = mapElement.view.constraints.effectiveLODs;
+  if (!levels?.length) {
+    throw new Error("The active map view does not expose levels of detail.");
+  }
+
+  const exactLevel = levels.find((level) => level.level === zoom);
+  if (exactLevel) {
+    return exactLevel.scale;
+  }
+
+  let lowerLevel: (typeof levels)[number] | undefined;
+  let upperLevel: (typeof levels)[number] | undefined;
+  for (const level of levels) {
+    if (level.level < zoom) {
+      lowerLevel = level;
+    } else if (level.level > zoom) {
+      upperLevel = level;
+      break;
+    }
+  }
+
+  if (!lowerLevel || !upperLevel) {
+    throw new RangeError(`Zoom ${zoom} falls outside the active map levels.`);
+  }
+
+  const levelFraction =
+    (zoom - lowerLevel.level) / (upperLevel.level - lowerLevel.level);
+
+  return Math.exp(
+    Math.log(lowerLevel.scale) +
+      (Math.log(upperLevel.scale) - Math.log(lowerLevel.scale)) * levelFraction,
+  );
+}
 
 function createDebugBoundsSymbol(outlineColor: string) {
   return {
@@ -212,7 +247,7 @@ const MapCanvas = memo(function MapCanvas({
       aria-label="Dark gray basemap"
       basemap="dark-gray-vector"
       center={defaultCenter}
-      scale={defaultScale}
+      zoom={defaultZoom}
     >
       <arcgis-zoom slot="top-left" />
       {MapSlotComponent ? (
@@ -325,7 +360,7 @@ const RowGroupOverviewMap = memo(function RowGroupOverviewMap({
         aria-label="Parquet row group overview"
         basemap="dark-gray-vector"
         center={defaultCenter}
-        scale={defaultScale}
+        zoom={defaultZoom}
       />
     </div>
   );
@@ -751,7 +786,7 @@ export function App() {
     setLayerFeatureCount(null);
     setLayerViewFeatureCount(null);
     mapElement.center = activeDataset.center ?? defaultCenter;
-    mapElement.scale = activeDataset.scale ?? defaultScale;
+    mapElement.zoom = activeDataset.zoom ?? defaultZoom;
     map.layers.removeAll();
     const layer = new ParquetLayer({
       title: activeDataset.name,
@@ -920,7 +955,7 @@ export function App() {
               longitude: bookmark.center[0],
               latitude: bookmark.center[1],
             },
-            scale: bookmark.scale,
+            scale: resolveScaleForZoom(mapElement, bookmark.zoom),
           }),
         }),
     );

@@ -3,6 +3,7 @@ import type { ParquetLayerProperties } from "@arcgis/core/layers/ParquetLayer";
 import type { ComponentType } from "react";
 import { censusMapProfile } from "./censusMapProfile";
 import type { DatasetId } from "./datasets";
+import { japanMapProfile } from "./japanMapProfile";
 
 export interface DatasetEffectLayer {
   effect: string | null;
@@ -32,6 +33,7 @@ export const defaultDatasetMapProfile: DatasetMapProfile = {};
 
 const datasetMapProfileRegistry: Partial<Record<DatasetId, DatasetMapProfile>> = {
   "census-blocks": censusMapProfile,
+  "building-footprints-japan": japanMapProfile,
 };
 
 export function resolveDatasetMapProfile(datasetId: DatasetId): DatasetMapProfile {
