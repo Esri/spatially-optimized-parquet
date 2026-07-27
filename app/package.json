@@ -14,6 +14,7 @@
     "@arcgis/core": "5.1.0",
     "@arcgis/map-components": "5.1.0",
     "@esri/calcite-components": "5.1.1",
+    "hyparquet": "1.26.2",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

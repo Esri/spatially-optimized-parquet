@@ -3,3 +3,5 @@
 /test-data
 /app/dist
 /app/node_modules
+*.parquet
+*.gpkg
