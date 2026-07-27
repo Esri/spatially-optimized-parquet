@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use arrow_array::{Array, UInt64Array};
+use arrow_schema::Schema;
 use datafusion::common::{
   Result as DataFusionResult,
   config::{ParquetColumnOptions, TableParquetOptions},
@@ -20,14 +21,16 @@ use datafusion::physical_plan::{
   projection::{ProjectionExec, ProjectionExpr},
   sorts::sort_preserving_merge::SortPreservingMergeExec,
 };
+use parquet::arrow::ArrowSchemaConverter;
+use parquet::basic::LogicalType;
 use parquet::basic::{BrotliLevel, Compression, GzipLevel, ZstdLevel};
 use parquet::file::metadata::KeyValue;
 
 use crate::diagnostics::Diagnostics;
 use crate::pipeline::SharedWriteReporter;
 
-use super::partition_plan::PartitionPlan;
 use super::geometry_schema::GeometrySchemaExec;
+use super::partition_plan::PartitionPlan;
 use super::reporter::WriteReporter;
 use super::tracking_sink::TrackingSink;
 
@@ -49,7 +52,7 @@ impl WriterOptions {
     let compression = Self::parse_compression(compression)?;
     let mut options = TableParquetOptions::new();
     options.global.compression = Some(Self::datafusion_compression_name(compression));
-    options.global.dictionary_enabled = Some(true);
+    options.global.dictionary_enabled = Some(false);
     options.global.writer_version = DFParquetWriterVersion::V2_0;
     options.global.maximum_parallel_row_group_writers = Self::available_parallelism();
     options.global.max_row_group_size = Self::configured_max_row_group_size();
@@ -72,14 +75,28 @@ impl WriterOptions {
     self
   }
 
+  /// Enable adaptive dictionary encoding for physical string leaves.
+  fn into_table_options(mut self, schema: &Schema) -> DataFusionResult<TableParquetOptions> {
+    let parquet_schema = ArrowSchemaConverter::new().convert(schema)?;
+    for column in parquet_schema.columns() {
+      if matches!(column.logical_type_ref(), Some(LogicalType::String)) {
+        self
+          .options
+          .column_specific_options
+          .entry(column.path().string())
+          .or_default()
+          .dictionary_enabled = Some(true);
+      }
+    }
+    Ok(self.options)
+  }
+
   fn apply_geometry_schema(
     &self,
     input: Arc<dyn ExecutionPlan>,
   ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
     match (&self.geometry_column, &self.geometry_crs) {
-      (Some(column), Some(crs)) => {
-        Ok(Arc::new(GeometrySchemaExec::try_new(input, column, crs)?))
-      }
+      (Some(column), Some(crs)) => Ok(Arc::new(GeometrySchemaExec::try_new(input, column, crs)?)),
       (None, None) => Ok(input),
       _ => Err(datafusion::common::DataFusionError::Plan(
         "geometry column and CRS must be configured together".to_string(),
@@ -201,11 +218,12 @@ impl Writer {
       None
     };
     input = writer_options.apply_geometry_schema(input)?;
+    let parquet_options = writer_options.into_table_options(input.schema().as_ref())?;
     let sink = TrackingSink::create(
       write_path,
       input.schema(),
       Vec::new(),
-      writer_options.options,
+      parquet_options,
       Arc::clone(&self.reporter),
     )?;
     let plan: Arc<dyn ExecutionPlan> =
@@ -249,11 +267,12 @@ impl Writer {
     let context = Arc::new(TaskContext::from(&state));
     let input = rewrite_plan(state.create_physical_plan(&logical_plan).await?)?;
     let input = writer_options.apply_geometry_schema(input)?;
+    let parquet_options = writer_options.into_table_options(input.schema().as_ref())?;
     let sink = TrackingSink::create(
       write_path,
       input.schema(),
       partition_by,
-      writer_options.options,
+      parquet_options,
       Arc::clone(&self.reporter),
     )?;
     let plan: Arc<dyn ExecutionPlan> = Arc::new(PartitionPlan::new(input, Arc::clone(&sink)));
@@ -297,10 +316,51 @@ impl Writer {
 #[cfg(test)]
 mod tests {
   use super::WriterOptions;
+  use arrow_schema::{DataType, Field, Schema};
 
   #[test]
   fn compression_parser_rejects_invalid_codec() {
     let error = WriterOptions::parse_compression("bogus").unwrap_err();
     assert!(error.to_string().contains("compression"));
+  }
+
+  #[test]
+  fn dictionary_encoding_is_limited_to_string_columns() {
+    let schema = Schema::new(vec![
+      Field::new("name", DataType::Utf8, true),
+      Field::new("geokey", DataType::UInt64, false),
+      Field::new("geometry", DataType::Binary, true),
+      Field::new(
+        "properties",
+        DataType::Struct(vec![Field::new("category", DataType::LargeUtf8, true)].into()),
+        true,
+      ),
+    ]);
+    let options = WriterOptions::new("snappy", &[])
+      .unwrap()
+      .with_delta_binary_packed_columns(["geokey".to_string()])
+      .into_table_options(&schema)
+      .unwrap();
+
+    assert_eq!(options.global.dictionary_enabled, Some(false));
+    assert_eq!(
+      options.column_specific_options["name"].dictionary_enabled,
+      Some(true)
+    );
+    assert_eq!(
+      options.column_specific_options["properties.category"].dictionary_enabled,
+      Some(true)
+    );
+    assert_eq!(
+      options.column_specific_options["geokey"]
+        .encoding
+        .as_deref(),
+      Some("delta_binary_packed")
+    );
+    assert_eq!(
+      options.column_specific_options["geokey"].dictionary_enabled,
+      Some(false)
+    );
+    assert!(!options.column_specific_options.contains_key("geometry"));
   }
 }
