@@ -119,6 +119,67 @@ fn output_rejects_explicit_geometry_without_crs_metadata() {
 }
 
 #[test]
+fn output_applies_geoparquet_default_crs_when_omitted() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("points.parquet");
+  let output = temp.path().join("points-output.parquet");
+  let schema = Arc::new(Schema::new(vec![Field::new(
+    "geometry",
+    DataType::Binary,
+    true,
+  )]));
+  let point = wkb_point(139.6917, 35.6895);
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![Arc::new(BinaryArray::from(vec![Some(point.as_slice())]))],
+  )
+  .unwrap();
+  let geo = serde_json::json!({
+    "version": "1.0.0",
+    "primary_column": "geometry",
+    "columns": {
+      "geometry": {
+        "encoding": "WKB",
+        "geometry_types": ["Point"]
+      }
+    }
+  });
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[parquet::file::metadata::KeyValue::new(
+      "geo".to_string(),
+      Some(geo.to_string()),
+    )],
+  );
+
+  runtime()
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::Plain,
+        overwrite: true,
+        ..Default::default()
+      },
+      ..Default::default()
+    }))
+    .unwrap();
+
+  let output_geo: serde_json::Value =
+    serde_json::from_str(kv_map(&output).get("geo").unwrap()).unwrap();
+  assert_eq!(
+    output_geo["columns"]["geometry"]["crs"]["id"]["code"],
+    serde_json::json!(4326)
+  );
+}
+
+#[test]
 fn output_rejects_input_wkid_when_crs_metadata_exists() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("points.parquet");

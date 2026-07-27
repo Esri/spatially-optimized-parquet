@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use anyhow::{Context, Result};
+use gdal::spatial_ref::SpatialRef;
 use geoparquet::metadata::{GeoParquetColumnEncoding, GeoParquetGeometryType, GeoParquetMetadata};
 use parquet::arrow::arrow_reader::ArrowReaderMetadata;
 use parquet::file::metadata::KeyValue;
@@ -95,6 +96,7 @@ impl ParquetInputSource {
     let Some(mut json) = Self::metadata_json(metadata, "geo")? else {
       return Ok(None);
     };
+    Self::apply_default_crs(&mut json)?;
     Self::sanitize_geo_metadata_json(&mut json);
     serde_json::from_value(json)
       .context("deserialize geo metadata")
@@ -161,6 +163,32 @@ impl ParquetInputSource {
         object.remove("bbox");
       }
     }
+  }
+
+  /// Apply the GeoParquet OGC:CRS84 default when a geometry column omits `crs`.
+  /// Preserve explicit `null` because it declares an unknown coordinate reference system.
+  fn apply_default_crs(json: &mut Value) -> Result<()> {
+    let Some(columns) = json.get_mut("columns").and_then(Value::as_object_mut) else {
+      return Ok(());
+    };
+    if columns.values().all(|column| column.get("crs").is_some()) {
+      return Ok(());
+    }
+
+    let crs = SpatialRef::from_definition("OGC:CRS84")
+      .context("load GeoParquet default CRS OGC:CRS84")?
+      .to_projjson()
+      .context("export GeoParquet default CRS as PROJJSON")?;
+    let crs: Value =
+      serde_json::from_str(&crs).context("decode GeoParquet default CRS PROJJSON")?;
+    for column in columns.values_mut() {
+      if let Some(column) = column.as_object_mut()
+        && !column.contains_key("crs")
+      {
+        column.insert("crs".to_string(), crs.clone());
+      }
+    }
+    Ok(())
   }
 }
 
@@ -256,6 +284,44 @@ mod tests {
     ParquetInputSource::sanitize_geo_metadata_json(&mut metadata);
 
     assert!(metadata["columns"]["geometry"].get("bbox").is_none());
+  }
+
+  #[test]
+  fn omitted_crs_uses_geoparquet_default() {
+    let mut metadata = json!({
+      "columns": {
+        "geometry": {
+          "encoding": "WKB"
+        }
+      }
+    });
+
+    ParquetInputSource::apply_default_crs(&mut metadata).unwrap();
+
+    assert_eq!(
+      metadata["columns"]["geometry"]["crs"]["id"]["authority"],
+      "OGC"
+    );
+    assert_eq!(
+      metadata["columns"]["geometry"]["crs"]["id"]["code"],
+      "CRS84"
+    );
+  }
+
+  #[test]
+  fn explicit_null_crs_remains_undefined() {
+    let mut metadata = json!({
+      "columns": {
+        "geometry": {
+          "encoding": "WKB",
+          "crs": null
+        }
+      }
+    });
+
+    ParquetInputSource::apply_default_crs(&mut metadata).unwrap();
+
+    assert!(metadata["columns"]["geometry"]["crs"].is_null());
   }
 
   #[test]
