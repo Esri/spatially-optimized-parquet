@@ -20,7 +20,6 @@ gdal-sys = { version = "0.12", features = ["bundled"] }
 geo = "0.32.0"
 geo-traits = "0.3.0"
 geo-types = "0.7.16"
-geoparquet = "0.7.0"
 parquet = { version = "58.3.0", features = ["arrow", "brotli", "flate2", "geospatial", "lz4", "object_store", "snap", "zstd"] }
 parquet-geospatial = "58.3.0"
 prost = "0.13"

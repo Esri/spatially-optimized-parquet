@@ -81,6 +81,14 @@ fn write_parquet(
 }
 
 fn geoparquet_kv(primary_column: &str, geometry_types: &[&str]) -> KeyValue {
+  geoparquet_kv_with_bbox(primary_column, geometry_types, None)
+}
+
+fn geoparquet_kv_with_bbox(
+  primary_column: &str,
+  geometry_types: &[&str],
+  bbox: Option<[f64; 4]>,
+) -> KeyValue {
   let spatial_reference = SpatialRef::from_epsg(4326).unwrap().to_projjson().unwrap();
   let spatial_reference: serde_json::Value = serde_json::from_str(&spatial_reference).unwrap();
   let geometry_types = geometry_types
@@ -94,7 +102,8 @@ fn geoparquet_kv(primary_column: &str, geometry_types: &[&str]) -> KeyValue {
       primary_column: {
         "encoding": "WKB",
         "geometry_types": geometry_types,
-        "crs": spatial_reference
+        "crs": spatial_reference,
+        "bbox": bbox
       }
     }
   });
@@ -263,6 +272,57 @@ fn source_metadata_tolerates_null_bbox_metadata() {
   assert_eq!(geometry.column, "geometry");
   assert!(geometry.bbox.is_none());
   assert_eq!(geometry.geometry_types, vec![GeometryKind::Point]);
+}
+
+#[test]
+fn source_metadata_merges_multifile_geometry_types_and_extent() {
+  let temp = TempDir::new().unwrap();
+  let schema = sample_schema_with_geometry();
+  for (name, geometry_type, bbox, point) in [
+    (
+      "first.parquet",
+      "Point Z",
+      [-10.0, -5.0, 1.0, 2.0],
+      wkb_point(0.0, 0.0),
+    ),
+    (
+      "second.parquet",
+      "MultiPoint Z",
+      [-20.0, 0.0, 30.0, 40.0],
+      wkb_point(5.0, 5.0),
+    ),
+  ] {
+    write_parquet(
+      &temp.path().join(name),
+      &schema,
+      &[sample_batch_with_geometry(vec![Some(point)])],
+      Compression::SNAPPY,
+      &[geoparquet_kv_with_bbox(
+        "geometry",
+        &[geometry_type],
+        Some(bbox),
+      )],
+    );
+  }
+
+  let metadata = open_parquet_input(temp.path()).source_metadata().unwrap();
+  let geometry = metadata.geometry.unwrap();
+
+  assert_eq!(
+    geometry.geometry_types,
+    vec![GeometryKind::MultiPoint, GeometryKind::Point]
+  );
+  assert_eq!(
+    geometry.bbox,
+    Some(Extent2D {
+      xmin: -20.0,
+      ymin: -5.0,
+      xmax: 30.0,
+      ymax: 40.0,
+    })
+  );
+  assert!(geometry.has_z);
+  assert!(!geometry.has_m);
 }
 
 #[test]

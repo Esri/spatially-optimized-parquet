@@ -10,7 +10,6 @@ use arrow_schema::SchemaRef;
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
 use futures_util::future::BoxFuture;
-use geoparquet::metadata::GeoParquetColumnEncoding;
 use object_store::ObjectStore;
 use parquet::arrow::arrow_reader::ArrowReaderMetadata;
 use url::Url;
@@ -72,18 +71,16 @@ impl InputSource for ParquetInputSource {
     let Some(geo_meta) = self.geo_metadata()? else {
       return Ok(None);
     };
-    let Some(column_meta) = geo_meta.columns.get(&geo_meta.primary_column) else {
+    let Some(column_meta) = geo_meta.primary_geometry() else {
       return Ok(None);
     };
-    if column_meta.encoding != GeoParquetColumnEncoding::WKB {
+    if !column_meta.is_wkb() {
       return Ok(None);
     }
 
-    let geometry_kind = if column_meta.geometry_types.len() == 1 {
-      let geo_type = column_meta.geometry_types.iter().next().unwrap();
-      Some(SourceGeometryMetadata::from_geoparquet_geometry_type(
-        geo_type.geometry_type(),
-      ))
+    let geometry_types = column_meta.parsed_geometry_types()?;
+    let geometry_kind = if geometry_types.len() == 1 {
+      Some(geometry_types[0].kind)
     } else {
       None
     };
