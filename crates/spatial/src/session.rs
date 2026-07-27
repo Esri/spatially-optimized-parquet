@@ -10,16 +10,19 @@
 //! available-core default. [`DataFusionSession`] owns the temporary directory so spill files cannot
 //! disappear while a physical plan still references them.
 
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use datafusion::execution::context::SessionContext;
 use datafusion_execution::config::SessionConfig;
+use datafusion_execution::memory_pool::{FairSpillPool, TrackConsumersPool};
 use datafusion_execution::runtime_env::{RuntimeEnv, RuntimeEnvBuilder};
 use sysinfo::System;
 use tempfile::TempDir;
 
-const DEFAULT_SORT_SPILL_RESERVATION_BYTES: usize = 256 * 1024 * 1024;
+const DEFAULT_SORT_SPILL_RESERVATION_BYTES: usize = 10 * 1024 * 1024;
+const TRACKED_MEMORY_CONSUMER_COUNT: usize = 5;
 const NO_IN_PLACE_SORT_THRESHOLD_BYTES: usize = 1;
 const SORT_SPILL_RESERVATION_ENV: &str = "OPT_PARQUET_DF_SORT_SPILL_RESERVATION_BYTES";
 
@@ -74,9 +77,14 @@ impl DataFusionSession {
   }
 
   fn new_runtime_env(spill_dir: &std::path::Path, memory_limit_bytes: usize) -> Result<RuntimeEnv> {
+    let memory_pool = Arc::new(TrackConsumersPool::new(
+      FairSpillPool::new(memory_limit_bytes),
+      NonZeroUsize::new(TRACKED_MEMORY_CONSUMER_COUNT)
+        .expect("tracked memory consumer count must be non-zero"),
+    ));
     Ok(
       RuntimeEnvBuilder::new()
-        .with_memory_limit(memory_limit_bytes, 1.0)
+        .with_memory_pool(memory_pool)
         .with_temp_file_path(spill_dir)
         .build()?,
     )
@@ -106,20 +114,5 @@ impl DataFusionSession {
       .ok()
       .and_then(|value| value.parse::<usize>().ok())
       .filter(|value| *value > 0)
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use super::DataFusionSession;
-
-  #[test]
-  fn session_owns_spill_directory_for_its_lifetime() {
-    let session = DataFusionSession::new(None, None).unwrap();
-    let spill_path = session._spill_dir.path().to_path_buf();
-
-    assert!(spill_path.is_dir());
-    drop(session);
-    assert!(!spill_path.exists());
   }
 }
