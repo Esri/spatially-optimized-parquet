@@ -149,7 +149,7 @@ fn geo_metadata_serializes_ordering_and_lod_extensions() {
     orientation: Some("clockwise".to_string()),
     levels: vec![LodLevel {
       column: ["geolod".to_string(), "level_0".to_string()],
-      scale: 1.0,
+      resolution: 1.0,
       transform: LodTransform {
         scale: [1.0; 4],
         translate: [0.0; 4],
@@ -162,6 +162,8 @@ fn geo_metadata_serializes_ordering_and_lod_extensions() {
   assert_eq!(values["geo"]["ordering"]["type"], "xz");
   assert_eq!(values["geo"]["ordering"]["geometry_column"], "geometry");
   assert_eq!(values["geo"]["lod"]["encoding"], "pbf");
+  assert_eq!(values["geo"]["lod"]["levels"][0]["resolution"], 1.0);
+  assert!(values["geo"]["lod"]["levels"][0].get("scale").is_none());
   assert_eq!(
     values["geo"]["lod"]["levels"][0]["column"],
     json!(["geolod", "level_0"])

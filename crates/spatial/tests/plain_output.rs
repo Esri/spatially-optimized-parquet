@@ -18,7 +18,7 @@ use common::assertion::{
 use common::fixture::{wkb_dimensional_point, wkb_point};
 use common::geometry::{point_from_wkb_xy, transform_point_between_epsg};
 use common::parquet::{
-  geoparquet_kv, geoparquet_kv_with_epsg, kv_map, scan_parquet, write_parquet,
+  geoparquet_kv, geoparquet_kv_with_epsg, kv_map, reader_metadata, scan_parquet, write_parquet,
 };
 
 fn runtime() -> Runtime {
@@ -118,6 +118,27 @@ fn plain_output_preserves_wkb_rows_and_passthrough_metadata() {
   assert_eq!(output_metadata.get("geodisplay"), None);
   assert_eq!(output_metadata.get("custom"), Some(&custom_value));
   assert!(output_metadata.contains_key("geo"));
+
+  let parquet_metadata = reader_metadata(&output);
+  let row_group = parquet_metadata.metadata().row_group(0);
+  let name_column = row_group
+    .columns()
+    .iter()
+    .find(|column| column.column_descr().path().string() == "name")
+    .unwrap();
+  assert!(
+    name_column
+      .encodings()
+      .any(|encoding| encoding == parquet::basic::Encoding::RLE_DICTIONARY)
+  );
+  let z_code_column = row_group
+    .columns()
+    .iter()
+    .find(|column| column.column_descr().path().string() == "zCode")
+    .unwrap();
+  let z_code_encodings = z_code_column.encodings().collect::<Vec<_>>();
+  assert!(z_code_encodings.contains(&parquet::basic::Encoding::DELTA_BINARY_PACKED));
+  assert!(!z_code_encodings.contains(&parquet::basic::Encoding::RLE_DICTIONARY));
 
   let report = validate(&output).unwrap();
   assert!(report.has_errors());

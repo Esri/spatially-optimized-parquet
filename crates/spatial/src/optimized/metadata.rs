@@ -156,7 +156,7 @@ impl OptimizedLayout {
         .iter()
         .map(|level| LodLevel {
           column: [GEOLOD_COLUMN.to_string(), level.column.clone()],
-          scale: level.scale,
+          resolution: level.resolution,
           transform: LodTransform {
             scale: level.transform.scale,
             translate: level.transform.translate,

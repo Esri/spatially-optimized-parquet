@@ -49,7 +49,7 @@ pub(crate) struct LodMetadata {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct LodLevel {
   pub(crate) column: [String; 2],
-  pub(crate) scale: f64,
+  pub(crate) resolution: f64,
   pub(crate) transform: LodTransform,
 }
 

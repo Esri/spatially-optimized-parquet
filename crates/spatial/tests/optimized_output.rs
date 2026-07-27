@@ -74,6 +74,7 @@ fn run_optimized_multiscale(
       mode: OutputMode::Optimized,
       overwrite: true,
       multiscale_encoding: encoding,
+      write_extensions: encoding == MultiscaleEncoding::Pbf,
       ..Default::default()
     },
     ..Default::default()
@@ -1062,14 +1063,10 @@ fn optimized_output_writes_complex_geometry_display_struct_and_metadata() {
     parquet::basic::Compression::SNAPPY,
     &[geoparquet_kv("geometry", &["Polygon"])],
   );
-  run_optimized(
+  run_optimized_multiscale(
     &input,
     &output,
-    RowRange::default(),
-    None,
-    None,
-    None,
-    false,
+    MultiscaleEncoding::Pbf,
   )
   .unwrap();
   let validation = validate(&output).unwrap();
@@ -1115,6 +1112,9 @@ fn optimized_output_writes_complex_geometry_display_struct_and_metadata() {
   assert!(geodisplay.get("wkt").is_none());
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["authority"], "EPSG");
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
+  let lod_levels = geo["lod"]["levels"].as_array().unwrap();
+  assert_eq!(lod_levels[0]["resolution"], 0.703125);
+  assert!(lod_levels[0].get("scale").is_none());
   let levels = geodisplay["levels"].as_array().unwrap();
   assert_eq!(levels.len(), 9);
   assert_eq!(levels[0]["level"], 0);
