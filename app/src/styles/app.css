@@ -22,7 +22,7 @@ body {
   margin-inline: 0.75rem;
 }
 
-.census-renderer-controls {
+.map-renderer-controls {
   display: grid;
   gap: 0.75rem;
   min-width: 18rem;
@@ -32,7 +32,7 @@ body {
   box-shadow: var(--calcite-shadow-md);
 }
 
-.census-renderer-controls-heading {
+.map-renderer-controls-heading {
   color: var(--calcite-color-text-1);
   font-size: var(--calcite-font-size--1);
   font-weight: var(--calcite-font-weight-medium);
@@ -190,6 +190,7 @@ calcite-shell {
 }
 
 .grid-container {
+  position: relative;
   display: grid;
   height: calc(100% - 2rem);
   margin: 1rem;
@@ -197,11 +198,51 @@ calcite-shell {
   gap: 1rem;
 }
 
+.grid-container.compact {
+  display: block;
+}
+
+.grid-container.compact .grid-map {
+  width: 100%;
+  height: 100%;
+}
+
 .grid-container calcite-panel {
   min-width: 0;
   overflow: hidden;
   box-shadow: var(--calcite-shadow-sm);
   --calcite-panel-corner-radius: var(--calcite-corner-radius-sm);
+}
+
+.responsive-details-overlay {
+  position: absolute;
+  z-index: 100;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  inset-block: 3rem 0;
+  inset-inline-end: 0;
+  width: min(400px, 100%);
+  overflow: hidden;
+  border-radius: var(--calcite-corner-radius-sm);
+  background: var(--calcite-color-foreground-1);
+  box-shadow: var(--calcite-shadow-2);
+  color: var(--calcite-color-text-1);
+}
+
+.responsive-details-summary {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--calcite-color-border-1);
+}
+
+.responsive-details-summary .details-count-chip {
+  margin-inline: 0;
+}
+
+.responsive-details-content {
+  min-height: 0;
+  overflow: auto;
 }
 
 .grid-map arcgis-map {
@@ -416,19 +457,4 @@ calcite-shell {
   color: var(--calcite-color-text-3);
   font-size: var(--calcite-font-size--1);
   font-weight: var(--calcite-font-weight-normal);
-}
-
-@media screen and (max-width: 800px) {
-  .grid-container {
-    display: block;
-  }
-
-  .grid-map {
-    width: 100%;
-    height: 100%;
-  }
-
-  .grid-panel-desktop {
-    display: none;
-  }
 }

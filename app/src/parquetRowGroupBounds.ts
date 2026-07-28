@@ -1,4 +1,8 @@
-import { asyncBufferFromUrl, parquetMetadataAsync } from "hyparquet";
+import {
+  asyncBufferFromUrl,
+  parquetMetadataAsync,
+  type FileMetaData,
+} from "hyparquet";
 
 export interface RowGroupBounds {
   rowGroupIndex: number;
@@ -41,11 +45,12 @@ export async function loadParquetRowGroupBounds(url: string): Promise<RowGroupBo
 async function loadRowGroupBounds(url: string): Promise<RowGroupBounds[]> {
   const file = await asyncBufferFromUrl({ url });
   const metadata = await parquetMetadataAsync(file);
+  const geometryColumnPath = resolveGeometryColumnPath(metadata);
 
   return metadata.row_groups.map((rowGroup, rowGroupIndex) => {
     const geometryMetadata = rowGroup.columns.find(
       ({ meta_data: columnMetadata }) =>
-        columnMetadata?.path_in_schema.join(".") === "geometry",
+        columnMetadata?.path_in_schema.join(".") === geometryColumnPath,
     )?.meta_data;
     const bounds = geometryMetadata?.geospatial_statistics?.bbox;
 
@@ -59,6 +64,34 @@ async function loadRowGroupBounds(url: string): Promise<RowGroupBounds[]> {
       ...bounds,
     };
   });
+}
+
+function resolveGeometryColumnPath(metadata: FileMetaData): string {
+  const geoMetadataValue = metadata.key_value_metadata?.find(
+    ({ key }) => key === "geo",
+  )?.value;
+
+  if (geoMetadataValue) {
+    const geoMetadata: unknown = JSON.parse(geoMetadataValue);
+    if (
+      typeof geoMetadata === "object" &&
+      geoMetadata !== null &&
+      "primary_column" in geoMetadata &&
+      typeof geoMetadata.primary_column === "string"
+    ) {
+      return geoMetadata.primary_column;
+    }
+  }
+
+  const geometryColumnPath = metadata.row_groups[0]?.columns
+    .find(({ meta_data: columnMetadata }) => columnMetadata?.geospatial_statistics?.bbox)
+    ?.meta_data?.path_in_schema.join(".");
+
+  if (!geometryColumnPath) {
+    throw new Error("Primary geometry column not found in Parquet metadata.");
+  }
+
+  return geometryColumnPath;
 }
 
 export function calculateRowGroupFocusExtent(

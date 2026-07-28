@@ -8,10 +8,28 @@ export const japanMapProfile = {
         type: "simple-fill",
         color: "black",
         outline: {
-          color: [255, 255, 255, 0.6],
+          color: [255, 255, 255, 0.4],
           width: 1,
-        }
+        },
       },
+    },
+    popupTemplate: {
+      title: "Building",
+      content: [
+        {
+          type: "fields",
+          fieldInfos: [
+            {
+              fieldName: "is_underground",
+              label: "Underground",
+            },
+            {
+              fieldName: "has_parts",
+              label: "Has building parts",
+            },
+          ],
+        },
+      ],
     },
   },
   configureLayer(layer) {

@@ -1,16 +1,22 @@
 import ParquetLayer from "@arcgis/core/layers/ParquetLayer";
 import FeatureLayer from "@arcgis/core/layers/FeatureLayer";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
+import VectorTileLayer from "@arcgis/core/layers/VectorTileLayer";
 import ParquetFilesData from "@arcgis/core/layers/support/ParquetFilesData";
 import Graphic from "@arcgis/core/Graphic";
 import Extent from "@arcgis/core/geometry/Extent";
+import SpatialReference from "@arcgis/core/geometry/SpatialReference";
+import MapViewConstraints from "@arcgis/core/views/2d/MapViewConstraints";
 import Viewpoint from "@arcgis/core/Viewpoint";
 import Bookmark from "@arcgis/core/webmap/Bookmark";
+import Basemap from "@arcgis/core/Basemap";
 import * as reactiveUtils from "@arcgis/core/core/reactiveUtils";
 import {
   memo,
   type CSSProperties,
   useEffect,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -44,42 +50,24 @@ import {
 } from "./parquetRowGroupBounds";
 
 const defaultCenter: [number, number] = [-98, 39];
-const defaultZoom = 4.565;
+const defaultScale = 25_000_000;
+const detailsLayoutBreakpoint = 1024;
 const censusDatasetName = "Census Blocks, Demographics";
 
-function resolveScaleForZoom(mapElement: HTMLArcgisMapElement, zoom: number): number {
-  const levels = mapElement.view.constraints.effectiveLODs;
-  if (!levels?.length) {
-    throw new Error("The active map view does not expose levels of detail.");
-  }
+function createDatasetBasemap(basemapId?: string): Basemap | string {
+  return basemapId
+    ? new Basemap({
+        baseLayers: [
+          new VectorTileLayer({
+            portalItem: { id: basemapId },
+          }),
+        ],
+      })
+    : "dark-gray-vector";
+}
 
-  const exactLevel = levels.find((level) => level.level === zoom);
-  if (exactLevel) {
-    return exactLevel.scale;
-  }
-
-  let lowerLevel: (typeof levels)[number] | undefined;
-  let upperLevel: (typeof levels)[number] | undefined;
-  for (const level of levels) {
-    if (level.level < zoom) {
-      lowerLevel = level;
-    } else if (level.level > zoom) {
-      upperLevel = level;
-      break;
-    }
-  }
-
-  if (!lowerLevel || !upperLevel) {
-    throw new RangeError(`Zoom ${zoom} falls outside the active map levels.`);
-  }
-
-  const levelFraction =
-    (zoom - lowerLevel.level) / (upperLevel.level - lowerLevel.level);
-
-  return Math.exp(
-    Math.log(lowerLevel.scale) +
-      (Math.log(upperLevel.scale) - Math.log(lowerLevel.scale)) * levelFraction,
-  );
+function createDatasetSpatialReference(wkid?: number): SpatialReference {
+  return new SpatialReference({ wkid: wkid ?? 3857 });
 }
 
 function createDebugBoundsSymbol(outlineColor: string) {
@@ -231,23 +219,39 @@ interface ChunkStyle extends CSSProperties {
 }
 
 const MapCanvas = memo(function MapCanvas({
+  dataset,
   mapElementRef,
   profile,
   layer,
 }: {
+  dataset: Dataset;
   mapElementRef: React.RefObject<HTMLArcgisMapElement | null>;
   profile: DatasetMapProfile;
   layer: ParquetLayer | null;
 }) {
   const MapSlotComponent = profile.mapSlotComponent;
+  const basemap = useMemo(
+    () => createDatasetBasemap(dataset.basemap),
+    [dataset.basemap],
+  );
+  const spatialReference = useMemo(
+    () => createDatasetSpatialReference(dataset.spatialReference),
+    [dataset.spatialReference],
+  );
+  const constraints = useMemo(
+    () => new MapViewConstraints({ minScale: dataset.scale * 4 }),
+    [dataset.scale],
+  );
 
   return (
     <arcgis-map
       ref={mapElementRef}
-      aria-label="Dark gray basemap"
-      basemap="dark-gray-vector"
+      aria-label={`${dataset.name} map`}
+      spatialReference={spatialReference}
+      basemap={basemap}
+      constraints={constraints}
       center={defaultCenter}
-      zoom={defaultZoom}
+      scale={defaultScale}
     >
       <arcgis-zoom slot="top-left" />
       {MapSlotComponent ? (
@@ -265,17 +269,30 @@ const RowGroupOverviewMap = memo(function RowGroupOverviewMap({
   mainMapElementRef: React.RefObject<HTMLArcgisMapElement | null>;
 }) {
   const mapElementRef = useRef<HTMLArcgisMapElement>(null);
+  const basemap = useMemo(
+    () => createDatasetBasemap(dataset.basemap),
+    [dataset.basemap],
+  );
+  const spatialReference = useMemo(
+    () => createDatasetSpatialReference(dataset.spatialReference),
+    [dataset.spatialReference],
+  );
 
   useEffect(() => {
     const mapElement = mapElementRef.current;
-    if (!mapElement || dataset.name !== censusDatasetName) {
+    if (!mapElement || !dataset.url) {
       return;
     }
+
+    mapElement.center = dataset.center;
+    mapElement.scale = dataset.scale;
 
     let disposed = false;
     let boundsLayer: FeatureLayer | undefined;
     let extentLayer: GraphicsLayer | undefined;
     let extentWatcher: { remove(): void } | undefined;
+    let overviewClickHandle: { remove(): void } | undefined;
+    let overviewDragHandle: { remove(): void } | undefined;
 
     const loadOverview = async () => {
       try {
@@ -312,6 +329,27 @@ const RowGroupOverviewMap = memo(function RowGroupOverviewMap({
           return;
         }
 
+        const recenterMainView = (x: number, y: number) => {
+          const center = mapElement.view.toMap({ x, y });
+          if (center) {
+            mainMapElement.view.center = center;
+          }
+        };
+        overviewClickHandle = mapElement.view.on(
+          "immediate-click",
+          (event) => {
+            if (event.button === 0) {
+              recenterMainView(event.x, event.y);
+            }
+          },
+        );
+        overviewDragHandle = mapElement.view.on("drag", (event) => {
+          if (event.button === 0) {
+            event.stopPropagation();
+            recenterMainView(event.x, event.y);
+          }
+        });
+
         const extentGraphic = new Graphic({
           geometry: mainMapElement.view.extent.clone(),
           symbol: {
@@ -342,6 +380,8 @@ const RowGroupOverviewMap = memo(function RowGroupOverviewMap({
 
     return () => {
       disposed = true;
+      overviewClickHandle?.remove();
+      overviewDragHandle?.remove();
       extentWatcher?.remove();
       if (extentLayer) {
         mapElement.map?.remove(extentLayer);
@@ -350,7 +390,7 @@ const RowGroupOverviewMap = memo(function RowGroupOverviewMap({
         mapElement.map?.remove(boundsLayer);
       }
     };
-  }, [dataset.name, dataset.url, mainMapElementRef]);
+  }, [dataset, mainMapElementRef]);
 
   return (
     <div className="row-group-overview">
@@ -358,9 +398,10 @@ const RowGroupOverviewMap = memo(function RowGroupOverviewMap({
       <arcgis-map
         ref={mapElementRef}
         aria-label="Parquet row group overview"
-        basemap="dark-gray-vector"
-        center={defaultCenter}
-        zoom={defaultZoom}
+        spatialReference={spatialReference}
+        basemap={basemap}
+        center={dataset.center}
+        scale={dataset.scale}
       />
     </div>
   );
@@ -678,6 +719,49 @@ function formatFeatureCount(featureCount: number | null): string {
   }).format(featureCount);
 }
 
+const DownloadDetailsContent = memo(function DownloadDetailsContent({
+  dataset,
+  downloadStore,
+  mainMapElementRef,
+}: {
+  dataset: Dataset;
+  downloadStore: ParquetDownloadStore;
+  mainMapElementRef: React.RefObject<HTMLArcgisMapElement | null>;
+}) {
+  return (
+    <>
+      <RowGroupOverviewMap
+        dataset={dataset}
+        mainMapElementRef={mainMapElementRef}
+      />
+      <FileDownload downloadStore={downloadStore} />
+    </>
+  );
+});
+
+const DownloadDetailsPanel = memo(function DownloadDetailsPanel({
+  className,
+  dataset,
+  downloadStore,
+  mainMapElementRef,
+}: {
+  className?: string;
+  dataset: Dataset;
+  downloadStore: ParquetDownloadStore;
+  mainMapElementRef: React.RefObject<HTMLArcgisMapElement | null>;
+}) {
+  return (
+    <calcite-panel className={className} heading="Details">
+      <CompletedRequestCountChip downloadStore={downloadStore} />
+      <DownloadDetailsContent
+        dataset={dataset}
+        downloadStore={downloadStore}
+        mainMapElementRef={mainMapElementRef}
+      />
+    </calcite-panel>
+  );
+});
+
 export function App() {
   const [datasetIndex, setDatasetIndex] = useState(0);
   const [mapReady, setMapReady] = useState(false);
@@ -686,9 +770,12 @@ export function App() {
   const [parquetLayer, setParquetLayer] = useState<ParquetLayer | null>(null);
   const [debugEnabled, setDebugEnabled] = useState(false);
   const [datasetDetailsOpen, setDatasetDetailsOpen] = useState(false);
+  const [compactDetailsLayout, setCompactDetailsLayout] = useState(false);
+  const [responsiveDetailsOpen, setResponsiveDetailsOpen] = useState(false);
   const [datasetDetailsButton, setDatasetDetailsButton] =
     useState<HTMLCalciteButtonElement | null>(null);
   const mapElementRef = useRef<HTMLArcgisMapElement>(null);
+  const gridContainerRef = useRef<HTMLElement>(null);
   const parquetLayerRef = useRef<ParquetLayer | null>(null);
   const datasetMenuItemRef = useRef<HTMLCalciteMenuItemElement>(null);
   const downloadStoreRef = useRef<ParquetDownloadStore | null>(null);
@@ -705,11 +792,37 @@ export function App() {
   const selectDataset = (index: number) => {
     setDatasetIndex(index);
     setDatasetDetailsOpen(false);
+    setResponsiveDetailsOpen(false);
     const datasetMenuItem = datasetMenuItemRef.current;
     if (datasetMenuItem) {
       datasetMenuItem.open = false;
     }
   };
+
+  useLayoutEffect(() => {
+    const gridContainer = gridContainerRef.current;
+    if (!gridContainer) {
+      return;
+    }
+
+    const updateLayout = (width: number) => {
+      const compact = width <= detailsLayoutBreakpoint;
+      setCompactDetailsLayout(compact);
+      if (!compact) {
+        setResponsiveDetailsOpen(false);
+      }
+    };
+    updateLayout(gridContainer.getBoundingClientRect().width);
+
+    const resizeObserver = new ResizeObserver(([entry]) => {
+      updateLayout(entry.contentRect.width);
+    });
+    resizeObserver.observe(gridContainer);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     downloadStore.reset();
@@ -786,11 +899,13 @@ export function App() {
     setLayerFeatureCount(null);
     setLayerViewFeatureCount(null);
     mapElement.center = activeDataset.center ?? defaultCenter;
-    mapElement.zoom = activeDataset.zoom ?? defaultZoom;
+    mapElement.scale = activeDataset.scale ?? defaultScale;
     map.layers.removeAll();
     const layer = new ParquetLayer({
       title: activeDataset.name,
+      copyright: activeDataset.source,
       data: new ParquetFilesData({ urls: [activeDataset.url] }),
+      maxScale: activeDataset.maxScale,
       ...activeProfile.layerProperties,
     });
     parquetLayerRef.current = layer;
@@ -955,11 +1070,10 @@ export function App() {
               longitude: bookmark.center[0],
               latitude: bookmark.center[1],
             },
-            scale: resolveScaleForZoom(mapElement, bookmark.zoom),
+            scale: bookmark.scale,
           }),
         }),
     );
-
     const expandElement = document.createElement("arcgis-expand");
     expandElement.setAttribute("expand-icon", "bookmark");
     expandElement.setAttribute("expand-tooltip", "Bookmarks");
@@ -1002,7 +1116,10 @@ export function App() {
         </calcite-menu>
       </calcite-navigation>
 
-      <main className="grid-container">
+      <main
+        ref={gridContainerRef}
+        className={`grid-container${compactDetailsLayout ? " compact" : ""}`}
+      >
         <calcite-panel className="grid-map">
           <calcite-menu
             className="dataset-menu"
@@ -1125,27 +1242,45 @@ export function App() {
           ) : null}
           <calcite-label
             className="panel-metric"
+            id="layer-feature-count"
             slot="header-actions-end"
             layout="inline"
           >
             Layer
             <strong>{formatFeatureCount(layerFeatureCount)}</strong>
           </calcite-label>
+          <calcite-tooltip referenceElement="layer-feature-count">
+            Count of features in the dataset.
+          </calcite-tooltip>
           <calcite-label
             className="panel-metric"
+            id="layer-view-feature-count"
             slot="header-actions-end"
             layout="inline"
           >
             LayerView
             <strong>{formatFeatureCount(layerViewFeatureCount)}</strong>
           </calcite-label>
-          <span
-            className="header-divider"
-            slot="header-actions-end"
-            aria-hidden="true"
-          />
+          <calcite-tooltip referenceElement="layer-view-feature-count">
+            Count of features in the current view.
+          </calcite-tooltip>
+          {compactDetailsLayout ? (
+            <calcite-button
+              appearance="transparent"
+              aria-expanded={responsiveDetailsOpen}
+              className="responsive-details-button"
+              kind="neutral"
+              label={responsiveDetailsOpen ? "Close details" : "Open details"}
+              scale="m"
+              slot="header-actions-end"
+              onClick={() => setResponsiveDetailsOpen((open) => !open)}
+            >
+              Details
+            </calcite-button>
+          ) : null}
           <calcite-switch
             className="debug-switch"
+            hidden
             slot="header-actions-end"
             label="Debug"
             labelTextEnd="Debug"
@@ -1155,20 +1290,38 @@ export function App() {
             }
           />
           <MapCanvas
+            dataset={activeDataset}
             layer={parquetLayer}
             mapElementRef={mapElementRef}
             profile={activeProfile}
           />
         </calcite-panel>
 
-        <calcite-panel className="grid-panel-desktop" heading="Details">
-          <CompletedRequestCountChip downloadStore={downloadStore} />
-          <RowGroupOverviewMap
+        {!compactDetailsLayout ? (
+          <DownloadDetailsPanel
+            className="grid-panel-desktop"
             dataset={activeDataset}
+            downloadStore={downloadStore}
             mainMapElementRef={mapElementRef}
           />
-          <FileDownload downloadStore={downloadStore} />
-        </calcite-panel>
+        ) : null}
+        {compactDetailsLayout && responsiveDetailsOpen ? (
+          <aside
+            className="responsive-details-overlay"
+            aria-label="Details"
+          >
+            <div className="responsive-details-summary">
+              <CompletedRequestCountChip downloadStore={downloadStore} />
+            </div>
+            <div className="responsive-details-content">
+              <DownloadDetailsContent
+                dataset={activeDataset}
+                downloadStore={downloadStore}
+                mainMapElementRef={mapElementRef}
+              />
+            </div>
+          </aside>
+        ) : null}
       </main>
     </calcite-shell>
   );

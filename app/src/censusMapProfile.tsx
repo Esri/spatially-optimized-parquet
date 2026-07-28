@@ -19,6 +19,31 @@ const colors = {
 export const censusMapProfile = {
   layerProperties: {
     renderer: createBoundaryRenderer(),
+    popupTemplate: {
+      title: "Census block {GEOID}",
+      content: [
+        {
+          type: "fields",
+          fieldInfos: [
+            {
+              fieldName: "POP100",
+              label: "Population",
+              format: { digitSeparator: true, places: 0 },
+            },
+            {
+              fieldName: "HU100",
+              label: "Housing units",
+              format: { digitSeparator: true, places: 0 },
+            },
+            {
+              fieldName: "AREALAND",
+              label: "Land area (m²)",
+              format: { digitSeparator: true, places: 0 },
+            },
+          ],
+        },
+      ],
+    },
   },
   mapSlotComponent: function CensusMapControls({ layer }: DatasetMapSlotProps) {
     const [demographicsEnabled, setDemographicsEnabled] = useState(false);
@@ -46,8 +71,8 @@ export const censusMapProfile = {
     return (
       <>
         <arcgis-legend hidden={!demographicsEnabled} slot="bottom-left" />
-        <div className="census-renderer-controls" slot="bottom-right">
-          <div className="census-renderer-controls-heading">Census blocks</div>
+        <div className="map-renderer-controls" slot="bottom-right">
+          <div className="map-renderer-controls-heading">Census blocks</div>
           <calcite-button
             appearance="solid"
             kind="brand"
