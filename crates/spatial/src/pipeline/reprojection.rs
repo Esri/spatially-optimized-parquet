@@ -4,7 +4,6 @@
 //! transformation, prepares GDAL transformation state during execution, and exposes a DataFusion
 //! expression that rewrites WKB geometry lazily.
 
-use anyhow::{Context, Result};
 use arrow_array::ArrayRef;
 use arrow_array::builder::BinaryBuilder;
 use arrow_schema::DataType;
@@ -18,8 +17,9 @@ use gdal::vector::Geometry;
 use serde_json::Value;
 use std::sync::Arc;
 
-use crate::geometry::{GeometryArray, geometry_signature, to_datafusion_error};
+use crate::geometry::{GeometryArray, GeometryError, geometry_signature, to_datafusion_error};
 use crate::geoparquet::SpatialReference;
+use crate::pipeline::PipelineError;
 
 #[derive(Debug, Clone)]
 /// Represents target spatial-reference metadata and the source definition for deferred reprojection.
@@ -30,7 +30,10 @@ pub(crate) struct ResolvedReprojection {
 
 impl ResolvedReprojection {
   /// Resolve target spatial-reference metadata and transformation from source PROJJSON.
-  pub(crate) fn from_source_projjson(source_projjson: &Value, target_wkid: u32) -> Result<Self> {
+  pub(crate) fn from_source_projjson(
+    source_projjson: &Value,
+    target_wkid: u32,
+  ) -> Result<Self, PipelineError> {
     let source_spatial_reference = SpatialReference::from_projjson(source_projjson)?;
     let target_spatial_reference = SpatialReference::from_epsg(target_wkid)?;
     let source_definition = source_spatial_reference.definition()?;
@@ -53,7 +56,7 @@ impl ResolvedReprojection {
     &self.target_spatial_reference
   }
 
-  pub(crate) fn geometry_expr(&self, geometry_column: &str) -> Result<Option<Expr>> {
+  pub(crate) fn geometry_expr(&self, geometry_column: &str) -> Result<Option<Expr>, PipelineError> {
     let Some(source_definition) = self.source_definition.as_ref() else {
       return Ok(None);
     };
@@ -75,9 +78,10 @@ struct PreparedTransform {
 
 impl PreparedTransform {
   /// Construct a coordinate operation backed by source and target spatial references.
-  fn new(source: SpatialRef, target: SpatialRef) -> Result<Self> {
-    let coord_transform =
-      CoordTransform::new(&source, &target).context("create coordinate transform")?;
+  fn new(source: SpatialRef, target: SpatialRef) -> Result<Self, GeometryError> {
+    let coord_transform = CoordTransform::new(&source, &target).map_err(|error| {
+      GeometryError::InvalidGeometry(format!("create coordinate transform: {error}"))
+    })?;
     Ok(Self {
       _source: source,
       _target: target,
@@ -86,12 +90,16 @@ impl PreparedTransform {
   }
 
   /// Reproject one WKB geometry and return target-spatial-reference WKB.
-  fn reproject_wkb(&self, bytes: &[u8]) -> Result<Vec<u8>> {
-    let geometry = Geometry::from_wkb(bytes).context("decode geometry for reprojection")?;
+  fn reproject_wkb(&self, bytes: &[u8]) -> Result<Vec<u8>, GeometryError> {
+    let geometry = Geometry::from_wkb(bytes).map_err(|error| {
+      GeometryError::InvalidGeometry(format!("decode geometry for reprojection: {error}"))
+    })?;
     let geometry = geometry
       .transform(&self.coord_transform)
-      .context("reproject geometry")?;
-    geometry.wkb().context("encode reprojected geometry as WKB")
+      .map_err(|error| GeometryError::InvalidGeometry(format!("reproject geometry: {error}")))?;
+    geometry.wkb().map_err(|error| {
+      GeometryError::InvalidGeometry(format!("encode reprojected geometry as WKB: {error}"))
+    })
   }
 }
 

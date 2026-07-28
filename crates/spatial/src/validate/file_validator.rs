@@ -1,6 +1,5 @@
 use std::fs::File;
 
-use anyhow::{Context, Result};
 use arrow_array::{Array, Float64Array, RecordBatch, StructArray, UInt64Array};
 use arrow_schema::{DataType, Field, Schema};
 use parquet::arrow::ProjectionMask;
@@ -9,6 +8,7 @@ use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ParquetRecordBatchReader
 use crate::input::parquet::{ParquetDatasetFile, PartitionFamily};
 use crate::optimized::GeodisplayMetadata;
 
+use super::ValidationError;
 use super::metadata_validator::{ValidatedDatasetFile, ValidatedMetadata};
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
 use super::xz_validator::XzValidator;
@@ -308,21 +308,31 @@ impl FileValidator {
     Some(field)
   }
 
-  pub(crate) fn array_at_path<'a>(batch: &'a RecordBatch, path: &str) -> Result<&'a dyn Array> {
+  pub(crate) fn array_at_path<'a>(
+    batch: &'a RecordBatch,
+    path: &str,
+  ) -> Result<&'a dyn Array, ValidationError> {
     let mut segments = path.split('.');
-    let first = segments.next().context("empty Arrow column path")?;
+    let first = segments
+      .next()
+      .filter(|segment| !segment.is_empty())
+      .ok_or_else(|| ValidationError::ArrowColumn("empty Arrow column path".to_string()))?;
     let mut array = batch
       .column_by_name(first)
-      .with_context(|| format!("missing Arrow column '{first}'"))?
+      .ok_or_else(|| ValidationError::ArrowColumn(format!("missing Arrow column '{first}'")))?
       .as_ref();
     for segment in segments {
       let struct_array = array
         .as_any()
         .downcast_ref::<StructArray>()
-        .with_context(|| format!("Arrow column before '{segment}' is not a struct"))?;
+        .ok_or_else(|| {
+          ValidationError::ArrowColumn(format!("Arrow column before '{segment}' is not a struct"))
+        })?;
       array = struct_array
         .column_by_name(segment)
-        .with_context(|| format!("missing Arrow struct field '{segment}'"))?
+        .ok_or_else(|| {
+          ValidationError::ArrowColumn(format!("missing Arrow struct field '{segment}'"))
+        })?
         .as_ref();
     }
     Ok(array)
@@ -331,45 +341,54 @@ impl FileValidator {
   pub(crate) fn float64_array_at_path<'a>(
     batch: &'a RecordBatch,
     path: &str,
-  ) -> Result<&'a Float64Array> {
+  ) -> Result<&'a Float64Array, ValidationError> {
     Self::array_at_path(batch, path)?
       .as_any()
       .downcast_ref::<Float64Array>()
-      .with_context(|| format!("Arrow column '{path}' is not Float64"))
+      .ok_or_else(|| ValidationError::ArrowColumn(format!("Arrow column '{path}' is not Float64")))
   }
 
   pub(crate) fn uint64_array_at_path<'a>(
     batch: &'a RecordBatch,
     path: &str,
-  ) -> Result<&'a UInt64Array> {
+  ) -> Result<&'a UInt64Array, ValidationError> {
     Self::array_at_path(batch, path)?
       .as_any()
       .downcast_ref::<UInt64Array>()
-      .with_context(|| format!("Arrow column '{path}' is not UInt64"))
+      .ok_or_else(|| ValidationError::ArrowColumn(format!("Arrow column '{path}' is not UInt64")))
   }
 
   pub(crate) fn read_row_groups(
     &self,
     columns: &[String],
-    mut visit_batch: impl FnMut(usize, u64, &RecordBatch) -> Result<()>,
-  ) -> Result<()> {
+    mut visit_batch: impl FnMut(usize, u64, &RecordBatch) -> Result<(), ValidationError>,
+  ) -> Result<(), ValidationError> {
     let projection = ProjectionMask::columns(
       self.metadata.parquet_schema(),
       columns.iter().map(String::as_str),
     );
     for row_group in 0..self.metadata.metadata().num_row_groups() {
-      let input = File::open(&self.file.path)
-        .with_context(|| format!("open parquet file: {}", self.file.path.display()))?;
+      let input = File::open(&self.file.path).map_err(|source| ValidationError::Io {
+        operation: "open parquet file",
+        path: self.file.path.clone(),
+        source,
+      })?;
       let reader = ParquetRecordBatchReaderBuilder::new_with_metadata(input, self.metadata.clone())
         .with_row_groups(vec![row_group])
         .with_projection(projection.clone())
         .with_batch_size(1024)
         .build()
-        .with_context(|| format!("build parquet reader: {}", self.file.path.display()))?;
+        .map_err(|source| ValidationError::Parquet {
+          path: self.file.path.clone(),
+          source,
+        })?;
       let mut row_offset = 0_u64;
       for batch in reader {
-        let batch =
-          batch.with_context(|| format!("read parquet rows: {}", self.file.path.display()))?;
+        let batch = batch.map_err(|source| ValidationError::Arrow {
+          operation: "read parquet rows",
+          path: self.file.path.clone(),
+          source,
+        })?;
         visit_batch(row_group, row_offset, &batch)?;
         row_offset += batch.num_rows() as u64;
       }

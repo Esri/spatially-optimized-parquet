@@ -1,4 +1,3 @@
-use anyhow::{Result, anyhow, bail};
 use gdal::Dataset;
 use gdal::spatial_ref::SpatialRef;
 use gdal::vector::{LayerAccess, geometry_type_to_name};
@@ -6,7 +5,7 @@ use gdal_sys::OGRwkbGeometryType;
 
 use crate::geometry::Extent2D;
 use crate::geometry::{GeometryEncoding, GeometryKind};
-use crate::input::{InputOpenOptions, SourceGeometryMetadata};
+use crate::input::{InputError, InputOpenOptions, SourceGeometryMetadata};
 
 const MAX_GEOMETRY_TYPE_SAMPLE_FEATURES: usize = 64;
 
@@ -31,7 +30,7 @@ enum SampledGeometryType {
 
 impl GpkgLayerSummary {
   /// Collect user-facing metadata for every vector layer in a dataset.
-  pub(super) fn collect(dataset: &Dataset) -> Result<Vec<Self>> {
+  pub(super) fn collect(dataset: &Dataset) -> Result<Vec<Self>, InputError> {
     let layer_summaries = dataset
       .layers()
       .map(|mut layer| {
@@ -59,7 +58,9 @@ impl GpkgLayerSummary {
       })
       .collect::<Vec<_>>();
     if layer_summaries.is_empty() {
-      bail!("GeoPackage contains no vector layers");
+      return Err(InputError::Metadata(
+        "GeoPackage contains no vector layers".to_string(),
+      ));
     }
     Ok(layer_summaries)
   }
@@ -68,29 +69,29 @@ impl GpkgLayerSummary {
   pub(super) fn select_name(
     options: &InputOpenOptions,
     layer_summaries: &[Self],
-  ) -> Result<String> {
+  ) -> Result<String, InputError> {
     let available = Self::format_collection(layer_summaries);
     if let Some(requested) = options.layer() {
       if layer_summaries.iter().any(|layer| layer.name == requested) {
         return Ok(requested.to_string());
       }
-      bail!(
+      return Err(InputError::Metadata(format!(
         "GeoPackage layer {:?} was not found in {}\nAvailable layers:\n{}",
         requested,
         options.location(),
         available
-      );
+      )));
     }
 
     if layer_summaries.len() == 1 {
       return Ok(layer_summaries[0].name.clone());
     }
 
-    bail!(
+    Err(InputError::Metadata(format!(
       "GeoPackage {} contains multiple layers; pass --layer <NAME>\nAvailable layers:\n{}",
       options.location(),
       available
-    )
+    )))
   }
 
   fn format_collection(layer_summaries: &[Self]) -> String {
@@ -216,13 +217,13 @@ impl SourceGeometryMetadata {
   pub(super) fn from_gpkg_layer(
     layer: &mut impl LayerAccess,
     layer_name: &str,
-  ) -> Result<SourceGeometryMetadata> {
+  ) -> Result<SourceGeometryMetadata, InputError> {
     let (column_name, geometry_type, field_spatial_ref) = {
-      let geom_field = layer
-        .defn()
-        .geom_fields()
-        .next()
-        .ok_or_else(|| anyhow!("GeoPackage layer {layer_name} has no geometry column"))?;
+      let geom_field = layer.defn().geom_fields().next().ok_or_else(|| {
+        InputError::Metadata(format!(
+          "GeoPackage layer {layer_name} has no geometry column"
+        ))
+      })?;
       (
         geom_field.name(),
         geom_field.field_type(),
@@ -244,12 +245,18 @@ impl SourceGeometryMetadata {
     let projjson = field_spatial_ref
       .or_else(|| layer.spatial_ref())
       .and_then(|spatial_ref| Self::spatial_ref_to_projjson(&spatial_ref));
-    let bbox = layer.try_get_extent()?.map(|extent| Extent2D {
-      xmin: extent.MinX,
-      ymin: extent.MinY,
-      xmax: extent.MaxX,
-      ymax: extent.MaxY,
-    });
+    let bbox = layer
+      .try_get_extent()
+      .map_err(|source| InputError::GeoPackage {
+        operation: "read GeoPackage layer extent",
+        source,
+      })?
+      .map(|extent| Extent2D {
+        xmin: extent.MinX,
+        ymin: extent.MinY,
+        xmax: extent.MaxX,
+        ymax: extent.MaxY,
+      });
 
     Ok(SourceGeometryMetadata {
       column: column_name,

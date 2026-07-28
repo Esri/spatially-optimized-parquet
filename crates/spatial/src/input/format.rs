@@ -8,9 +8,9 @@ use std::fmt;
 use std::path::Path;
 use std::str::FromStr;
 
-use anyhow::{Context, Result, bail};
 use url::Url;
 
+use super::InputError;
 use super::source::is_http_location;
 
 /// Identifies the physical source implementation used to open an input.
@@ -23,13 +23,15 @@ pub enum SourceFormat {
 }
 
 impl FromStr for SourceFormat {
-  type Err = anyhow::Error;
+  type Err = InputError;
 
-  fn from_str(value: &str) -> Result<Self> {
+  fn from_str(value: &str) -> Result<Self, InputError> {
     match value.to_ascii_lowercase().as_str() {
       "gpkg" | "geopackage" => Ok(Self::GeoPackage),
       "parquet" | "geoparquet" => Ok(Self::Parquet),
-      _ => bail!("unsupported input format '{value}'; expected gpkg or parquet"),
+      _ => Err(InputError::Format(format!(
+        "unsupported input format '{value}'; expected gpkg or parquet"
+      ))),
     }
   }
 }
@@ -45,7 +47,7 @@ impl fmt::Display for SourceFormat {
 
 impl SourceFormat {
   /// Resolve an input format from an override, directory, local extension, or URL path.
-  pub(crate) fn resolve(location: &str, explicit_format: Option<Self>) -> Result<Self> {
+  pub(crate) fn resolve(location: &str, explicit_format: Option<Self>) -> Result<Self, InputError> {
     if let Some(explicit_format) = explicit_format {
       return Ok(explicit_format);
     }
@@ -55,7 +57,7 @@ impl SourceFormat {
     }
 
     let extension = if is_http_location(location) {
-      let url = Url::parse(location).with_context(|| format!("parse input URL: {location}"))?;
+      let url = Url::parse(location).map_err(|source| InputError::Url { source })?;
       Path::new(url.path())
         .extension()
         .map(|extension| extension.to_string_lossy().into_owned())
@@ -68,9 +70,9 @@ impl SourceFormat {
     match extension.as_deref().map(str::to_ascii_lowercase).as_deref() {
       Some("gpkg") => Ok(Self::GeoPackage),
       Some("parquet") => Ok(Self::Parquet),
-      _ => bail!(
+      _ => Err(InputError::Format(format!(
         "unable to determine input format for '{location}'; pass --input-format gpkg or --input-format parquet"
-      ),
+      ))),
     }
   }
 }

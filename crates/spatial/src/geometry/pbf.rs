@@ -4,13 +4,14 @@
 //! deltas after the first coordinate of each part, while z and m remain absolute. The codec
 //! operates on [`QuantizedGeometry`] and therefore does not depend on multiscale level policy.
 
-use anyhow::Result;
 use arrow_array::ArrayRef;
 use arrow_array::builder::BinaryBuilder;
 use prost::Message;
 use std::sync::Arc;
 
-use super::{QuantizedGeometry, encode_deltas_xy};
+use super::{GeometryError, QuantizedGeometry, encode_deltas_xy};
+
+type Result<T> = std::result::Result<T, GeometryError>;
 
 #[derive(Debug, Default)]
 struct GeometryEncodeScratch {
@@ -30,7 +31,7 @@ pub(crate) struct PbfGeometry {
 impl PbfGeometry {
   /// Decode one Esri PBF geometry payload through the writer's wire schema.
   pub(crate) fn from_bytes(bytes: &[u8]) -> Result<Self> {
-    Ok(Self::decode(bytes)?)
+    Self::decode(bytes).map_err(|error| GeometryError::Pbf(error.to_string()))
   }
 }
 
@@ -55,7 +56,9 @@ impl GeometryEncodeScratch {
     };
     self.buffer.clear();
     self.buffer.reserve(message.encoded_len());
-    message.encode(&mut self.buffer)?;
+    message
+      .encode(&mut self.buffer)
+      .map_err(|error| GeometryError::Pbf(error.to_string()))?;
     self.quantized_coords = message.coords;
     self.quantized_lengths = message.lengths;
     Ok(self.buffer.as_slice())

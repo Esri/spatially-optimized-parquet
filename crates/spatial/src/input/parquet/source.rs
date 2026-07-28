@@ -5,7 +5,6 @@
 
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
 use arrow_schema::SchemaRef;
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
@@ -15,7 +14,9 @@ use parquet::arrow::arrow_reader::ArrowReaderMetadata;
 use url::Url;
 
 use crate::geometry::{GeometryColumn, GeometryEncoding};
-use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata};
+use crate::input::{
+  InputError, InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata,
+};
 
 /// Represents Parquet footer metadata and the location needed to construct future scans.
 pub(crate) struct ParquetInputSource {
@@ -42,15 +43,14 @@ impl ParquetInputSource {
 }
 
 impl InputSource for ParquetInputSource {
-  fn schema(&self) -> Result<SchemaRef> {
-    let metadata = self
-      .metadata
-      .first()
-      .context("parquet input requires at least one file")?;
+  fn schema(&self) -> Result<SchemaRef, InputError> {
+    let metadata = self.metadata.first().ok_or_else(|| {
+      InputError::Metadata("parquet input requires at least one file".to_string())
+    })?;
     Ok(metadata.schema().clone())
   }
 
-  fn total_rows(&self) -> Result<u64> {
+  fn total_rows(&self) -> Result<u64, InputError> {
     Ok(
       self
         .metadata
@@ -67,7 +67,7 @@ impl InputSource for ParquetInputSource {
     )
   }
 
-  fn inferred_geometry_column(&self) -> Result<Option<GeometryColumn>> {
+  fn inferred_geometry_column(&self) -> Result<Option<GeometryColumn>, InputError> {
     let Some(geo_meta) = self.geo_metadata()? else {
       return Ok(None);
     };
@@ -92,7 +92,7 @@ impl InputSource for ParquetInputSource {
     }))
   }
 
-  fn source_metadata(&self) -> Result<SourceDatasetMetadata> {
+  fn source_metadata(&self) -> Result<SourceDatasetMetadata, InputError> {
     let geometry = match self.geo_metadata()? {
       Some(geo_meta) => {
         let covering = self.covering_metadata(&geo_meta.primary_column)?;
@@ -111,14 +111,25 @@ impl InputSource for ParquetInputSource {
     &'a self,
     ctx: &'a SessionContext,
     row_range: RowRange,
-  ) -> BoxFuture<'a, Result<DataFrame>> {
+  ) -> BoxFuture<'a, Result<DataFrame, InputError>> {
     match &self.location {
       ParquetInputLocation::Local { input_path } => {
         let input_path = input_path.clone();
         Box::pin(async move {
-          let mut dataframe = ctx.read_parquet(&input_path, Default::default()).await?;
+          let mut dataframe = ctx
+            .read_parquet(&input_path, Default::default())
+            .await
+            .map_err(|source| InputError::DataFusion {
+              operation: "read local Parquet input",
+              source,
+            })?;
           if !row_range.is_full() {
-            dataframe = dataframe.limit(row_range.start(), row_range.num())?;
+            dataframe = dataframe
+              .limit(row_range.start(), row_range.num())
+              .map_err(|source| InputError::DataFusion {
+                operation: "limit local Parquet input",
+                source,
+              })?;
           }
           Ok(dataframe)
         })
@@ -134,9 +145,20 @@ impl InputSource for ParquetInputSource {
         let store = Arc::clone(store);
         Box::pin(async move {
           ctx.register_object_store(&store_url, store);
-          let mut dataframe = ctx.read_parquet(&input_url, Default::default()).await?;
+          let mut dataframe = ctx
+            .read_parquet(&input_url, Default::default())
+            .await
+            .map_err(|source| InputError::DataFusion {
+              operation: "read HTTP Parquet input",
+              source,
+            })?;
           if !row_range.is_full() {
-            dataframe = dataframe.limit(row_range.start(), row_range.num())?;
+            dataframe = dataframe
+              .limit(row_range.start(), row_range.num())
+              .map_err(|source| InputError::DataFusion {
+                operation: "limit HTTP Parquet input",
+                source,
+              })?;
           }
           Ok(dataframe)
         })

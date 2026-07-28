@@ -4,7 +4,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use anyhow::Result;
 use arrow_array::{BinaryArray, Int32Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use datafusion::dataframe::DataFrame;
@@ -20,7 +19,7 @@ use tokio::runtime::Runtime;
 
 use crate::geometry::{Extent2D, GeometryColumn, GeometryEncoding, GeometryKind};
 use crate::input::{
-  InputOpenOptions, InputSource, RowRange, SourceDatasetMetadata, SourceFormat,
+  InputError, InputOpenOptions, InputSource, RowRange, SourceDatasetMetadata, SourceFormat,
   SourceGeometryMetadata, open_input,
 };
 
@@ -51,8 +50,7 @@ fn sample_batch_with_geometry(wkb_values: Vec<Option<Vec<u8>>>) -> RecordBatch {
 }
 
 fn wkb_point(x: f64, y: f64) -> Vec<u8> {
-  let geometry = geo::Geometry::Point(geo::Point::new(x, y));
-  crate::geometry::write_test_geometry(&geometry)
+  crate::geometry::write_test_point(x, y)
 }
 
 fn write_parquet(
@@ -126,15 +124,15 @@ struct MetadataInputSource {
 }
 
 impl InputSource for MetadataInputSource {
-  fn schema(&self) -> Result<SchemaRef> {
+  fn schema(&self) -> Result<SchemaRef, InputError> {
     Ok(self.schema.clone())
   }
 
-  fn total_rows(&self) -> Result<u64> {
+  fn total_rows(&self) -> Result<u64, InputError> {
     Ok(3)
   }
 
-  fn inferred_geometry_column(&self) -> Result<Option<GeometryColumn>> {
+  fn inferred_geometry_column(&self) -> Result<Option<GeometryColumn>, InputError> {
     Ok(Some(GeometryColumn {
       column: "geometry".into(),
       encoding: GeometryEncoding::Wkb,
@@ -142,7 +140,7 @@ impl InputSource for MetadataInputSource {
     }))
   }
 
-  fn source_metadata(&self) -> Result<SourceDatasetMetadata> {
+  fn source_metadata(&self) -> Result<SourceDatasetMetadata, InputError> {
     Ok(self.metadata.clone())
   }
 
@@ -150,12 +148,15 @@ impl InputSource for MetadataInputSource {
     &'a self,
     ctx: &'a SessionContext,
     _row_range: RowRange,
-  ) -> BoxFuture<'a, Result<DataFrame>> {
+  ) -> BoxFuture<'a, Result<DataFrame, InputError>> {
     self.dataframe_calls.fetch_add(1, Ordering::SeqCst);
     Box::pin(async move {
       ctx
         .read_batch(RecordBatch::new_empty(self.schema.clone()))
-        .map_err(Into::into)
+        .map_err(|source| InputError::DataFusion {
+          operation: "create metadata test dataframe",
+          source,
+        })
     })
   }
 }

@@ -1,3 +1,4 @@
+mod error;
 mod extent_resolver;
 mod geometry_scan;
 mod normalized_spatial_frame;
@@ -10,6 +11,7 @@ mod spatial_write_context;
 mod strip;
 mod warnings;
 
+pub use error::PipelineError;
 pub(crate) use extent_resolver::ExtentResolver;
 pub(crate) use normalized_spatial_frame::NormalizedSpatialFrame;
 pub use pipeline::{InputOptions, OutputOptions, Pipeline, SpatialPipelineOptions};

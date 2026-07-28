@@ -7,7 +7,6 @@ edition.workspace = true
 print-plan = []
 
 [dependencies]
-anyhow = "1.0"
 async-trait = "0.1"
 arrow-array = { version = "58.3.0", features = ["ffi"] }
 arrow-schema = { version = "58.3.0", features = ["canonical_extension_types"] }
@@ -17,9 +16,6 @@ futures-util = "0.3"
 gdal = "0.19"
 gdal-src = { version = "0.3", features = ["driver_gpkg"] }
 gdal-sys = { version = "0.12", features = ["bundled"] }
-geo = "0.32.0"
-geo-traits = "0.3.0"
-geo-types = "0.7.16"
 parquet = { version = "58.3.0", features = ["arrow", "brotli", "flate2", "geospatial", "lz4", "object_store", "snap", "zstd"] }
 parquet-geospatial = "58.3.0"
 prost = "0.13"

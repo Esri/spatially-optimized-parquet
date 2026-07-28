@@ -1,7 +1,7 @@
 //! Prints DataFusion physical plans for explicit diagnostic builds.
 
-use anyhow::Result;
 use arrow_array::RecordBatch;
+use datafusion::common::Result;
 use datafusion::dataframe::DataFrame;
 use datafusion::physical_plan::ExecutionPlan;
 

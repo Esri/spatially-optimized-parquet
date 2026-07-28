@@ -6,7 +6,6 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
 use arrow_array::RecordBatch;
 use arrow_array::RecordBatchReader;
 use arrow_array::ffi_stream::{ArrowArrayStreamReader, FFI_ArrowArrayStream};
@@ -18,6 +17,7 @@ use gdal::cpl::CslStringList;
 use gdal::vector::{LayerAccess, OwnedLayer};
 
 use super::open::open_gpkg_layer;
+use crate::input::InputError;
 
 const GEOMETRY_EXTENSION_NAME: &str = "ARROW:extension:name";
 const GEOMETRY_EXTENSION_VALUE: &str = "ogc.wkb";
@@ -37,13 +37,18 @@ pub(super) struct GpkgBatchReader {
 
 impl GpkgArrowReader {
   /// Open a GDAL Arrow stream while retaining the layer that owns its lifetime.
-  fn open(path: &Path, layer_name: &str, attribute_filter: Option<&str>) -> Result<Self> {
+  fn open(
+    path: &Path,
+    layer_name: &str,
+    attribute_filter: Option<&str>,
+  ) -> Result<Self, InputError> {
     let mut layer = open_gpkg_layer(path, layer_name)?;
     if let Some(attribute_filter) = attribute_filter {
       layer
         .set_attribute_filter(attribute_filter)
-        .with_context(|| {
-          format!("failed to apply GeoPackage attribute filter {attribute_filter:?}")
+        .map_err(|source| InputError::GeoPackage {
+          operation: "apply GeoPackage attribute filter",
+          source,
         })?;
     }
     let options = CslStringList::from_iter(["INCLUDE_FID=NO", "GEOMETRY_ENCODING=WKB"]);
@@ -54,9 +59,13 @@ impl GpkgArrowReader {
         &options,
       )
     }
-    .with_context(|| format!("failed to open Arrow stream for GeoPackage layer {layer_name}"))?;
-    let reader = ArrowArrayStreamReader::try_new(stream).with_context(|| {
-      format!("failed to create Arrow reader for GeoPackage layer {layer_name}")
+    .map_err(|source| InputError::GeoPackage {
+      operation: "open GeoPackage Arrow stream",
+      source,
+    })?;
+    let reader = ArrowArrayStreamReader::try_new(stream).map_err(|source| InputError::Arrow {
+      operation: "create GeoPackage Arrow reader",
+      source,
     })?;
     Ok(Self {
       _layer: layer,
@@ -71,7 +80,7 @@ impl GpkgBatchReader {
     path: &Path,
     layer_name: &str,
     geometry_column: &str,
-  ) -> Result<SchemaRef> {
+  ) -> Result<SchemaRef, InputError> {
     let arrow_reader = GpkgArrowReader::open(path, layer_name, None)?;
     Ok(Self::normalize_schema(
       arrow_reader.reader.schema(),
@@ -86,7 +95,7 @@ impl GpkgBatchReader {
     schema: SchemaRef,
     attribute_filter: Option<&str>,
     limit: Option<usize>,
-  ) -> Result<Self> {
+  ) -> Result<Self, InputError> {
     Ok(Self {
       arrow_reader: GpkgArrowReader::open(input_path, layer_name, attribute_filter)?,
       schema,
@@ -97,7 +106,7 @@ impl GpkgBatchReader {
   /// Convert this stateful GDAL Arrow reader into a fallible asynchronous batch stream.
   pub(super) fn into_stream(
     self,
-  ) -> impl futures_util::Stream<Item = Result<RecordBatch>> + Send + 'static {
+  ) -> impl futures_util::Stream<Item = Result<RecordBatch, InputError>> + Send + 'static {
     stream::unfold(Some(self), |state| async move {
       let mut state = state?;
       if state.remaining == Some(0) {
@@ -113,14 +122,20 @@ impl GpkgBatchReader {
           let batch = Self::truncate_batch(&mut state.remaining, batch);
           Some((Ok(batch), Some(state)))
         }
-        Some(Err(err)) => Some((Err(err.into()), None)),
+        Some(Err(source)) => Some((
+          Err(InputError::Arrow {
+            operation: "read GeoPackage Arrow batch",
+            source,
+          }),
+          None,
+        )),
         None => None,
       }
     })
   }
 
-  pub(super) fn to_datafusion_error(err: anyhow::Error) -> DataFusionError {
-    DataFusionError::External(err.into())
+  pub(super) fn to_datafusion_error(error: InputError) -> DataFusionError {
+    DataFusionError::External(Box::new(error))
   }
 
   /// Normalize provider-specific geometry field names and extension metadata.
@@ -165,12 +180,18 @@ impl GpkgBatchReader {
   }
 
   /// Replace a provider batch schema with the stable source schema after field normalization.
-  fn normalize_batch_schema(batch: RecordBatch, schema: SchemaRef) -> Result<RecordBatch> {
+  fn normalize_batch_schema(
+    batch: RecordBatch,
+    schema: SchemaRef,
+  ) -> Result<RecordBatch, InputError> {
     if batch.schema() == schema {
       return Ok(batch);
     }
 
-    Ok(RecordBatch::try_new(schema, batch.columns().to_vec())?)
+    RecordBatch::try_new(schema, batch.columns().to_vec()).map_err(|source| InputError::Arrow {
+      operation: "normalize GeoPackage Arrow batch schema",
+      source,
+    })
   }
 
   /// Slice a batch to the remaining requested row count and update that count.

@@ -277,13 +277,12 @@ impl ScalarUDFImpl for PointGeometryClusterKeyUdf {
 #[cfg(test)]
 mod tests {
   use arrow_array::BinaryArray;
-  use geo_types::{Geometry, Point};
 
   use super::*;
 
   #[test]
   fn point_coordinates_are_null_for_missing_geometry() {
-    let point_wkb = crate::geometry::write_test_geometry(&Geometry::Point(Point::new(1.0, 2.0)));
+    let point_wkb = crate::geometry::write_test_point(1.0, 2.0);
     let input = BinaryArray::from(vec![Some(point_wkb.as_slice()), None]);
 
     let geometry = GeometryArray::try_new(&input).unwrap();

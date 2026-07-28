@@ -21,15 +21,19 @@ mod pipeline;
 mod session;
 pub mod validate;
 
+pub use geometry::GeometryError;
 pub use geoparquet::DEFAULT_OUTPUT_WKID;
+pub use geoparquet::GeoParquetError;
+pub use input::InputError;
 pub use input::{RowRange, SourceFormat};
 pub use optimized::MultiscaleEncoding;
 pub use output::OutputMode;
 pub use pipeline::{
-  InputOptions, OutputOptions, Pipeline, SpatialPipelineOptions, SpatialPipelineResult,
-  WriteProgress, WriteReporter,
+  InputOptions, OutputOptions, Pipeline, PipelineError, SpatialPipelineOptions,
+  SpatialPipelineResult, WriteProgress, WriteReporter,
 };
+pub use session::SessionError;
 pub use validate::{
-  ValidationFailure, ValidationFinding, ValidationLocation, ValidationReport, ValidationRule,
-  ValidationSeverity, validate,
+  ValidationError, ValidationFailure, ValidationFinding, ValidationLocation, ValidationReport,
+  ValidationRule, ValidationSeverity, validate,
 };

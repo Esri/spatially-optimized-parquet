@@ -1,4 +1,3 @@
-use anyhow::Result;
 use gdal::spatial_ref::{AxisMappingStrategy, CoordTransform, SpatialRef};
 
 use super::wkb;
@@ -22,10 +21,10 @@ pub fn transform_point_between_epsg(
   (xs[0], ys[0])
 }
 
-pub fn point_from_wkb_xy(bytes: &[u8]) -> Result<(f64, f64)> {
+pub fn point_from_wkb_xy(bytes: &[u8]) -> Result<(f64, f64), String> {
   wkb::read_point(bytes)
 }
 
-pub fn polygon_extent_from_wkb(bytes: &[u8]) -> Result<[f64; 4]> {
+pub fn polygon_extent_from_wkb(bytes: &[u8]) -> Result<[f64; 4], String> {
   wkb::read_polygon_extent(bytes)
 }

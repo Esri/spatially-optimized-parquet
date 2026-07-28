@@ -28,7 +28,7 @@
 //!   InputOptions, OutputMode, OutputOptions, Pipeline, RowRange, SpatialPipelineOptions,
 //! };
 //!
-//! # async fn convert() -> anyhow::Result<()> {
+//! # async fn convert() -> Result<(), spatial::PipelineError> {
 //! let request = SpatialPipelineOptions {
 //!   input: InputOptions {
 //!     location: "roads.parquet".to_string(),
@@ -55,12 +55,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{Result, bail};
 use arrow_schema::SchemaRef;
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
 
-use super::SpatialWriteContext;
+use super::{PipelineError, SpatialWriteContext};
 use crate::geoparquet::SpatialReference;
 use crate::input::{InputOpenOptions, InputSource, RowRange, SourceFormat, open_input};
 use crate::optimized::{MultiscaleEncoding, OptimizedLayout, validate_internal_projection_columns};
@@ -240,11 +239,13 @@ impl Pipeline {
   ///
   /// Panics when `OutputOptions` requests an output WKID other than
   /// [`crate::DEFAULT_OUTPUT_WKID`], because additional output references are not implemented.
-  pub async fn run(options: SpatialPipelineOptions) -> Result<SpatialPipelineResult> {
+  pub async fn run(
+    options: SpatialPipelineOptions,
+  ) -> Result<SpatialPipelineResult, PipelineError> {
     Self::new(options).await?.execute().await
   }
 
-  async fn new(options: SpatialPipelineOptions) -> Result<Self> {
+  async fn new(options: SpatialPipelineOptions) -> Result<Self, PipelineError> {
     let SpatialPipelineOptions {
       input: input_options,
       output: output_options,
@@ -254,7 +255,9 @@ impl Pipeline {
     } = options;
     SpatialReference::validate_output_wkid(output_options.output_wkid);
     if output_options.cluster_depth == 0 || output_options.cluster_depth > 32 {
-      bail!("cluster depth must be between 1 and 32");
+      return Err(PipelineError::InvalidRequest(
+        "cluster depth must be between 1 and 32".to_string(),
+      ));
     }
     if let Some([xmin, ymin, xmax, ymax]) = output_options.normalization_extent
       && (![xmin, ymin, xmax, ymax]
@@ -263,12 +266,15 @@ impl Pipeline {
         || xmin >= xmax
         || ymin >= ymax)
     {
-      bail!(
+      return Err(PipelineError::InvalidRequest(
         "normalization extent must contain finite xmin ymin xmax ymax values with positive width and height"
-      );
+          .to_string(),
+      ));
     }
     if output_options.mode == OutputMode::Plain && output_options.write_extensions {
-      bail!("--write-extensions cannot be combined with --no-optimization");
+      return Err(PipelineError::InvalidRequest(
+        "--write-extensions cannot be combined with --no-optimization".to_string(),
+      ));
     }
     let input_format = SourceFormat::resolve(&input_options.location, input_options.format)?;
     let input_source = open_input(
@@ -309,15 +315,15 @@ impl Pipeline {
 
     match (output_mode, state.output_path.part_count()) {
       (OutputMode::Plain, 1) => Ok(Self(PipelineExecution::Plain(state))),
-      (OutputMode::Plain, _) => {
-        bail!("plain GeoParquet output does not support --partitions")
-      }
+      (OutputMode::Plain, _) => Err(PipelineError::InvalidRequest(
+        "plain GeoParquet output does not support --partitions".to_string(),
+      )),
       (OutputMode::Optimized, 1) => Ok(Self(PipelineExecution::OptimizedSingle(state))),
       (OutputMode::Optimized, _) => Ok(Self(PipelineExecution::OptimizedPartitioned(state))),
     }
   }
 
-  async fn execute(self) -> Result<SpatialPipelineResult> {
+  async fn execute(self) -> Result<SpatialPipelineResult, PipelineError> {
     match self.0 {
       PipelineExecution::Plain(state) => Self::write_plain(state).await,
       PipelineExecution::OptimizedSingle(state) => Self::write_optimized_single(state).await,
@@ -327,7 +333,9 @@ impl Pipeline {
     }
   }
 
-  async fn write_plain(state: SpatialPipelineState) -> Result<SpatialPipelineResult> {
+  async fn write_plain(
+    state: SpatialPipelineState,
+  ) -> Result<SpatialPipelineResult, PipelineError> {
     let options = &state.output_options;
     let context = Self::resolve_spatial_write_context(&state).await?;
     let rows_written = PlainWriter::new(
@@ -342,7 +350,9 @@ impl Pipeline {
     Ok(state.finish(rows_written))
   }
 
-  async fn write_optimized_single(state: SpatialPipelineState) -> Result<SpatialPipelineResult> {
+  async fn write_optimized_single(
+    state: SpatialPipelineState,
+  ) -> Result<SpatialPipelineResult, PipelineError> {
     let context = Self::resolve_spatial_write_context(&state).await?;
     let layout = OptimizedLayout::new(&context, &state.output_options)?;
     let rows_written = single::write(
@@ -362,7 +372,7 @@ impl Pipeline {
 
   async fn write_optimized_partitioned(
     state: SpatialPipelineState,
-  ) -> Result<SpatialPipelineResult> {
+  ) -> Result<SpatialPipelineResult, PipelineError> {
     let context = Self::resolve_spatial_write_context(&state).await?;
     let layout = OptimizedLayout::new(&context, &state.output_options)?;
     let rows_written = partitioned::write(
@@ -382,7 +392,7 @@ impl Pipeline {
 
   async fn resolve_spatial_write_context(
     state: &SpatialPipelineState,
-  ) -> Result<SpatialWriteContext> {
+  ) -> Result<SpatialWriteContext, PipelineError> {
     SpatialWriteContext::resolve(
       state.input_source.as_ref(),
       state.input_dataframe.clone(),
@@ -396,19 +406,26 @@ impl Pipeline {
       state.output_options.normalization_extent,
     )
     .await
+    .map_err(|error| PipelineError::InvalidRequest(error.to_string()))
   }
 
   async fn prepare_input_dataframe(
     input: &dyn InputSource,
     session: &SessionContext,
     row_range: RowRange,
-  ) -> Result<DataFrame> {
+  ) -> Result<DataFrame, PipelineError> {
     let dataframe = input.to_dataframe(session, row_range).await?;
     if row_range.num().is_none() {
       return Ok(dataframe);
     }
 
-    dataframe.cache().await.map_err(Into::into)
+    dataframe
+      .cache()
+      .await
+      .map_err(|source| PipelineError::DataFusion {
+        operation: "cache limited input dataframe",
+        source,
+      })
   }
 }
 

@@ -1,11 +1,8 @@
 //! Resolves optimized GeoParquet layout decisions.
 
-use anyhow::{Result, bail};
-
 use crate::optimized::MultiscaleEncoding;
 use crate::optimized::multiscale::MultiscaleLevel;
-use crate::pipeline::OutputOptions;
-use crate::pipeline::SpatialWriteContext;
+use crate::pipeline::{OutputOptions, PipelineError, SpatialWriteContext};
 
 use super::{ClusteringFamily, GeometryInfo};
 
@@ -22,18 +19,25 @@ pub(crate) struct OptimizedLayout {
 
 impl OptimizedLayout {
   /// Resolve optimized layout decisions from prepared GeoParquet data.
-  pub(crate) fn new(context: &SpatialWriteContext, output_options: &OutputOptions) -> Result<Self> {
-    let geometry = GeometryInfo::resolve(context.source())?;
+  pub(crate) fn new(
+    context: &SpatialWriteContext,
+    output_options: &OutputOptions,
+  ) -> Result<Self, PipelineError> {
+    let geometry = GeometryInfo::resolve(context.source());
     if geometry.clustering_family == ClusteringFamily::ComplexGeometry
       && output_options.cluster_depth > 31
     {
-      bail!("XZ cluster depth must be between 1 and 31");
+      return Err(PipelineError::InvalidRequest(
+        "resolve optimized layout: XZ cluster depth must be between 1 and 31".to_string(),
+      ));
     }
     let levels = match geometry.ty {
       crate::geometry::GeometryType::Polyline | crate::geometry::GeometryType::Polygon => {
-        MultiscaleLevel::create_all(output_options.output_wkid, geometry.ty)?
+        MultiscaleLevel::create_all(output_options.output_wkid, geometry.ty)
       }
-      crate::geometry::GeometryType::Point | crate::geometry::GeometryType::MultiPoint => Vec::new(),
+      crate::geometry::GeometryType::Point | crate::geometry::GeometryType::MultiPoint => {
+        Vec::new()
+      }
     };
     if output_options.write_extensions
       && matches!(
@@ -42,7 +46,10 @@ impl OptimizedLayout {
       )
       && output_options.multiscale_encoding != MultiscaleEncoding::Pbf
     {
-      bail!("--write-extensions requires PBF multiscale encoding for line and polygon output");
+      return Err(PipelineError::InvalidRequest(
+        "resolve optimized layout: --write-extensions requires PBF multiscale encoding for line and polygon output"
+          .to_string(),
+      ));
     }
     Ok(Self {
       geometry,

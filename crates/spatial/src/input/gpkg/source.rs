@@ -6,7 +6,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{Context, Result, bail};
 use datafusion::catalog::streaming::StreamingTable;
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
@@ -20,7 +19,8 @@ use super::open::{is_gpkg_path, open_gpkg_dataset};
 use super::partition::{GpkgPartitionStream, GpkgScanPartition};
 use crate::geometry::{GeometryColumn, GeometryEncoding};
 use crate::input::{
-  InputOpenOptions, InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata,
+  InputError, InputOpenOptions, InputSource, RowRange, SourceDatasetMetadata,
+  SourceGeometryMetadata,
 };
 
 #[derive(Debug, Clone)]
@@ -35,19 +35,19 @@ pub(crate) struct GpkgInputSource {
 }
 
 impl InputSource for GpkgInputSource {
-  fn schema(&self) -> Result<arrow_schema::SchemaRef> {
+  fn schema(&self) -> Result<arrow_schema::SchemaRef, InputError> {
     Ok(self.schema.clone())
   }
 
-  fn total_rows(&self) -> Result<u64> {
+  fn total_rows(&self) -> Result<u64, InputError> {
     Ok(self.total_rows)
   }
 
-  fn inferred_geometry_column(&self) -> Result<Option<GeometryColumn>> {
+  fn inferred_geometry_column(&self) -> Result<Option<GeometryColumn>, InputError> {
     Ok(self.geometry.clone())
   }
 
-  fn source_metadata(&self) -> Result<SourceDatasetMetadata> {
+  fn source_metadata(&self) -> Result<SourceDatasetMetadata, InputError> {
     Ok(self.source_metadata.clone())
   }
 
@@ -55,7 +55,7 @@ impl InputSource for GpkgInputSource {
     &'a self,
     ctx: &'a SessionContext,
     row_range: RowRange,
-  ) -> BoxFuture<'a, Result<DataFrame>> {
+  ) -> BoxFuture<'a, Result<DataFrame, InputError>> {
     let input_path = self.input_path.clone();
     let layer_name = self.layer_name.clone();
     let schema = self.schema.clone();
@@ -79,10 +79,24 @@ impl InputSource for GpkgInputSource {
           )) as Arc<dyn PartitionStream>
         })
         .collect();
-      let table = StreamingTable::try_new(schema, streams)?;
-      let mut df = ctx.read_table(Arc::new(table))?;
+      let table =
+        StreamingTable::try_new(schema, streams).map_err(|source| InputError::DataFusion {
+          operation: "create GeoPackage streaming table",
+          source,
+        })?;
+      let mut df = ctx
+        .read_table(Arc::new(table))
+        .map_err(|source| InputError::DataFusion {
+          operation: "read GeoPackage streaming table",
+          source,
+        })?;
       if let Some(num) = row_range.num() {
-        df = df.limit(0, Some(num))?;
+        df = df
+          .limit(0, Some(num))
+          .map_err(|source| InputError::DataFusion {
+            operation: "limit GeoPackage input",
+            source,
+          })?;
       }
       Ok(df)
     })
@@ -91,22 +105,30 @@ impl InputSource for GpkgInputSource {
 
 impl GpkgInputSource {
   /// Open one local GeoPackage layer through GDAL.
-  pub(crate) async fn open(options: &InputOpenOptions) -> Result<Arc<dyn InputSource>> {
-    let path = options
-      .local_path()
-      .ok_or_else(|| anyhow::anyhow!("gpkg input does not support HTTP locations"))?;
+  pub(crate) async fn open(options: &InputOpenOptions) -> Result<Arc<dyn InputSource>, InputError> {
+    let path = options.local_path().ok_or_else(|| {
+      InputError::Format("gpkg input does not support HTTP locations".to_string())
+    })?;
     if !is_gpkg_path(path) {
-      bail!("GeoPackage input must use a .gpkg file: {}", path.display());
+      return Err(InputError::Format(format!(
+        "GeoPackage input must use a .gpkg file: {}",
+        path.display()
+      )));
     }
 
     let dataset = open_gpkg_dataset(path)?;
     let layer_summaries = GpkgLayerSummary::collect(&dataset)?;
     let layer_name = GpkgLayerSummary::select_name(options, &layer_summaries)?;
-    let mut layer = dataset
-      .layer_by_name(&layer_name)
-      .with_context(|| format!("failed to open GeoPackage layer {layer_name}"))?;
+    let mut layer =
+      dataset
+        .layer_by_name(&layer_name)
+        .map_err(|source| InputError::GeoPackage {
+          operation: "open GeoPackage layer",
+          source,
+        })?;
     let geometry_metadata = SourceGeometryMetadata::from_gpkg_layer(&mut layer, &layer_name)?;
-    let schema = GpkgBatchReader::load_schema(path, &layer_name, &geometry_metadata.column)?;
+    let schema = GpkgBatchReader::load_schema(path, &layer_name, &geometry_metadata.column)
+      .map_err(|error| InputError::Metadata(error.to_string()))?;
     let total_rows = layer
       .try_feature_count()
       .unwrap_or_else(|| layer.feature_count());

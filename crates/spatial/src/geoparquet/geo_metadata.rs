@@ -2,13 +2,12 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::geometry::{Extent2D, GeometryKind};
 use crate::geoparquet::SpatialReference;
-use crate::geoparquet::{LodMetadata, OrderingMetadata};
+use crate::geoparquet::{GeoParquetError, LodMetadata, OrderingMetadata};
 
 use ::parquet::file::metadata::KeyValue;
 
@@ -72,13 +71,13 @@ pub(crate) struct GeoCoveringBbox {
 }
 
 impl GeoMetadata {
-  pub(super) fn new(input: GeoMetadataInput<'_>) -> Result<Self> {
+  pub(super) fn new(input: GeoMetadataInput<'_>) -> Result<Self, GeoParquetError> {
     let geometry_types = input
       .geometry_types
       .iter()
       .copied()
       .map(|geometry_kind| geometry_kind.geoparquet_type_name(input.has_z, input.has_m))
-      .collect::<Result<Vec<_>>>()?;
+      .collect::<Result<Vec<_>, GeoParquetError>>()?;
     let column = GeoColumnMetadata {
       encoding: "WKB".to_string(),
       geometry_types,
@@ -92,7 +91,9 @@ impl GeoMetadata {
         .output_spatial_reference
         .projjson
         .clone()
-        .context("missing output spatial-reference PROJJSON")?,
+        .ok_or_else(|| {
+          GeoParquetError::Metadata("missing output spatial-reference PROJJSON".to_string())
+        })?,
       covering: input
         .covering
         .then(|| GeoCovering::new(input.covering_column)),
@@ -110,17 +111,22 @@ impl GeoMetadata {
   pub(crate) fn parquet_entries(
     mut source_entries: Vec<KeyValue>,
     input: GeoMetadataInput<'_>,
-  ) -> Result<Vec<KeyValue>> {
+  ) -> Result<Vec<KeyValue>, GeoParquetError> {
     source_entries.retain(|entry| entry.key != "geo");
     source_entries.push(Self::parquet_entry(input)?);
     Ok(source_entries)
   }
 
   /// Serialize one GeoParquet metadata entry.
-  pub(crate) fn parquet_entry(input: GeoMetadataInput<'_>) -> Result<KeyValue> {
+  pub(crate) fn parquet_entry(input: GeoMetadataInput<'_>) -> Result<KeyValue, GeoParquetError> {
     Ok(KeyValue::new(
       "geo".to_string(),
-      Some(serde_json::to_string(&Self::new(input)?)?),
+      Some(
+        serde_json::to_string(&Self::new(input)?).map_err(|source| GeoParquetError::Json {
+          operation: "serialize GeoParquet metadata",
+          source,
+        })?,
+      ),
     ))
   }
 }
@@ -139,7 +145,7 @@ impl GeoCovering {
 }
 
 impl GeometryKind {
-  fn geoparquet_type_name(self, has_z: bool, has_m: bool) -> Result<String> {
+  fn geoparquet_type_name(self, has_z: bool, has_m: bool) -> Result<String, GeoParquetError> {
     let base = match self {
       Self::Point => "Point",
       Self::LineString => "LineString",
@@ -148,7 +154,11 @@ impl GeometryKind {
       Self::Polygon => "Polygon",
       Self::MultiPolygon => "MultiPolygon",
       Self::GeometryCollection => "GeometryCollection",
-      Self::Unknown => return Err(anyhow::anyhow!("unsupported geometry kind metadata")),
+      Self::Unknown => {
+        return Err(GeoParquetError::Metadata(
+          "unsupported geometry kind metadata".to_string(),
+        ));
+      }
     };
     let suffix = match (has_z, has_m) {
       (false, false) => "",

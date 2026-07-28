@@ -1,9 +1,9 @@
 //! Resolves source spatial-reference metadata and defines supported GeoParquet output references.
 
-use anyhow::{Context, Result, bail};
 use gdal::spatial_ref::{AxisMappingStrategy, SpatialRef};
 use serde_json::Value;
 
+use super::GeoParquetError;
 use crate::input::SourceGeometryMetadata;
 
 /// Selects the default output spatial reference.
@@ -35,37 +35,47 @@ impl SpatialReference {
     source_geometry: Option<&SourceGeometryMetadata>,
     geometry_column: &str,
     input_wkid: Option<u32>,
-  ) -> Result<Self> {
+  ) -> Result<Self, GeoParquetError> {
     match (
       input_wkid,
       source_geometry.and_then(|geometry| geometry.projjson.as_ref()),
     ) {
-      (Some(_), Some(_)) => bail!(
+      (Some(_), Some(_)) => Err(GeoParquetError::Metadata(format!(
         "--in-sr cannot be used because geometry column '{geometry_column}' already has spatial-reference metadata"
-      ),
+      ))),
       (Some(wkid), None) => Self::from_epsg(wkid),
       (None, Some(projjson)) => Self::from_projjson(projjson),
-      (None, None) => bail!(
+      (None, None) => Err(GeoParquetError::Metadata(format!(
         "missing spatial-reference metadata for geometry column '{geometry_column}'; \
          pass --in-sr <LATEST_WKID>"
-      ),
+      ))),
     }
   }
 
   /// Construct spatial-reference metadata from an EPSG well-known identifier.
-  pub(crate) fn from_epsg(wkid: u32) -> Result<Self> {
+  pub(crate) fn from_epsg(wkid: u32) -> Result<Self, GeoParquetError> {
     let mut spatial_ref =
-      SpatialRef::from_epsg(wkid).with_context(|| format!("load EPSG:{wkid}"))?;
+      SpatialRef::from_epsg(wkid).map_err(|source| GeoParquetError::SpatialReference {
+        operation: "load EPSG definition",
+        source,
+      })?;
     spatial_ref.set_axis_mapping_strategy(AxisMappingStrategy::TraditionalGisOrder);
-    let projjson = spatial_ref
-      .to_projjson()
-      .with_context(|| format!("export EPSG:{wkid} as PROJJSON"))?;
-    let projjson = serde_json::from_str(&projjson).context("decode spatial-reference PROJJSON")?;
+    let projjson =
+      spatial_ref
+        .to_projjson()
+        .map_err(|source| GeoParquetError::SpatialReference {
+          operation: "export EPSG definition as PROJJSON",
+          source,
+        })?;
+    let projjson = serde_json::from_str(&projjson).map_err(|source| GeoParquetError::Json {
+      operation: "decode spatial-reference PROJJSON",
+      source,
+    })?;
     Self::from_projjson(&projjson)
   }
 
   /// Construct spatial-reference metadata from an authoritative PROJJSON definition.
-  pub(crate) fn from_projjson(projjson: &Value) -> Result<Self> {
+  pub(crate) fn from_projjson(projjson: &Value) -> Result<Self, GeoParquetError> {
     let spatial_ref = Self::spatial_ref_from_projjson(projjson)?;
     Ok(Self {
       wkid: projjson.get("id").and_then(supported_authority_code),
@@ -75,36 +85,46 @@ impl SpatialReference {
   }
 
   /// Serialize the authoritative PROJJSON definition for deferred transformation.
-  pub(crate) fn definition(&self) -> Result<String> {
+  pub(crate) fn definition(&self) -> Result<String, GeoParquetError> {
     let projjson = self.projjson()?;
-    serde_json::to_string(projjson).context("serialize spatial reference as PROJJSON")
+    serde_json::to_string(projjson).map_err(|source| GeoParquetError::Json {
+      operation: "serialize spatial-reference PROJJSON",
+      source,
+    })
   }
 
   /// Return the authoritative PROJJSON definition.
-  pub(crate) fn projjson(&self) -> Result<&Value> {
-    self
-      .projjson
-      .as_ref()
-      .context("missing spatial-reference PROJJSON definition")
+  pub(crate) fn projjson(&self) -> Result<&Value, GeoParquetError> {
+    self.projjson.as_ref().ok_or_else(|| {
+      GeoParquetError::Metadata("missing spatial-reference PROJJSON definition".to_string())
+    })
   }
 
   /// Construct a GDAL spatial reference with traditional GIS axis order.
-  pub(crate) fn spatial_ref(&self) -> Result<SpatialRef> {
+  pub(crate) fn spatial_ref(&self) -> Result<SpatialRef, GeoParquetError> {
     let definition = self.definition()?;
     Self::spatial_ref_from_definition(&definition)
   }
 
   /// Construct a GDAL spatial reference from a PROJJSON definition.
-  pub(crate) fn spatial_ref_from_definition(definition: &str) -> Result<SpatialRef> {
-    let mut spatial_ref =
-      SpatialRef::from_definition(definition).context("load spatial reference")?;
+  pub(crate) fn spatial_ref_from_definition(
+    definition: &str,
+  ) -> Result<SpatialRef, GeoParquetError> {
+    let mut spatial_ref = SpatialRef::from_definition(definition).map_err(|source| {
+      GeoParquetError::SpatialReference {
+        operation: "load spatial reference",
+        source,
+      }
+    })?;
     spatial_ref.set_axis_mapping_strategy(AxisMappingStrategy::TraditionalGisOrder);
     Ok(spatial_ref)
   }
 
-  fn spatial_ref_from_projjson(projjson: &Value) -> Result<SpatialRef> {
-    let definition =
-      serde_json::to_string(projjson).context("serialize spatial-reference PROJJSON")?;
+  fn spatial_ref_from_projjson(projjson: &Value) -> Result<SpatialRef, GeoParquetError> {
+    let definition = serde_json::to_string(projjson).map_err(|source| GeoParquetError::Json {
+      operation: "serialize spatial-reference PROJJSON",
+      source,
+    })?;
     Self::spatial_ref_from_definition(&definition)
   }
 }

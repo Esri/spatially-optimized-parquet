@@ -12,7 +12,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use super::OutputError;
 
 #[derive(Debug)]
 /// Describes the resolved output destination and number of Parquet parts.
@@ -42,42 +42,67 @@ impl OutputPath {
   /// Resolve the output path and prepare its parent directory.
   ///
   /// Existing compatible destinations are removed only when `overwrite` is true.
-  pub(crate) fn new(output: &Path, output_files: Option<usize>, overwrite: bool) -> Result<Self> {
+  pub(crate) fn new(
+    output: &Path,
+    output_files: Option<usize>,
+    overwrite: bool,
+  ) -> Result<Self, OutputError> {
     let has_extension = output.extension().is_some();
     let is_directory = !has_extension;
     let parts = if is_directory {
-      let parts = output_files.ok_or(OutputPathError::FilesRequired)?;
+      let parts = output_files
+        .ok_or_else(|| OutputError::Path(OutputPathError::FilesRequired.to_string()))?;
       if parts == 0 {
-        return Err(OutputPathError::FilesInvalid.into());
+        return Err(OutputError::Path(OutputPathError::FilesInvalid.to_string()));
       }
       parts
     } else {
       let parts = output_files.unwrap_or(1);
       if parts != 1 {
-        return Err(OutputPathError::FilesMustBeOne.into());
+        return Err(OutputError::Path(
+          OutputPathError::FilesMustBeOne.to_string(),
+        ));
       }
       parts
     };
 
     if output.exists() {
       if !overwrite {
-        return Err(OutputPathError::Exists(output.to_path_buf()).into());
+        return Err(OutputError::Path(
+          OutputPathError::Exists(output.to_path_buf()).to_string(),
+        ));
       }
       if output.is_dir() && !is_directory {
-        return Err(OutputPathError::Exists(output.to_path_buf()).into());
+        return Err(OutputError::Path(
+          OutputPathError::Exists(output.to_path_buf()).to_string(),
+        ));
       }
       if output.is_file() && is_directory {
-        return Err(OutputPathError::Exists(output.to_path_buf()).into());
+        return Err(OutputError::Path(
+          OutputPathError::Exists(output.to_path_buf()).to_string(),
+        ));
       }
       if output.is_dir() && is_directory {
-        fs::remove_dir_all(output)?;
+        fs::remove_dir_all(output).map_err(|source| OutputError::Io {
+          operation: "remove output directory",
+          path: output.to_path_buf(),
+          source,
+        })?;
       }
     }
 
     if is_directory {
-      fs::create_dir_all(output)?;
+      fs::create_dir_all(output).map_err(|source| OutputError::Io {
+        operation: "create output directory",
+        path: output.to_path_buf(),
+        source,
+      })?;
     } else if let Some(parent) = output.parent() {
-      fs::create_dir_all(parent)?;
+      fs::create_dir_all(parent).map_err(|source| OutputError::Io {
+        operation: "create output parent directory",
+        path: parent.to_path_buf(),
+        source,
+      })?;
     }
 
     Ok(Self {
@@ -98,7 +123,7 @@ impl OutputPath {
   }
 
   /// Resolve the validated output path into deterministic output file paths.
-  pub(crate) fn paths(&self) -> Result<Vec<PathBuf>> {
+  pub(crate) fn paths(&self) -> Result<Vec<PathBuf>, OutputError> {
     if self.is_directory {
       let mut paths = Vec::new();
       for part_index in 0..self.parts {

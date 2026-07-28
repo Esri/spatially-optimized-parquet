@@ -1,12 +1,11 @@
 //! Resolves normalized GeoParquet source facts for output workflows.
 
-use anyhow::{Context, Result};
 use arrow_schema::Schema;
 
 use crate::geometry::{Extent2D, GeometryColumn, GeometryEncoding, GeometryKind, GeometryType};
 use crate::geoparquet::SpatialReference;
 use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata};
-use crate::pipeline::geometry_scan::scan_geometry_metadata;
+use crate::pipeline::{PipelineError, geometry_scan::scan_geometry_metadata};
 
 /// Represents normalized source geometry facts required by output workflows.
 #[derive(Debug, Clone)]
@@ -47,18 +46,22 @@ impl GeometryColumn {
     schema: &Schema,
     inferred_geometry_column: Option<Self>,
     explicit_geometry_column: Option<&str>,
-  ) -> Result<Self> {
+  ) -> Result<Self, PipelineError> {
     if let Some(column) = explicit_geometry_column {
-      schema
-        .field_with_name(column)
-        .with_context(|| format!("missing geometry column '{column}'"))?;
+      schema.field_with_name(column).map_err(|_| {
+        PipelineError::InvalidRequest(format!("missing geometry column '{column}'"))
+      })?;
       return Ok(Self {
         column: column.to_string(),
         encoding: GeometryEncoding::Wkb,
         geometry_kind: None,
       });
     }
-    inferred_geometry_column.context("unable to resolve geometry column; pass --geometry-column")
+    inferred_geometry_column.ok_or_else(|| {
+      PipelineError::InvalidRequest(
+        "unable to resolve geometry column; pass --geometry-column".to_string(),
+      )
+    })
   }
 }
 
@@ -70,7 +73,7 @@ pub(crate) async fn resolve_source(
   explicit_geometry_column: Option<&str>,
   input_wkid: Option<u32>,
   row_range: RowRange,
-) -> Result<ResolvedSpatialSource> {
+) -> Result<ResolvedSpatialSource, PipelineError> {
   let geometry = GeometryColumn::resolve(
     schema,
     input.inferred_geometry_column()?,
@@ -87,14 +90,18 @@ pub(crate) async fn resolve_source(
     || source_geometry.is_none_or(|source_geometry| source_geometry.geometry_types.is_empty())
     || source_geometry.is_none_or(|source_geometry| source_geometry.bbox.is_none());
   let (geometry_types, source_extent) = if requires_scan {
-    scan_geometry_metadata(input_dataframe, &geometry.column).await?
+    scan_geometry_metadata(input_dataframe, &geometry.column)
+      .await
+      .map_err(|error| PipelineError::InvalidRequest(format!("scan source geometry: {error}")))?
   } else {
-    let source_geometry = source_geometry.context("missing source geometry metadata")?;
+    let source_geometry = source_geometry.ok_or_else(|| {
+      PipelineError::InvalidRequest("missing source geometry metadata".to_string())
+    })?;
     (
       source_geometry.geometry_types.clone(),
-      source_geometry
-        .bbox
-        .context("missing source geometry extent")?,
+      source_geometry.bbox.ok_or_else(|| {
+        PipelineError::InvalidRequest("missing source geometry extent".to_string())
+      })?,
     )
   };
   let geometry_type = GeometryType::from_kinds(&geometry_types)?;

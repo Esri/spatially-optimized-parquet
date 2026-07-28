@@ -1,9 +1,8 @@
 //! Persists range-partitioned optimized output through custom physical sink planning.
 
 use crate::optimized::{ClusterRangeBoundaries, OptimizedLayout};
-use crate::output::{OutputPath, Writer, WriterOptions};
+use crate::output::{OutputError, OutputPath, Writer, WriterOptions};
 use crate::pipeline::{PipelineWarnings, SharedWriteReporter, SpatialWriteContext};
-use anyhow::{Context, Result};
 
 use super::dataframe;
 use super::sort::PartitionedSortConfig;
@@ -19,10 +18,12 @@ pub(crate) async fn write(
   total_input_rows: u64,
   write_reporter: Option<SharedWriteReporter>,
   warnings: PipelineWarnings,
-) -> Result<u64> {
+) -> Result<u64, OutputError> {
   let clustering_family = layout.geometry().clustering_family;
   let partition_column = clustering_family.cluster_partition_column();
-  clustering_family.validate_partition_column(source_schema)?;
+  clustering_family
+    .validate_partition_column(source_schema)
+    .map_err(|error| OutputError::Configuration(format!("validate partition column: {error}")))?;
   let range_source = dataframe::range_source(context, layout)?;
   let boundaries = ClusterRangeBoundaries::compute(
     range_source,
@@ -38,14 +39,18 @@ pub(crate) async fn write(
     covering,
     warnings,
   )?;
-  let metadata = layout.parquet_metadata(context, covering)?;
+  let metadata = layout
+    .parquet_metadata(context, covering)
+    .map_err(|error| OutputError::Configuration(format!("build optimized metadata: {error}")))?;
   let geometry_crs = format!(
     "srid:{}",
     context
       .reprojection()
       .target_spatial_reference()
       .wkid
-      .context("missing output spatial-reference WKID")?
+      .ok_or_else(|| {
+        OutputError::Configuration("missing output spatial-reference WKID".to_string())
+      })?
   );
   let writer_options = WriterOptions::new(compression.unwrap_or("snappy"), &metadata)?
     .with_delta_binary_packed_columns(layout.delta_binary_packed_column_paths())

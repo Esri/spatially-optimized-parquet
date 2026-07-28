@@ -6,7 +6,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
 use arrow_schema::SchemaRef;
 use datafusion::execution::context::TaskContext;
 use datafusion::physical_plan::SendableRecordBatchStream;
@@ -17,7 +16,7 @@ use futures_util::stream;
 use gdal::Dataset;
 use gdal::vector::{LayerAccess, sql};
 
-use crate::input::RowRange;
+use crate::input::{InputError, RowRange};
 
 use super::batch_reader::GpkgBatchReader;
 use super::open::open_gpkg_dataset;
@@ -79,8 +78,7 @@ impl PartitionStream for GpkgPartitionStream {
       self.schema.clone(),
       self.attribute_filter.as_deref(),
       None,
-    )
-    .with_context(|| format!("failed to stream GeoPackage layer {}", self.layer_name));
+    );
 
     match result {
       Ok(reader) => Box::pin(RecordBatchStreamAdapter::new(
@@ -108,7 +106,7 @@ impl GpkgScanPartition {
     total_rows: u64,
     row_range: RowRange,
     target_partitions: usize,
-  ) -> Result<Vec<Self>> {
+  ) -> Result<Vec<Self>, InputError> {
     let effective_rows = row_range.effective_rows(total_rows);
     let partition_count = Self::effective_count(total_rows, row_range, target_partitions);
     let dataset = open_gpkg_dataset(path)?;
@@ -156,19 +154,36 @@ impl GpkgScanPartition {
     dataset: &Dataset,
     layer_name: &str,
     offset: u64,
-  ) -> Result<Option<i64>> {
+  ) -> Result<Option<i64>, InputError> {
     let query = format!(
       "SELECT CAST(rowid AS BIGINT) AS partition_rowid FROM {} ORDER BY rowid LIMIT 1 OFFSET {offset}",
       Self::quoted_sqlite_identifier(layer_name)
     );
-    let Some(mut result_set) = dataset.execute_sql(&query, None, sql::Dialect::SQLITE)? else {
+    let Some(mut result_set) = dataset
+      .execute_sql(&query, None, sql::Dialect::SQLITE)
+      .map_err(|source| InputError::GeoPackage {
+        operation: "query GeoPackage partition rowid",
+        source,
+      })?
+    else {
       return Ok(None);
     };
-    let field_index = result_set.defn().field_index("partition_rowid")?;
+    let field_index = result_set
+      .defn()
+      .field_index("partition_rowid")
+      .map_err(|source| InputError::GeoPackage {
+        operation: "resolve GeoPackage partition rowid field",
+        source,
+      })?;
     let Some(feature) = result_set.features().next() else {
       return Ok(None);
     };
-    feature.field_as_integer64(field_index).map_err(Into::into)
+    feature
+      .field_as_integer64(field_index)
+      .map_err(|source| InputError::GeoPackage {
+        operation: "read GeoPackage partition rowid",
+        source,
+      })
   }
 
   fn rowid_at_offset(
@@ -176,7 +191,7 @@ impl GpkgScanPartition {
     layer_name: &str,
     total_rows: u64,
     offset: u64,
-  ) -> Result<Option<i64>> {
+  ) -> Result<Option<i64>, InputError> {
     if offset < total_rows {
       Self::query_rowid_at_offset(dataset, layer_name, offset)
     } else {
@@ -189,7 +204,7 @@ impl GpkgScanPartition {
     layer_name: &str,
     total_rows: u64,
     row_range: RowRange,
-  ) -> Result<Vec<Self>> {
+  ) -> Result<Vec<Self>, InputError> {
     let start = row_range.start() as u64;
     let end = start + row_range.effective_rows(total_rows);
     Ok(vec![Self {

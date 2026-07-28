@@ -1,7 +1,6 @@
 //! Defines and serializes the Geodisplay JSON metadata contract.
 
 use ::parquet::file::metadata::KeyValue;
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -234,10 +233,15 @@ impl GeodisplayMetadata {
 
 impl GeodisplayMetadata {
   /// Serialize this Geodisplay metadata into one Parquet key-value entry.
-  pub(crate) fn parquet_entry(&self) -> Result<KeyValue> {
+  pub(crate) fn parquet_entry(&self) -> Result<KeyValue, crate::GeoParquetError> {
     Ok(KeyValue::new(
       "geodisplay".to_string(),
-      Some(serde_json::to_string(self)?),
+      Some(
+        serde_json::to_string(self).map_err(|source| crate::GeoParquetError::Json {
+          operation: "serialize Geodisplay metadata",
+          source,
+        })?,
+      ),
     ))
   }
 }

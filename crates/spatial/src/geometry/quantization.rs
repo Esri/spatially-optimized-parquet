@@ -3,10 +3,17 @@
 //! Callers supply the transform and simplification policy. Native Arrow preserves nullable z and m
 //! components through [`ComponentValidity`], while Esri PBF encodes absent components as zero.
 
-use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
-use super::{Coord, Geometry};
+use super::{Coord, Geometry, GeometryError};
+
+type Result<T> = std::result::Result<T, GeometryError>;
+
+macro_rules! bail {
+  ($($argument:tt)*) => {
+    return Err(GeometryError::Quantization(format!($($argument)*)))
+  };
+}
 
 /// Defines per-axis scale and translation values for integer coordinate quantization.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -1,5 +1,6 @@
 //! Adapts Arrow binary geometry arrays into one spatial input boundary.
 
+use std::error::Error;
 use std::sync::OnceLock;
 
 use arrow_array::{Array, BinaryArray, BinaryViewArray, LargeBinaryArray};
@@ -61,8 +62,8 @@ impl<'a> GeometryArray<'a> {
   }
 }
 
-pub(crate) fn to_datafusion_error(error: impl Into<anyhow::Error>) -> DataFusionError {
-  DataFusionError::External(error.into().into())
+pub(crate) fn to_datafusion_error(error: impl Error + Send + Sync + 'static) -> DataFusionError {
+  DataFusionError::External(Box::new(error))
 }
 
 #[cfg(test)]

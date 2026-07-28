@@ -1,9 +1,8 @@
 //! Persists globally ordered optimized output into one Parquet file.
 
 use crate::optimized::OptimizedLayout;
-use crate::output::{OutputPath, Writer, WriterOptions};
+use crate::output::{OutputError, OutputPath, Writer, WriterOptions};
 use crate::pipeline::{PipelineWarnings, SharedWriteReporter, SpatialWriteContext};
-use anyhow::{Context, Result};
 
 use super::dataframe;
 
@@ -18,16 +17,20 @@ pub(crate) async fn write(
   total_input_rows: u64,
   write_reporter: Option<SharedWriteReporter>,
   warnings: PipelineWarnings,
-) -> Result<u64> {
+) -> Result<u64, OutputError> {
   let dataframe = dataframe::dataframe(source_schema, context, layout, covering, warnings)?;
-  let metadata = layout.parquet_metadata(context, covering)?;
+  let metadata = layout
+    .parquet_metadata(context, covering)
+    .map_err(|error| OutputError::Configuration(format!("build optimized metadata: {error}")))?;
   let geometry_crs = format!(
     "srid:{}",
     context
       .reprojection()
       .target_spatial_reference()
       .wkid
-      .context("missing output spatial-reference WKID")?
+      .ok_or_else(|| {
+        OutputError::Configuration("missing output spatial-reference WKID".to_string())
+      })?
   );
   let writer_options = WriterOptions::new(compression.unwrap_or("snappy"), &metadata)?
     .with_delta_binary_packed_columns(layout.delta_binary_packed_column_paths())
@@ -36,7 +39,7 @@ pub(crate) async fn write(
     .paths()?
     .into_iter()
     .next()
-    .context("missing output path")?
+    .ok_or_else(|| OutputError::Configuration("missing output path".to_string()))?
     .to_string_lossy()
     .into_owned();
   Writer::new(total_input_rows, write_reporter)

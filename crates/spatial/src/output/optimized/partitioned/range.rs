@@ -1,6 +1,5 @@
 //! Computes balanced cluster-key ranges for exact multi-file output.
 
-use anyhow::Result;
 use arrow_array::{Array, ArrayRef, Float64Array, UInt64Array};
 use datafusion::dataframe::DataFrame;
 use datafusion::functions_aggregate::approx_percentile_cont::approx_percentile_cont;
@@ -11,6 +10,7 @@ use datafusion::prelude::lit;
 use crate::diagnostics::Diagnostics;
 
 use crate::optimized::ClusterRangeBoundaries;
+use crate::output::OutputError;
 
 impl ClusterRangeBoundaries {
   /// Compute balanced cluster-key ranges from one dataframe and target bucket count.
@@ -18,7 +18,7 @@ impl ClusterRangeBoundaries {
     dataframe: DataFrame,
     cluster_key_column: &str,
     bucket_count: usize,
-  ) -> Result<Self> {
+  ) -> Result<Self, OutputError> {
     if bucket_count <= 1 {
       return Ok(Self::new(0, Vec::new()));
     }
@@ -32,10 +32,19 @@ impl ClusterRangeBoundaries {
       )
       .alias(format!("range_boundary_{index}"))
     }));
-    let aggregate_dataframe = dataframe.aggregate(vec![], aggregate_expressions)?;
+    let aggregate_dataframe =
+      dataframe
+        .aggregate(vec![], aggregate_expressions)
+        .map_err(|source| OutputError::DataFusion {
+          operation: "aggregate cluster range boundaries",
+          source,
+        })?;
     let batches = Diagnostics::with("cluster boundary aggregate")
       .collect(aggregate_dataframe)
-      .await?;
+      .await
+      .map_err(|error| {
+        OutputError::Configuration(format!("collect cluster range boundaries: {error}"))
+      })?;
     let Some(batch) = batches.first() else {
       return Ok(Self::new(0, Vec::new()));
     };
@@ -56,7 +65,7 @@ impl ClusterRangeBoundaries {
   }
 }
 
-fn aggregate_u64(values: &ArrayRef) -> Result<Option<u64>> {
+fn aggregate_u64(values: &ArrayRef) -> Result<Option<u64>, OutputError> {
   if values.is_null(0) {
     return Ok(None);
   }
@@ -66,8 +75,8 @@ fn aggregate_u64(values: &ArrayRef) -> Result<Option<u64>> {
   if let Some(values) = values.as_any().downcast_ref::<Float64Array>() {
     return Ok(Some(values.value(0) as u64));
   }
-  anyhow::bail!(
+  Err(OutputError::Configuration(format!(
     "range aggregate returned unsupported type {}",
     values.data_type()
-  )
+  )))
 }

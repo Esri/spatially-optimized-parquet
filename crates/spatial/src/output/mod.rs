@@ -2,10 +2,11 @@
 //!
 //! Product contracts and pipelines live in [`crate::geoparquet`] and [`crate::pipeline`].
 
+mod error;
+mod geometry_schema;
 mod mode;
 mod optimized;
 mod partition_plan;
-mod geometry_schema;
 mod path;
 mod plain;
 mod reporter;
@@ -14,6 +15,7 @@ mod writer;
 
 #[cfg(test)]
 pub(crate) use crate::geometry::QuantizationTransform;
+pub(crate) use error::OutputError;
 pub use mode::OutputMode;
 pub(crate) use optimized::{partitioned, single};
 pub(crate) use path::OutputPath;

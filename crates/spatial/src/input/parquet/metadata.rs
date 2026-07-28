@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::{Context, Result, bail};
 use gdal::spatial_ref::SpatialRef;
 use parquet::arrow::arrow_reader::ArrowReaderMetadata;
 use parquet::file::metadata::KeyValue;
@@ -9,7 +8,7 @@ use serde_json::Value;
 
 use crate::geometry::Extent2D;
 use crate::geometry::{GeometryEncoding, GeometryKind};
-use crate::input::{SourceCoveringMetadata, SourceGeometryMetadata};
+use crate::input::{InputError, SourceCoveringMetadata, SourceGeometryMetadata};
 
 use super::source::ParquetInputSource;
 
@@ -45,21 +44,24 @@ impl ParquetGeoMetadata {
     self.columns.get(&self.primary_column)
   }
 
-  fn merge(&mut self, other: Self) -> Result<()> {
+  fn merge(&mut self, other: Self) -> Result<(), InputError> {
     if self.primary_column != other.primary_column {
-      bail!(
+      return Err(InputError::Metadata(format!(
         "inconsistent geoparquet primary column across input files: {} != {}",
-        self.primary_column,
-        other.primary_column
-      );
+        self.primary_column, other.primary_column
+      )));
     }
 
     let primary_column = self.primary_column.clone();
     let Some(current) = self.columns.get_mut(&primary_column) else {
-      bail!("geoparquet primary column is missing metadata: {primary_column}");
+      return Err(InputError::Metadata(format!(
+        "geoparquet primary column is missing metadata: {primary_column}"
+      )));
     };
     let Some(incoming) = other.columns.get(&primary_column) else {
-      bail!("geoparquet primary column is missing metadata: {primary_column}");
+      return Err(InputError::Metadata(format!(
+        "geoparquet primary column is missing metadata: {primary_column}"
+      )));
     };
     current.merge(incoming)
   }
@@ -70,24 +72,25 @@ impl ParquetGeoColumnMetadata {
     self.encoding == "WKB"
   }
 
-  pub(super) fn parsed_geometry_types(&self) -> Result<Vec<ParsedGeometryType>> {
+  pub(super) fn parsed_geometry_types(&self) -> Result<Vec<ParsedGeometryType>, InputError> {
     self
       .geometry_types
       .iter()
       .map(|geometry_type| ParsedGeometryType::parse(geometry_type))
-      .collect()
+      .collect::<Result<Vec<_>, InputError>>()
   }
 
-  fn merge(&mut self, other: &Self) -> Result<()> {
+  fn merge(&mut self, other: &Self) -> Result<(), InputError> {
     if self.encoding != other.encoding {
-      bail!(
+      return Err(InputError::Metadata(format!(
         "inconsistent geoparquet geometry encoding across input files: {} != {}",
-        self.encoding,
-        other.encoding
-      );
+        self.encoding, other.encoding
+      )));
     }
     if self.crs != other.crs {
-      bail!("inconsistent geoparquet CRS across input files");
+      return Err(InputError::Metadata(
+        "inconsistent geoparquet CRS across input files".to_string(),
+      ));
     }
 
     let mut geometry_types = self.geometry_types.iter().cloned().collect::<BTreeSet<_>>();
@@ -99,7 +102,7 @@ impl ParquetGeoColumnMetadata {
 }
 
 impl ParsedGeometryType {
-  fn parse(value: &str) -> Result<Self> {
+  fn parse(value: &str) -> Result<Self, InputError> {
     let (base, has_z, has_m) = if let Some(base) = value.strip_suffix(" ZM") {
       (base, true, true)
     } else if let Some(base) = value.strip_suffix(" Z") {
@@ -117,7 +120,11 @@ impl ParsedGeometryType {
       "Polygon" => GeometryKind::Polygon,
       "MultiPolygon" => GeometryKind::MultiPolygon,
       "GeometryCollection" => GeometryKind::GeometryCollection,
-      _ => bail!("unsupported geoparquet geometry type: {value}"),
+      _ => {
+        return Err(InputError::Metadata(format!(
+          "unsupported geoparquet geometry type: {value}"
+        )));
+      }
     };
     Ok(Self { kind, has_z, has_m })
   }
@@ -125,12 +132,12 @@ impl ParsedGeometryType {
 
 impl ParquetInputSource {
   /// Parse and require consistent GeoParquet metadata across all discovered files.
-  pub(super) fn geo_metadata(&self) -> Result<Option<ParquetGeoMetadata>> {
+  pub(super) fn geo_metadata(&self) -> Result<Option<ParquetGeoMetadata>, InputError> {
     let mut geo_meta: Option<ParquetGeoMetadata> = None;
     let mut saw_geo = false;
     let mut saw_missing_geo = false;
     for metadata in &self.metadata {
-      match Self::parse_geo_metadata(metadata).context("parse geoparquet metadata")? {
+      match Self::parse_geo_metadata(metadata)? {
         Some(file_geo_meta) => {
           saw_geo = true;
           if let Some(existing) = geo_meta.as_mut() {
@@ -143,8 +150,8 @@ impl ParquetInputSource {
       }
     }
     if saw_geo && saw_missing_geo {
-      return Err(anyhow::anyhow!(
-        "inconsistent geoparquet metadata across input files"
+      return Err(InputError::Metadata(
+        "inconsistent geoparquet metadata across input files".to_string(),
       ));
     }
     Ok(geo_meta)
@@ -153,7 +160,7 @@ impl ParquetInputSource {
   pub(super) fn covering_metadata(
     &self,
     geometry_column: &str,
-  ) -> Result<Option<SourceCoveringMetadata>> {
+  ) -> Result<Option<SourceCoveringMetadata>, InputError> {
     let mut covering = None;
     let mut saw_missing = false;
     for metadata in &self.metadata {
@@ -202,17 +209,22 @@ impl ParquetInputSource {
     out
   }
 
-  fn parse_geo_metadata(metadata: &ArrowReaderMetadata) -> Result<Option<ParquetGeoMetadata>> {
+  fn parse_geo_metadata(
+    metadata: &ArrowReaderMetadata,
+  ) -> Result<Option<ParquetGeoMetadata>, InputError> {
     let Some(mut json) = Self::metadata_json(metadata, "geo")? else {
       return Ok(None);
     };
     Self::apply_default_crs(&mut json)?;
     serde_json::from_value(json)
-      .context("deserialize geo metadata")
       .map(Some)
+      .map_err(|source| InputError::Json {
+        operation: "deserialize GeoParquet metadata",
+        source,
+      })
   }
 
-  fn metadata_json(metadata: &ArrowReaderMetadata, key: &str) -> Result<Option<Value>> {
+  fn metadata_json(metadata: &ArrowReaderMetadata, key: &str) -> Result<Option<Value>, InputError> {
     let Some(value) = metadata
       .metadata()
       .file_metadata()
@@ -223,8 +235,11 @@ impl ParquetInputSource {
       return Ok(None);
     };
     serde_json::from_str(value)
-      .with_context(|| format!("decode {key} metadata json"))
       .map(Some)
+      .map_err(|source| InputError::Json {
+        operation: "decode GeoParquet metadata JSON",
+        source,
+      })
   }
 
   fn covering_column(json: &Value, geometry_column: &str) -> Option<SourceCoveringMetadata> {
@@ -257,7 +272,7 @@ impl ParquetInputSource {
 
   /// Apply the GeoParquet OGC:CRS84 default when a geometry column omits `crs`.
   /// Preserve explicit `null` because it declares an unknown coordinate reference system.
-  fn apply_default_crs(json: &mut Value) -> Result<()> {
+  fn apply_default_crs(json: &mut Value) -> Result<(), InputError> {
     let Some(columns) = json.get_mut("columns").and_then(Value::as_object_mut) else {
       return Ok(());
     };
@@ -265,12 +280,19 @@ impl ParquetInputSource {
       return Ok(());
     }
 
-    let crs = SpatialRef::from_definition("OGC:CRS84")
-      .context("load GeoParquet default CRS OGC:CRS84")?
-      .to_projjson()
-      .context("export GeoParquet default CRS as PROJJSON")?;
-    let crs: Value =
-      serde_json::from_str(&crs).context("decode GeoParquet default CRS PROJJSON")?;
+    let crs =
+      SpatialRef::from_definition("OGC:CRS84").map_err(|source| InputError::GeoPackage {
+        operation: "load GeoParquet default CRS OGC:CRS84",
+        source,
+      })?;
+    let crs = crs.to_projjson().map_err(|source| InputError::GeoPackage {
+      operation: "export GeoParquet default CRS as PROJJSON",
+      source,
+    })?;
+    let crs: Value = serde_json::from_str(&crs).map_err(|source| InputError::Json {
+      operation: "decode GeoParquet default CRS PROJJSON",
+      source,
+    })?;
     for column in columns.values_mut() {
       if let Some(column) = column.as_object_mut()
         && !column.contains_key("crs")
@@ -287,7 +309,7 @@ impl SourceGeometryMetadata {
   pub(super) fn from_geoparquet(
     geo_meta: &ParquetGeoMetadata,
     covering: Option<SourceCoveringMetadata>,
-  ) -> Result<Option<SourceGeometryMetadata>> {
+  ) -> Result<Option<SourceGeometryMetadata>, InputError> {
     let Some(column_meta) = geo_meta.primary_geometry() else {
       return Ok(None);
     };

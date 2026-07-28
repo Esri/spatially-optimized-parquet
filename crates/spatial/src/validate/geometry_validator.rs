@@ -1,11 +1,9 @@
-use anyhow::{Result, bail};
-use arrow_array::{Array, BinaryArray, BinaryViewArray, LargeBinaryArray};
-use geo_traits::Dimensions;
-
-use crate::geometry::{Extent2D, GeometryKind, GeometryType};
+use crate::geometry::{CoordinateDimensions, Extent2D, GeometryKind, GeometryType};
 use crate::geometry::{WkbCoordinate, WkbHeader};
 use crate::optimized::{GeometryPartRole, GeometryPartSink};
+use arrow_array::{Array, BinaryArray, BinaryViewArray, LargeBinaryArray};
 
+use super::ValidationError;
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -19,7 +17,7 @@ struct RingValidationInfo {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GeometryValidationInfo {
   kind: GeometryKind,
-  dimensions: Dimensions,
+  dimensions: CoordinateDimensions,
   pub(crate) extent: Option<Extent2D>,
   finite_coordinates: bool,
   rings: Vec<RingValidationInfo>,
@@ -28,7 +26,7 @@ pub(crate) struct GeometryValidationInfo {
 pub(crate) struct GeometryValidator;
 
 impl GeometryValidator {
-  pub(crate) fn inspect(bytes: &[u8]) -> Result<GeometryValidationInfo> {
+  pub(crate) fn inspect(bytes: &[u8]) -> Result<GeometryValidationInfo, ValidationError> {
     let mut sink = InspectionSink::default();
     let header = WkbHeader::visit(bytes, &mut sink)?;
     Ok(GeometryValidationInfo {
@@ -61,10 +59,10 @@ impl GeometryValidator {
       );
     }
     let expected_dimensions = match (expected_has_z, expected_has_m) {
-      (false, false) => Dimensions::Xy,
-      (true, false) => Dimensions::Xyz,
-      (false, true) => Dimensions::Xym,
-      (true, true) => Dimensions::Xyzm,
+      (false, false) => CoordinateDimensions::Xy,
+      (true, false) => CoordinateDimensions::Xyz,
+      (false, true) => CoordinateDimensions::Xym,
+      (true, true) => CoordinateDimensions::Xyzm,
     };
     if inspection.dimensions != expected_dimensions {
       report.push(
@@ -116,7 +114,10 @@ impl GeometryValidator {
     }
   }
 
-  pub(crate) fn binary_value(array: &dyn Array, index: usize) -> Result<Option<Vec<u8>>> {
+  pub(crate) fn binary_value(
+    array: &dyn Array,
+    index: usize,
+  ) -> Result<Option<Vec<u8>>, ValidationError> {
     if array.is_null(index) {
       return Ok(None);
     }
@@ -129,7 +130,10 @@ impl GeometryValidator {
     if let Some(array) = array.as_any().downcast_ref::<BinaryViewArray>() {
       return Ok(Some(array.value(index).to_vec()));
     }
-    bail!("expected Arrow binary array, found {}", array.data_type())
+    Err(ValidationError::ArrowColumn(format!(
+      "expected Arrow binary array, found {}",
+      array.data_type()
+    )))
   }
 
   fn matches_geometry_type(inspection: &GeometryValidationInfo, expected: GeometryType) -> bool {
@@ -242,19 +246,12 @@ impl GeometryPartSink for InspectionSink {
 
 #[cfg(test)]
 mod tests {
-  use geo_types::{Geometry, polygon};
-
   use super::*;
 
   #[test]
   fn geometry_inspection_tracks_ring_winding() {
-    let geometry = Geometry::Polygon(polygon![
-      (x: 0.0, y: 0.0),
-      (x: 1.0, y: 0.0),
-      (x: 1.0, y: 1.0),
-      (x: 0.0, y: 0.0),
-    ]);
-    let bytes = crate::geometry::write_test_geometry(&geometry);
+    let exterior = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 0.0)];
+    let bytes = crate::geometry::write_test_polygon(&[&exterior]);
 
     let inspection = GeometryValidator::inspect(&bytes).unwrap();
 

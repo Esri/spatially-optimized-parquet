@@ -128,8 +128,7 @@ impl ExecutionPlan for GeometrySchemaExec {
     let output_schema = Arc::clone(&schema);
     let stream = self.input.execute(partition, context)?.map(move |batch| {
       let batch = batch?;
-      RecordBatch::try_new(Arc::clone(&schema), batch.columns().to_vec())
-        .map_err(Into::into)
+      RecordBatch::try_new(Arc::clone(&schema), batch.columns().to_vec()).map_err(Into::into)
     });
     Ok(Box::pin(RecordBatchStreamAdapter::new(
       output_schema,

@@ -3,7 +3,6 @@ use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context, Result, ensure};
 use arrow_array::{
   Array, BinaryArray, BinaryViewArray, Int32Array, LargeBinaryArray, RecordBatch, StringArray,
   StructArray,
@@ -19,8 +18,8 @@ use parquet::file::metadata::KeyValue;
 use parquet::file::properties::WriterProperties;
 use prost::Message;
 use spatial::{
-  InputOptions, OutputMode, OutputOptions, Pipeline, SpatialPipelineOptions, ValidationRule,
-  ValidationSeverity, validate,
+  InputOptions, OutputMode, OutputOptions, Pipeline, PipelineError, SpatialPipelineOptions,
+  ValidationError, ValidationRule, ValidationSeverity, validate,
 };
 
 const OUTPUT_DIRECTORY: &str = "test-data";
@@ -32,6 +31,77 @@ const NORMALIZATION_EXTENT: [f64; 4] = [-180.0, -90.0, 180.0, 90.0];
 const CLUSTER_DEPTH: u32 = 20;
 
 type Coordinate = (f64, f64, Option<f64>, Option<f64>);
+type Result<T> = std::result::Result<T, FixtureError>;
+
+#[derive(Debug, thiserror::Error)]
+enum FixtureError {
+  #[error("{operation}: {source}")]
+  Io {
+    operation: String,
+    #[source]
+    source: std::io::Error,
+  },
+  #[error("{operation}: {source}")]
+  Arrow {
+    operation: String,
+    #[source]
+    source: arrow_schema::ArrowError,
+  },
+  #[error("{operation}: {source}")]
+  Parquet {
+    operation: String,
+    #[source]
+    source: parquet::errors::ParquetError,
+  },
+  #[error("{operation}: {source}")]
+  Gdal {
+    operation: String,
+    #[source]
+    source: gdal::errors::GdalError,
+  },
+  #[error("{operation}: {source}")]
+  Json {
+    operation: String,
+    #[source]
+    source: serde_json::Error,
+  },
+  #[error("{operation}: {source}")]
+  Pipeline {
+    operation: String,
+    #[source]
+    source: PipelineError,
+  },
+  #[error("{operation}: {source}")]
+  Validation {
+    operation: String,
+    #[source]
+    source: ValidationError,
+  },
+  #[error("{operation}: {source}")]
+  Protobuf {
+    operation: String,
+    #[source]
+    source: prost::DecodeError,
+  },
+  #[error("{0}")]
+  Check(String),
+}
+
+macro_rules! ensure_fixture {
+  ($condition:expr $(,)?) => {
+    if !$condition {
+      return Err(FixtureError::Check(format!(
+        "fixture invariant failed: {}",
+        stringify!($condition)
+      )));
+    }
+  };
+  ($condition:expr, $($argument:tt)+) => {
+    if !$condition {
+      return Err(FixtureError::Check(format!($($argument)+)));
+    }
+  };
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CoordinateLayout {
@@ -181,14 +251,20 @@ struct PbfGeometry {
 fn main() -> Result<()> {
   let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
   let output_root = repository.join(OUTPUT_DIRECTORY);
-  let input_directory = tempfile::tempdir().context("create temporary fixture input directory")?;
+  let input_directory = tempfile::tempdir().map_err(|source| FixtureError::Io {
+    operation: "create temporary fixture input directory".to_string(),
+    source,
+  })?;
 
   let sop_directory = output_root.join(SOP_DIRECTORY);
   let extensions_directory = output_root.join(GEOPARQUET_EXTENSIONS_DIRECTORY);
   reset_directory(&sop_directory)?;
   reset_directory(&extensions_directory)?;
 
-  let runtime = tokio::runtime::Runtime::new().context("create Tokio runtime")?;
+  let runtime = tokio::runtime::Runtime::new().map_err(|source| FixtureError::Io {
+    operation: "create Tokio runtime".to_string(),
+    source,
+  })?;
   generate_sop(&runtime, input_directory.path(), &sop_directory)?;
   generate_geoparquet_extensions(&runtime, input_directory.path(), &extensions_directory)?;
   Ok(())
@@ -242,10 +318,15 @@ fn generate_family(
 
 fn reset_directory(path: &Path) -> Result<()> {
   if path.exists() {
-    fs::remove_dir_all(path)
-      .with_context(|| format!("remove existing fixture directory {}", path.display()))?;
+    fs::remove_dir_all(path).map_err(|source| FixtureError::Io {
+      operation: format!("remove existing fixture directory {}", path.display()),
+      source,
+    })?;
   }
-  fs::create_dir_all(path).with_context(|| format!("create fixture directory {}", path.display()))
+  fs::create_dir_all(path).map_err(|source| FixtureError::Io {
+    operation: format!("create fixture directory {}", path.display()),
+    source,
+  })
 }
 
 fn write_input_fixture(
@@ -267,7 +348,10 @@ fn write_input_fixture(
       Arc::new(BinaryArray::from(vec![Some(geometry_value.as_slice())])),
     ],
   )
-  .context("construct fixture record batch")?;
+  .map_err(|source| FixtureError::Arrow {
+    operation: "construct fixture record batch".to_string(),
+    source,
+  })?;
   let geometry_type = geometry.geoparquet_type(layout);
   write_parquet(
     path,
@@ -305,7 +389,10 @@ fn optimize_fixture(
       },
       ..Default::default()
     }))
-    .with_context(|| format!("optimize fixture {}", output.display()))?;
+    .map_err(|source| FixtureError::Pipeline {
+      operation: format!("optimize fixture {}", output.display()),
+      source,
+    })?;
   Ok(())
 }
 
@@ -315,14 +402,17 @@ fn inspect_fixture(
   layout: CoordinateLayout,
   contract: OutputContract,
 ) -> Result<()> {
-  let report = validate(path).with_context(|| format!("validate {}", path.display()))?;
+  let report = validate(path).map_err(|source| FixtureError::Validation {
+    operation: format!("validate {}", path.display()),
+    source,
+  })?;
   match contract {
-    OutputContract::Sop => ensure!(
+    OutputContract::Sop => ensure_fixture!(
       !report.has_errors(),
       "{} failed validation: {report:#?}",
       path.display()
     ),
-    OutputContract::GeoparquetExtensions => ensure!(
+    OutputContract::GeoparquetExtensions => ensure_fixture!(
       report.findings().iter().all(|finding| {
         finding.severity() != ValidationSeverity::Error
           || (finding.rule() == ValidationRule::MetadataMissing
@@ -334,13 +424,14 @@ fn inspect_fixture(
   }
 
   let metadata = parquet_metadata(path)?;
-  let geo: serde_json::Value = serde_json::from_str(
-    metadata
-      .get("geo")
-      .context("generated fixture is missing GeoParquet metadata")?,
-  )
-  .context("parse generated GeoParquet metadata")?;
-  ensure!(
+  let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").ok_or_else(|| {
+    FixtureError::Check("generated fixture is missing GeoParquet metadata".to_string())
+  })?)
+  .map_err(|source| FixtureError::Json {
+    operation: "parse generated GeoParquet metadata".to_string(),
+    source,
+  })?;
+  ensure_fixture!(
     geo["columns"]["geometry"]["geometry_types"][0] == geometry.geoparquet_type(layout),
     "{} has unexpected geometry metadata",
     path.display()
@@ -354,7 +445,7 @@ fn inspect_fixture(
   }
 
   let batches = read_batches(path)?;
-  ensure!(
+  ensure_fixture!(
     batches.iter().map(RecordBatch::num_rows).sum::<usize>() == 1,
     "{} must contain one feature",
     path.display()
@@ -376,10 +467,11 @@ fn inspect_wkb_layout(
 ) -> Result<()> {
   let geometry_array = batches[0]
     .column_by_name("geometry")
-    .with_context(|| format!("{} is missing geometry", path.display()))?;
-  let bytes = binary_value(geometry_array.as_ref(), 0)
-    .with_context(|| format!("{} geometry must be binary WKB", path.display()))?;
-  ensure!(
+    .ok_or_else(|| FixtureError::Check(format!("{} is missing geometry", path.display())))?;
+  let bytes = binary_value(geometry_array.as_ref(), 0).ok_or_else(|| {
+    FixtureError::Check(format!("{} geometry must be binary WKB", path.display()))
+  })?;
+  ensure_fixture!(
     bytes.first() == Some(&1),
     "{} must use little-endian WKB",
     path.display()
@@ -387,12 +479,12 @@ fn inspect_wkb_layout(
   let encoded_type = u32::from_le_bytes(
     bytes
       .get(1..5)
-      .context("geometry WKB is truncated")?
+      .ok_or_else(|| FixtureError::Check("geometry WKB is truncated".to_string()))?
       .try_into()
       .expect("WKB type occupies four bytes"),
   );
   let expected_type = geometry_type(geometry.wkb_type(), layout.has_z(), layout.has_m());
-  ensure!(
+  ensure_fixture!(
     encoded_type == expected_type,
     "{} has WKB type {encoded_type}, expected {expected_type}",
     path.display()
@@ -421,11 +513,14 @@ fn inspect_sop_metadata(
   let geodisplay: serde_json::Value = serde_json::from_str(
     metadata
       .get("geodisplay")
-      .with_context(|| format!("{} is missing SOP metadata", path.display()))?,
+      .ok_or_else(|| FixtureError::Check(format!("{} is missing SOP metadata", path.display())))?,
   )
-  .context("parse SOP metadata")?;
-  ensure!(geodisplay["hasZ"] == layout.has_z());
-  ensure!(geodisplay["hasM"] == layout.has_m());
+  .map_err(|source| FixtureError::Json {
+    operation: "parse SOP metadata".to_string(),
+    source,
+  })?;
+  ensure_fixture!(geodisplay["hasZ"] == layout.has_z());
+  ensure_fixture!(geodisplay["hasM"] == layout.has_m());
   Ok(())
 }
 
@@ -435,17 +530,17 @@ fn inspect_geoparquet_extension_metadata(
   geo: &serde_json::Value,
   geometry: FixtureGeometry,
 ) -> Result<()> {
-  ensure!(
+  ensure_fixture!(
     !metadata.contains_key("geodisplay"),
     "{} unexpectedly contains SOP metadata",
     path.display()
   );
-  ensure!(
+  ensure_fixture!(
     geo.get("ordering").is_some(),
     "{} is missing GeoParquet ordering metadata",
     path.display()
   );
-  ensure!(
+  ensure_fixture!(
     geo.get("lod").is_some() == geometry.is_complex(),
     "{} has unexpected GeoParquet LOD metadata",
     path.display()
@@ -460,12 +555,12 @@ fn inspect_point_components(
 ) -> Result<()> {
   let sop_geometry = batches[0]
     .column_by_name("sop_geometry")
-    .with_context(|| format!("{} is missing sop_geometry", path.display()))?
+    .ok_or_else(|| FixtureError::Check(format!("{} is missing sop_geometry", path.display())))?
     .as_any()
     .downcast_ref::<StructArray>()
-    .context("sop_geometry must be a struct")?;
-  ensure!(sop_geometry.column_by_name("z").is_some() == layout.has_z());
-  ensure!(sop_geometry.column_by_name("m").is_some() == layout.has_m());
+    .ok_or_else(|| FixtureError::Check("sop_geometry must be a struct".to_string()))?;
+  ensure_fixture!(sop_geometry.column_by_name("z").is_some() == layout.has_z());
+  ensure_fixture!(sop_geometry.column_by_name("m").is_some() == layout.has_m());
   Ok(())
 }
 
@@ -480,26 +575,30 @@ fn inspect_simplification(
   for batch in batches {
     let geolod = batch
       .column_by_name("geolod")
-      .with_context(|| format!("{} is missing geolod", path.display()))?
+      .ok_or_else(|| FixtureError::Check(format!("{} is missing geolod", path.display())))?
       .as_any()
       .downcast_ref::<StructArray>()
-      .context("geolod must be a struct")?;
+      .ok_or_else(|| FixtureError::Check("geolod must be a struct".to_string()))?;
     for column in geolod.columns() {
       let level = column
         .as_any()
         .downcast_ref::<BinaryArray>()
-        .context("PBF geolod level must be binary")?;
+        .ok_or_else(|| FixtureError::Check("PBF geolod level must be binary".to_string()))?;
       for row in 0..level.len() {
         if level.is_null(row) {
           continue;
         }
-        let decoded = PbfGeometry::decode(level.value(row)).context("decode PBF geolod level")?;
+        let decoded =
+          PbfGeometry::decode(level.value(row)).map_err(|source| FixtureError::Protobuf {
+            operation: "decode PBF geolod level".to_string(),
+            source,
+          })?;
         let vertex_count = decoded
           .lengths
           .iter()
           .map(|length| *length as usize)
           .sum::<usize>();
-        ensure!(
+        ensure_fixture!(
           decoded.coords.len() == vertex_count * layout.stride(),
           "{} has an invalid coordinate stride",
           path.display()
@@ -508,7 +607,7 @@ fn inspect_simplification(
       }
     }
   }
-  ensure!(
+  ensure_fixture!(
     saw_reduced_level,
     "{} did not produce a simplified lower-detail level",
     path.display()
@@ -782,27 +881,50 @@ fn write_parquet(
     .set_compression(Compression::SNAPPY)
     .build();
   let mut writer = ArrowWriter::try_new(
-    File::create(path).with_context(|| format!("create {}", path.display()))?,
+    File::create(path).map_err(|source| FixtureError::Io {
+      operation: format!("create {}", path.display()),
+      source,
+    })?,
     Arc::clone(schema),
     Some(properties),
   )
-  .context("create Parquet writer")?;
+  .map_err(|source| FixtureError::Parquet {
+    operation: "create Parquet writer".to_string(),
+    source,
+  })?;
   for batch in batches {
-    writer.write(batch).context("write fixture batch")?;
+    writer
+      .write(batch)
+      .map_err(|source| FixtureError::Parquet {
+        operation: "write fixture batch".to_string(),
+        source,
+      })?;
   }
   for entry in metadata {
     writer.append_key_value_metadata(entry.clone());
   }
-  writer.close().context("close fixture Parquet writer")?;
+  writer.close().map_err(|source| FixtureError::Parquet {
+    operation: "close fixture Parquet writer".to_string(),
+    source,
+  })?;
   Ok(())
 }
 
 fn geoparquet_metadata(primary_column: &str, geometry_types: &[&str]) -> Result<KeyValue> {
   let crs = SpatialRef::from_epsg(4326)
-    .context("load EPSG:4326")?
+    .map_err(|source| FixtureError::Gdal {
+      operation: "load EPSG:4326".to_string(),
+      source,
+    })?
     .to_projjson()
-    .context("serialize EPSG:4326")?;
-  let crs: serde_json::Value = serde_json::from_str(&crs).context("parse EPSG:4326 PROJJSON")?;
+    .map_err(|source| FixtureError::Gdal {
+      operation: "serialize EPSG:4326".to_string(),
+      source,
+    })?;
+  let crs: serde_json::Value = serde_json::from_str(&crs).map_err(|source| FixtureError::Json {
+    operation: "parse EPSG:4326 PROJJSON".to_string(),
+    source,
+  })?;
   let value = serde_json::json!({
     "version": "1.1.0",
     "primary_column": primary_column,
@@ -819,10 +941,16 @@ fn geoparquet_metadata(primary_column: &str, geometry_types: &[&str]) -> Result<
 
 fn parquet_metadata(path: &Path) -> Result<HashMap<String, String>> {
   let metadata = ArrowReaderMetadata::load(
-    &File::open(path).with_context(|| format!("open {}", path.display()))?,
+    &File::open(path).map_err(|source| FixtureError::Io {
+      operation: format!("open {}", path.display()),
+      source,
+    })?,
     ArrowReaderOptions::new(),
   )
-  .with_context(|| format!("read metadata from {}", path.display()))?;
+  .map_err(|source| FixtureError::Parquet {
+    operation: format!("read metadata from {}", path.display()),
+    source,
+  })?;
   Ok(
     metadata
       .metadata()
@@ -841,12 +969,22 @@ fn parquet_metadata(path: &Path) -> Result<HashMap<String, String>> {
 }
 
 fn read_batches(path: &Path) -> Result<Vec<RecordBatch>> {
-  ParquetRecordBatchReaderBuilder::try_new(
-    File::open(path).with_context(|| format!("open {}", path.display()))?,
-  )
-  .with_context(|| format!("create reader for {}", path.display()))?
+  ParquetRecordBatchReaderBuilder::try_new(File::open(path).map_err(|source| FixtureError::Io {
+    operation: format!("open {}", path.display()),
+    source,
+  })?)
+  .map_err(|source| FixtureError::Parquet {
+    operation: format!("create reader for {}", path.display()),
+    source,
+  })?
   .build()
-  .context("build Parquet record batch reader")?
+  .map_err(|source| FixtureError::Parquet {
+    operation: "build Parquet record batch reader".to_string(),
+    source,
+  })?
   .collect::<std::result::Result<Vec<_>, arrow_schema::ArrowError>>()
-  .with_context(|| format!("read record batches from {}", path.display()))
+  .map_err(|source| FixtureError::Arrow {
+    operation: format!("read record batches from {}", path.display()),
+    source,
+  })
 }

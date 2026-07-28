@@ -1,8 +1,8 @@
 //! Extends GeoParquet metadata with spatially optimized output metadata.
 
-use anyhow::Result;
 use parquet::file::metadata::KeyValue;
 
+use crate::GeoParquetError;
 use crate::geometry::GeometryKind;
 use crate::geoparquet::{
   COVERING_BBOX_COLUMN, GeoMetadata, GeoMetadataInput, LodEncoding, LodLevel, LodMetadata,
@@ -25,7 +25,7 @@ impl OptimizedLayout {
     &self,
     context: &SpatialWriteContext,
     covering: bool,
-  ) -> Result<Vec<KeyValue>> {
+  ) -> Result<Vec<KeyValue>, GeoParquetError> {
     let source_geometry = context
       .source()
       .source_metadata
@@ -170,7 +170,7 @@ impl OptimizedLayout {
     source_entries: Vec<KeyValue>,
     geo_input: GeoMetadataInput<'_>,
     index_input: Option<ClusteringIndexZInput>,
-  ) -> Result<Vec<KeyValue>> {
+  ) -> Result<Vec<KeyValue>, GeoParquetError> {
     Self::optimized_metadata(
       source_entries,
       geo_input,
@@ -182,7 +182,7 @@ impl OptimizedLayout {
     source_entries: Vec<KeyValue>,
     geo_input: GeoMetadataInput<'_>,
     index_input: Option<ClusteringIndexXZInput>,
-  ) -> Result<Vec<KeyValue>> {
+  ) -> Result<Vec<KeyValue>, GeoParquetError> {
     Self::optimized_metadata(
       source_entries,
       geo_input,
@@ -194,7 +194,7 @@ impl OptimizedLayout {
     mut source_entries: Vec<KeyValue>,
     geo_input: GeoMetadataInput<'_>,
     geodisplay: Option<GeodisplayMetadata>,
-  ) -> Result<Vec<KeyValue>> {
+  ) -> Result<Vec<KeyValue>, GeoParquetError> {
     source_entries.retain(|entry| entry.key != "geo" && entry.key != "geodisplay");
     Self::replace_metadata_entry(&mut source_entries, GeoMetadata::parquet_entry(geo_input)?);
     if let Some(geodisplay) = geodisplay {

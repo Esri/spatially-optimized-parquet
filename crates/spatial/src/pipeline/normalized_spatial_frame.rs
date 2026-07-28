@@ -3,13 +3,14 @@
 //! Reprojects geometry when required, creates one canonical GeoParquet bbox column, and records
 //! the canonical geometry state consumed by optimized output.
 
-use anyhow::Result;
 use arrow_schema::{DataType, Schema};
 use datafusion::dataframe::DataFrame;
 use datafusion::logical_expr::expr_fn::ident;
 
 use crate::geoparquet::{COVERING_BBOX_COLUMN, geometry_bbox_expr};
-use crate::pipeline::{ResolvedReprojection, ResolvedSpatialSource, StripGeometryDimensionsUdf};
+use crate::pipeline::{
+  PipelineError, ResolvedReprojection, ResolvedSpatialSource, StripGeometryDimensionsUdf,
+};
 
 #[derive(Clone)]
 pub(crate) struct NormalizedSpatialFrame {
@@ -25,15 +26,25 @@ impl NormalizedSpatialFrame {
     reprojection: &ResolvedReprojection,
     strip_z: bool,
     strip_m: bool,
-  ) -> Result<Self> {
+  ) -> Result<Self, PipelineError> {
     if let Some(expression) = reprojection.geometry_expr(&source.geometry.column)? {
-      dataframe = dataframe.with_column(&source.geometry.column, expression)?;
+      dataframe = dataframe
+        .with_column(&source.geometry.column, expression)
+        .map_err(|source| PipelineError::DataFusion {
+          operation: "reproject geometry column",
+          source,
+        })?;
     }
     if strip_z || strip_m {
-      dataframe = dataframe.with_column(
-        &source.geometry.column,
-        StripGeometryDimensionsUdf::expression(&source.geometry.column, strip_z, strip_m),
-      )?;
+      dataframe = dataframe
+        .with_column(
+          &source.geometry.column,
+          StripGeometryDimensionsUdf::expression(&source.geometry.column, strip_z, strip_m),
+        )
+        .map_err(|source| PipelineError::DataFusion {
+          operation: "strip geometry dimensions",
+          source,
+        })?;
     }
 
     let reusable_covering = (!reprojection.requires_reprojection())
@@ -47,12 +58,22 @@ impl NormalizedSpatialFrame {
       .flatten()
       .filter(|covering| valid_bbox_field(source_schema, &covering.column));
     dataframe = if let Some(covering) = reusable_covering {
-      dataframe.with_column(COVERING_BBOX_COLUMN, ident(&covering.column))?
+      dataframe
+        .with_column(COVERING_BBOX_COLUMN, ident(&covering.column))
+        .map_err(|source| PipelineError::DataFusion {
+          operation: "reuse source covering column",
+          source,
+        })?
     } else {
-      dataframe.with_column(
-        COVERING_BBOX_COLUMN,
-        geometry_bbox_expr(&source.geometry.column, source.geometry_type),
-      )?
+      dataframe
+        .with_column(
+          COVERING_BBOX_COLUMN,
+          geometry_bbox_expr(&source.geometry.column, source.geometry_type),
+        )
+        .map_err(|source| PipelineError::DataFusion {
+          operation: "compute GeoParquet covering column",
+          source,
+        })?
     };
 
     Ok(Self {

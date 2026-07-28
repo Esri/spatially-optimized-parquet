@@ -1,11 +1,13 @@
 //! Owns the GeoParquet product contract and plain output computations.
 
 mod covering;
+mod error;
 mod extensions;
 mod geo_metadata;
 mod spatial_reference;
 
 pub(crate) use covering::{COVERING_BBOX_COLUMN, bbox_field_expr, geometry_bbox_expr};
+pub use error::GeoParquetError;
 pub(crate) use extensions::{
   LodEncoding, LodLevel, LodMetadata, LodTransform, OrderingMetadata, XzOrderingMetadata,
   ZOrderingMetadata,

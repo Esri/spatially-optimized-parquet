@@ -8,8 +8,8 @@ name = "sop"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
+thiserror = "2.0"
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread"] }
 spatial = { path = "../spatial" }
 

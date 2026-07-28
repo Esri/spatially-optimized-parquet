@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use anyhow::{Context, Result, anyhow};
 use arrow_array::{Array, UInt64Array};
 use arrow_schema::Schema;
 use datafusion::common::{
@@ -29,6 +28,7 @@ use parquet::file::metadata::KeyValue;
 use crate::diagnostics::Diagnostics;
 use crate::pipeline::SharedWriteReporter;
 
+use super::OutputError;
 use super::geometry_schema::GeometrySchemaExec;
 use super::partition_plan::PartitionPlan;
 use super::reporter::WriteReporter;
@@ -48,7 +48,7 @@ pub(crate) struct WriterOptions {
 
 impl WriterOptions {
   /// Build Parquet writer options from a compression name and key-value metadata.
-  pub(crate) fn new(compression: &str, kv_metadata: &[KeyValue]) -> Result<Self> {
+  pub(crate) fn new(compression: &str, kv_metadata: &[KeyValue]) -> Result<Self, OutputError> {
     let compression = Self::parse_compression(compression)?;
     let mut options = TableParquetOptions::new();
     options.global.compression = Some(Self::datafusion_compression_name(compression));
@@ -122,7 +122,7 @@ impl WriterOptions {
     self
   }
 
-  fn parse_compression(compression: &str) -> Result<Compression> {
+  fn parse_compression(compression: &str) -> Result<Compression, OutputError> {
     let codec = match compression.to_ascii_lowercase().as_str() {
       "snappy" => Compression::SNAPPY,
       "gzip" => Compression::GZIP(GzipLevel::default()),
@@ -132,11 +132,9 @@ impl WriterOptions {
       "zstd" => Compression::ZSTD(ZstdLevel::default()),
       "uncompressed" => Compression::UNCOMPRESSED,
       other => {
-        return Err(std::io::Error::new(
-          std::io::ErrorKind::InvalidInput,
-          format!("invalid compression: {other}"),
-        ))
-        .context("parse compression");
+        return Err(OutputError::Configuration(format!(
+          "invalid compression: {other}"
+        )));
       }
     };
     Ok(codec)
@@ -197,10 +195,16 @@ impl Writer {
     write_path: String,
     writer_options: WriterOptions,
     hidden_columns: Vec<&str>,
-  ) -> Result<u64> {
+  ) -> Result<u64, OutputError> {
     let (state, logical_plan) = dataframe.into_parts();
     let context = Arc::new(TaskContext::from(&state));
-    let mut input = state.create_physical_plan(&logical_plan).await?;
+    let mut input = state
+      .create_physical_plan(&logical_plan)
+      .await
+      .map_err(|source| OutputError::DataFusion {
+        operation: "create single-file physical plan",
+        source,
+      })?;
     if input.output_partitioning().partition_count() != 1 {
       input = match input.properties().output_ordering().cloned() {
         Some(ordering) => Arc::new(SortPreservingMergeExec::new(ordering, input)),
@@ -217,8 +221,18 @@ impl Writer {
       input = Self::project_without_columns(input, &hidden_columns)?;
       None
     };
-    input = writer_options.apply_geometry_schema(input)?;
-    let parquet_options = writer_options.into_table_options(input.schema().as_ref())?;
+    input = writer_options
+      .apply_geometry_schema(input)
+      .map_err(|source| OutputError::DataFusion {
+        operation: "apply output geometry schema",
+        source,
+      })?;
+    let parquet_options = writer_options
+      .into_table_options(input.schema().as_ref())
+      .map_err(|source| OutputError::DataFusion {
+        operation: "build Parquet writer options",
+        source,
+      })?;
     let sink = TrackingSink::create(
       write_path,
       input.schema(),
@@ -236,7 +250,7 @@ impl Writer {
   fn project_without_columns(
     input: Arc<dyn ExecutionPlan>,
     hidden_columns: &[&str],
-  ) -> Result<Arc<dyn ExecutionPlan>> {
+  ) -> Result<Arc<dyn ExecutionPlan>, OutputError> {
     let expressions = input
       .schema()
       .fields()
@@ -248,7 +262,12 @@ impl Writer {
         alias: field.name().to_string(),
       })
       .collect::<Vec<_>>();
-    Ok(Arc::new(ProjectionExec::try_new(expressions, input)?))
+    ProjectionExec::try_new(expressions, input)
+      .map(|plan| Arc::new(plan) as Arc<dyn ExecutionPlan>)
+      .map_err(|source| OutputError::DataFusion {
+        operation: "project output columns",
+        source,
+      })
   }
 
   /// Write one DataFrame through partition-local Parquet sinks.
@@ -259,15 +278,35 @@ impl Writer {
     partition_by: Vec<String>,
     writer_options: WriterOptions,
     rewrite_plan: RewritePlan,
-  ) -> Result<u64>
+  ) -> Result<u64, OutputError>
   where
     RewritePlan: FnOnce(Arc<dyn ExecutionPlan>) -> DataFusionResult<Arc<dyn ExecutionPlan>>,
   {
     let (state, logical_plan) = dataframe.into_parts();
     let context = Arc::new(TaskContext::from(&state));
-    let input = rewrite_plan(state.create_physical_plan(&logical_plan).await?)?;
-    let input = writer_options.apply_geometry_schema(input)?;
-    let parquet_options = writer_options.into_table_options(input.schema().as_ref())?;
+    let input = state
+      .create_physical_plan(&logical_plan)
+      .await
+      .map_err(|source| OutputError::DataFusion {
+        operation: "create partitioned physical plan",
+        source,
+      })?;
+    let input = rewrite_plan(input).map_err(|source| OutputError::DataFusion {
+      operation: "rewrite partitioned physical plan",
+      source,
+    })?;
+    let input = writer_options
+      .apply_geometry_schema(input)
+      .map_err(|source| OutputError::DataFusion {
+        operation: "apply partitioned output geometry schema",
+        source,
+      })?;
+    let parquet_options = writer_options
+      .into_table_options(input.schema().as_ref())
+      .map_err(|source| OutputError::DataFusion {
+        operation: "build partitioned Parquet writer options",
+        source,
+      })?;
     let sink = TrackingSink::create(
       write_path,
       input.schema(),
@@ -286,25 +325,32 @@ impl Writer {
     plan: Arc<dyn ExecutionPlan>,
     sink: Arc<TrackingSink>,
     context: Arc<TaskContext>,
-  ) -> Result<u64> {
+  ) -> Result<u64, OutputError> {
     Diagnostics::with(label).print_physical_plan(plan.as_ref());
     let batches = match collect(plan, Arc::clone(&context)).await {
       Ok(batches) => batches,
       Err(error) => {
         if let Err(cleanup_error) = sink.cleanup_written_files(&context).await {
-          return Err(anyhow!(
+          return Err(OutputError::Configuration(format!(
             "parquet write failed: {error}; cleanup failed: {cleanup_error}"
-          ));
+          )));
         }
-        return Err(error.into());
+        return Err(OutputError::DataFusion {
+          operation: "execute Parquet sink",
+          source: error,
+        });
       }
     };
-    let batch = batches.first().context("write returned no row count")?;
+    let batch = batches
+      .first()
+      .ok_or_else(|| OutputError::Configuration("write returned no row count".to_string()))?;
     let values = batch
       .column(0)
       .as_any()
       .downcast_ref::<UInt64Array>()
-      .context("write result count column was not UInt64")?;
+      .ok_or_else(|| {
+        OutputError::Configuration("write result count column was not UInt64".to_string())
+      })?;
     Ok(if values.is_empty() {
       0
     } else {

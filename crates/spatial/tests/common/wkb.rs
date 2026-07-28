@@ -1,5 +1,3 @@
-use anyhow::{Result, bail};
-
 pub type DimensionalCoordinate = (f64, f64, Option<f64>, Option<f64>);
 
 pub fn point(x: f64, y: f64) -> Vec<u8> {
@@ -82,18 +80,18 @@ pub fn dimensional_polygon_rings(rings: &[&[DimensionalCoordinate]]) -> Vec<u8> 
   output
 }
 
-pub fn read_point(bytes: &[u8]) -> Result<(f64, f64)> {
+pub fn read_point(bytes: &[u8]) -> Result<(f64, f64), String> {
   require_little_endian_type(bytes, 1)?;
   Ok((read_f64(bytes, 5)?, read_f64(bytes, 13)?))
 }
 
-pub fn read_polygon_extent(bytes: &[u8]) -> Result<[f64; 4]> {
+pub fn read_polygon_extent(bytes: &[u8]) -> Result<[f64; 4], String> {
   require_little_endian_type(bytes, 3)?;
   let ring_count = read_u32(bytes, 5)?;
   if ring_count == 0 {
-    bail!("polygon missing exterior ring");
+    return Err("polygon missing exterior ring".to_string());
   }
-  let point_count = usize::try_from(read_u32(bytes, 9)?)?;
+  let point_count = usize::try_from(read_u32(bytes, 9)?).map_err(|error| error.to_string())?;
   let mut extent = [
     f64::INFINITY,
     f64::INFINITY,
@@ -157,30 +155,32 @@ fn dimensional_type(base_type: u32, has_z: bool, has_m: bool) -> u32 {
     }
 }
 
-fn require_little_endian_type(bytes: &[u8], expected_type: u32) -> Result<()> {
+fn require_little_endian_type(bytes: &[u8], expected_type: u32) -> Result<(), String> {
   if bytes.first() != Some(&1) {
-    bail!("expected little-endian WKB");
+    return Err("expected little-endian WKB".to_string());
   }
   let geometry_type = read_u32(bytes, 1)?;
   if geometry_type != expected_type {
-    bail!("expected WKB type {expected_type}, found {geometry_type}");
+    return Err(format!(
+      "expected WKB type {expected_type}, found {geometry_type}"
+    ));
   }
   Ok(())
 }
 
-fn read_u32(bytes: &[u8], offset: usize) -> Result<u32> {
+fn read_u32(bytes: &[u8], offset: usize) -> Result<u32, String> {
   let value = bytes
     .get(offset..offset + 4)
-    .ok_or_else(|| anyhow::anyhow!("truncated WKB"))?
+    .ok_or_else(|| "truncated WKB".to_string())?
     .try_into()
     .expect("slice length matches array length");
   Ok(u32::from_le_bytes(value))
 }
 
-fn read_f64(bytes: &[u8], offset: usize) -> Result<f64> {
+fn read_f64(bytes: &[u8], offset: usize) -> Result<f64, String> {
   let value = bytes
     .get(offset..offset + 8)
-    .ok_or_else(|| anyhow::anyhow!("truncated WKB"))?
+    .ok_or_else(|| "truncated WKB".to_string())?
     .try_into()
     .expect("slice length matches array length");
   Ok(f64::from_le_bytes(value))

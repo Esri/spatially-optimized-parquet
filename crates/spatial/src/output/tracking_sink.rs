@@ -3,7 +3,6 @@
 use std::fmt;
 use std::sync::Arc;
 
-use anyhow::Result;
 use arrow_schema::{DataType, SchemaRef};
 use async_trait::async_trait;
 use datafusion::common::{
@@ -14,14 +13,14 @@ use datafusion::datasource::listing::ListingTableUrl;
 use datafusion::datasource::physical_plan::FileSinkConfig;
 use datafusion::datasource::sink::DataSink;
 use datafusion::execution::TaskContext;
-use datafusion::object_store::ObjectStoreExt;
 use datafusion::logical_expr::dml::InsertOp;
+use datafusion::object_store::ObjectStoreExt;
 use datafusion::physical_plan::{
   DisplayAs, DisplayFormatType, SendableRecordBatchStream, stream::RecordBatchStreamAdapter,
 };
 use futures_util::StreamExt;
 
-use super::reporter::WriteReporter;
+use super::{OutputError, reporter::WriteReporter};
 
 /// Wraps DataFusion's Parquet sink with shared row tracking and failed-write cleanup.
 pub(super) struct TrackingSink {
@@ -38,8 +37,12 @@ impl TrackingSink {
     partition_by: Vec<String>,
     writer_options: TableParquetOptions,
     reporter: Arc<WriteReporter>,
-  ) -> Result<Arc<Self>> {
-    let parsed_url = ListingTableUrl::parse(&write_path)?;
+  ) -> Result<Arc<Self>, OutputError> {
+    let parsed_url =
+      ListingTableUrl::parse(&write_path).map_err(|source| OutputError::DataFusion {
+        operation: "parse output listing URL",
+        source,
+      })?;
     let config = FileSinkConfig {
       original_url: write_path,
       object_store_url: parsed_url.object_store(),

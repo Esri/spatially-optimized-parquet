@@ -36,3 +36,12 @@ pub(crate) enum GeometryEncoding {
   /// Represents Open Geospatial Consortium Well-Known Binary.
   Wkb,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Identifies the coordinate dimensions encoded by a geometry.
+pub(crate) enum CoordinateDimensions {
+  Xy,
+  Xyz,
+  Xym,
+  Xyzm,
+}

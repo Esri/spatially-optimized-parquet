@@ -5,10 +5,9 @@
 //! because those pairs share one optimized and quantized layout. [`GeometryKind`] retains the
 //! concrete WKB type when a codec must distinguish their binary framing.
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use super::GeometryKind;
+use super::{GeometryError, GeometryKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -26,29 +25,33 @@ pub(crate) enum GeometryType {
 
 impl GeometryType {
   /// Classify one concrete geometry kind.
-  pub(crate) fn from_kind(kind: GeometryKind) -> Result<Self> {
+  pub(crate) fn from_kind(kind: GeometryKind) -> Result<Self, GeometryError> {
     match kind {
       GeometryKind::Point => Ok(Self::Point),
       GeometryKind::MultiPoint => Ok(Self::MultiPoint),
       GeometryKind::LineString | GeometryKind::MultiLineString => Ok(Self::Polyline),
       GeometryKind::Polygon | GeometryKind::MultiPolygon => Ok(Self::Polygon),
-      GeometryKind::GeometryCollection | GeometryKind::Unknown => {
-        anyhow::bail!("unsupported geometry kind: {kind:?}")
-      }
+      GeometryKind::GeometryCollection | GeometryKind::Unknown => Err(
+        GeometryError::InvalidGeometry(format!("unsupported geometry kind: {kind:?}")),
+      ),
     }
   }
 
   /// Classify source geometry kinds while rejecting mixed representations.
-  pub(crate) fn from_kinds(kinds: &[GeometryKind]) -> Result<Self> {
+  pub(crate) fn from_kinds(kinds: &[GeometryKind]) -> Result<Self, GeometryError> {
     let mut ty = None;
     for kind in kinds {
       let next = Self::from_kind(*kind)?;
       if ty.is_some_and(|current| current != next) {
-        anyhow::bail!("mixed geometry types are not supported");
+        return Err(GeometryError::InvalidGeometry(
+          "mixed geometry types are not supported".to_string(),
+        ));
       }
       ty = Some(next);
     }
-    ty.ok_or_else(|| anyhow::anyhow!("unable to determine geometry type"))
+    ty.ok_or_else(|| {
+      GeometryError::InvalidGeometry("unable to determine geometry type".to_string())
+    })
   }
 
   /// Return the canonical geodisplay metadata label.
@@ -91,16 +94,22 @@ pub(crate) struct Geometry {
 
 impl Geometry {
   /// Build geometry from ordered coordinates and matching part lengths.
-  pub(crate) fn new(ty: GeometryType, coordinates: Vec<Coord>, lengths: Vec<u32>) -> Result<Self> {
+  pub(crate) fn new(
+    ty: GeometryType,
+    coordinates: Vec<Coord>,
+    lengths: Vec<u32>,
+  ) -> Result<Self, GeometryError> {
     let coordinate_count = lengths
       .iter()
       .try_fold(0usize, |count, length| count.checked_add(*length as usize))
-      .ok_or_else(|| anyhow::anyhow!("geometry coordinate count overflow"))?;
+      .ok_or_else(|| {
+        GeometryError::InvalidGeometry("geometry coordinate count overflow".to_string())
+      })?;
     if coordinate_count != coordinates.len() {
-      anyhow::bail!(
+      return Err(GeometryError::InvalidGeometry(format!(
         "geometry part lengths total {coordinate_count}, but geometry has {} coordinates",
         coordinates.len()
-      );
+      )));
     }
     Ok(Self {
       ty,

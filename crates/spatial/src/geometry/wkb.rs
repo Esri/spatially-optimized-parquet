@@ -1,9 +1,14 @@
 //! Reads and transforms ISO Well-Known Binary geometry.
 
-use anyhow::{Result, bail};
-use geo_traits::Dimensions;
+use super::{Coord, CoordinateDimensions, Geometry, GeometryError, GeometryKind, GeometryType};
 
-use super::{Coord, Geometry, GeometryKind, GeometryType};
+type Result<T> = std::result::Result<T, GeometryError>;
+
+macro_rules! bail {
+  ($($argument:tt)*) => {
+    return Err(GeometryError::Wkb(format!($($argument)*)))
+  };
+}
 
 const EWKB_Z: u32 = 0x8000_0000;
 const EWKB_M: u32 = 0x4000_0000;
@@ -71,7 +76,7 @@ pub(crate) enum PolygonRingOrder {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct WkbHeader {
   pub(crate) kind: GeometryKind,
-  pub(crate) dimensions: Dimensions,
+  pub(crate) dimensions: CoordinateDimensions,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -307,14 +312,14 @@ impl<'a> WkbReader<'a> {
     let coordinate_width = header
       .coordinate_width()
       .checked_mul(size_of::<f64>())
-      .ok_or_else(|| anyhow::anyhow!("WKB coordinate width overflows usize"))?;
+      .ok_or_else(|| GeometryError::Wkb("WKB coordinate width overflows usize".to_string()))?;
     let coordinate_bytes = point_count
       .checked_mul(coordinate_width)
-      .ok_or_else(|| anyhow::anyhow!("WKB ring byte length overflows usize"))?;
+      .ok_or_else(|| GeometryError::Wkb("WKB ring byte length overflows usize".to_string()))?;
     let ring_start = self.offset;
     let ring_end = ring_start
       .checked_add(coordinate_bytes)
-      .ok_or_else(|| anyhow::anyhow!("WKB ring end offset overflows usize"))?;
+      .ok_or_else(|| GeometryError::Wkb("WKB ring end offset overflows usize".to_string()))?;
     self.require_end(ring_end)?;
 
     sink.start_part(role);
@@ -414,7 +419,7 @@ impl<'a> WkbReader<'a> {
 
   fn read_count(&mut self, byte_order: ByteOrder, item: &str) -> Result<usize> {
     usize::try_from(self.read_u32(byte_order)?)
-      .map_err(|_| anyhow::anyhow!("WKB {item} count does not fit usize"))
+      .map_err(|_| GeometryError::Wkb(format!("WKB {item} count does not fit usize")))
   }
 
   fn read_coordinate(&mut self, header: ParsedHeader) -> Result<WkbCoordinate> {
@@ -447,10 +452,9 @@ impl<'a> WkbReader<'a> {
   }
 
   fn read_u8(&mut self) -> Result<u8> {
-    let value = *self
-      .bytes
-      .get(self.offset)
-      .ok_or_else(|| anyhow::anyhow!("unexpected end of WKB at byte {}", self.offset))?;
+    let value = *self.bytes.get(self.offset).ok_or_else(|| {
+      GeometryError::Wkb(format!("unexpected end of WKB at byte {}", self.offset))
+    })?;
     self.offset += 1;
     Ok(value)
   }
@@ -474,11 +478,11 @@ impl<'a> WkbReader<'a> {
   fn read_f64_at(&self, offset: usize, byte_order: ByteOrder) -> Result<f64> {
     let end = offset
       .checked_add(size_of::<f64>())
-      .ok_or_else(|| anyhow::anyhow!("WKB coordinate offset overflows usize"))?;
+      .ok_or_else(|| GeometryError::Wkb("WKB coordinate offset overflows usize".to_string()))?;
     let bytes: [u8; 8] = self
       .bytes
       .get(offset..end)
-      .ok_or_else(|| anyhow::anyhow!("unexpected end of WKB at byte {offset}"))?
+      .ok_or_else(|| GeometryError::Wkb(format!("unexpected end of WKB at byte {offset}")))?
       .try_into()
       .expect("slice length matches array length");
     Ok(match byte_order {
@@ -491,11 +495,10 @@ impl<'a> WkbReader<'a> {
     let end = self
       .offset
       .checked_add(SIZE)
-      .ok_or_else(|| anyhow::anyhow!("WKB offset overflows usize"))?;
-    let bytes = self
-      .bytes
-      .get(self.offset..end)
-      .ok_or_else(|| anyhow::anyhow!("unexpected end of WKB at byte {}", self.offset))?;
+      .ok_or_else(|| GeometryError::Wkb("WKB offset overflows usize".to_string()))?;
+    let bytes = self.bytes.get(self.offset..end).ok_or_else(|| {
+      GeometryError::Wkb(format!("unexpected end of WKB at byte {}", self.offset))
+    })?;
     self.offset = end;
     Ok(bytes.try_into().expect("slice length matches array length"))
   }
@@ -550,12 +553,12 @@ impl GeometryKind {
   }
 }
 
-fn dimensions(has_z: bool, has_m: bool) -> Dimensions {
+fn dimensions(has_z: bool, has_m: bool) -> CoordinateDimensions {
   match (has_z, has_m) {
-    (false, false) => Dimensions::Xy,
-    (true, false) => Dimensions::Xyz,
-    (false, true) => Dimensions::Xym,
-    (true, true) => Dimensions::Xyzm,
+    (false, false) => CoordinateDimensions::Xy,
+    (true, false) => CoordinateDimensions::Xyz,
+    (true, true) => CoordinateDimensions::Xyzm,
+    (false, true) => CoordinateDimensions::Xym,
   }
 }
 
@@ -589,7 +592,7 @@ fn write_iso_header(
 fn write_count(output: &mut Vec<u8>, count: usize) -> Result<()> {
   output.extend_from_slice(
     &u32::try_from(count)
-      .map_err(|_| anyhow::anyhow!("WKB count exceeds u32"))?
+      .map_err(|_| GeometryError::Wkb("WKB count exceeds u32".to_string()))?
       .to_le_bytes(),
   );
   Ok(())
@@ -629,74 +632,37 @@ fn require_kind(actual: GeometryKind, expected: GeometryKind, context: &str) -> 
 }
 
 #[cfg(test)]
-pub(crate) fn write_test_geometry(geometry: &geo::Geometry) -> Vec<u8> {
+pub(crate) fn write_test_point(x: f64, y: f64) -> Vec<u8> {
   let mut output = Vec::new();
-  write_test_geometry_into(geometry, &mut output);
+  write_header(&mut output, 1);
+  write_coordinate(&mut output, x, y);
   output
 }
 
 #[cfg(test)]
-fn write_test_geometry_into(geometry: &geo::Geometry, output: &mut Vec<u8>) {
-  use geo::Geometry;
-  match geometry {
-    Geometry::Point(point) => {
-      write_header(output, 1);
-      write_coordinate(output, point.x(), point.y());
-    }
-    Geometry::LineString(line) => {
-      write_header(output, 2);
-      write_line_string(output, line);
-    }
-    Geometry::Polygon(polygon) => {
-      write_header(output, 3);
-      write_polygon(output, polygon);
-    }
-    Geometry::MultiPoint(points) => {
-      write_header(output, 4);
-      write_u32(output, points.0.len());
-      for point in &points.0 {
-        write_test_geometry_into(&Geometry::Point(*point), output);
-      }
-    }
-    Geometry::MultiLineString(lines) => {
-      write_header(output, 5);
-      write_u32(output, lines.0.len());
-      for line in &lines.0 {
-        write_test_geometry_into(&Geometry::LineString(line.clone()), output);
-      }
-    }
-    Geometry::MultiPolygon(polygons) => {
-      write_header(output, 6);
-      write_u32(output, polygons.0.len());
-      for polygon in &polygons.0 {
-        write_test_geometry_into(&Geometry::Polygon(polygon.clone()), output);
-      }
-    }
-    Geometry::GeometryCollection(collection) => {
-      write_header(output, 7);
-      write_u32(output, collection.0.len());
-      for member in &collection.0 {
-        write_test_geometry_into(member, output);
-      }
-    }
-    other => panic!("unsupported test geometry {other:?}"),
-  }
+pub(crate) fn write_test_line_string(coordinates: &[(f64, f64)]) -> Vec<u8> {
+  let mut output = Vec::new();
+  write_header(&mut output, 2);
+  write_test_coordinate_sequence(&mut output, coordinates);
+  output
 }
 
 #[cfg(test)]
-fn write_polygon(output: &mut Vec<u8>, polygon: &geo::Polygon) {
-  write_u32(output, 1 + polygon.interiors().len());
-  write_line_string(output, polygon.exterior());
-  for interior in polygon.interiors() {
-    write_line_string(output, interior);
+pub(crate) fn write_test_polygon(rings: &[&[(f64, f64)]]) -> Vec<u8> {
+  let mut output = Vec::new();
+  write_header(&mut output, 3);
+  write_u32(&mut output, rings.len());
+  for ring in rings {
+    write_test_coordinate_sequence(&mut output, ring);
   }
+  output
 }
 
 #[cfg(test)]
-fn write_line_string(output: &mut Vec<u8>, line: &geo::LineString) {
-  write_u32(output, line.0.len());
-  for coordinate in &line.0 {
-    write_coordinate(output, coordinate.x, coordinate.y);
+fn write_test_coordinate_sequence(output: &mut Vec<u8>, coordinates: &[(f64, f64)]) {
+  write_u32(output, coordinates.len());
+  for &(x, y) in coordinates {
+    write_coordinate(output, x, y);
   }
 }
 
@@ -723,8 +689,6 @@ fn write_coordinate(output: &mut Vec<u8>, x: f64, y: f64) {
 
 #[cfg(test)]
 mod tests {
-  use geo::polygon;
-
   use super::*;
 
   #[derive(Default)]
@@ -754,10 +718,10 @@ mod tests {
   #[test]
   fn reads_iso_dimensions() {
     for (encoded_type, dimensions, extra_values) in [
-      (1_u32, Dimensions::Xy, vec![]),
-      (1001_u32, Dimensions::Xyz, vec![3.0_f64]),
-      (2001_u32, Dimensions::Xym, vec![4.0_f64]),
-      (3001_u32, Dimensions::Xyzm, vec![3.0_f64, 4.0_f64]),
+      (1_u32, CoordinateDimensions::Xy, vec![]),
+      (1001_u32, CoordinateDimensions::Xyz, vec![3.0_f64]),
+      (2001_u32, CoordinateDimensions::Xym, vec![4.0_f64]),
+      (3001_u32, CoordinateDimensions::Xyzm, vec![3.0_f64, 4.0_f64]),
     ] {
       let mut bytes = vec![1];
       bytes.extend_from_slice(&encoded_type.to_le_bytes());
@@ -774,8 +738,16 @@ mod tests {
         [WkbCoordinate {
           x: 1.0,
           y: 2.0,
-          z: matches!(dimensions, Dimensions::Xyz | Dimensions::Xyzm).then_some(3.0),
-          m: matches!(dimensions, Dimensions::Xym | Dimensions::Xyzm).then_some(4.0),
+          z: matches!(
+            dimensions,
+            CoordinateDimensions::Xyz | CoordinateDimensions::Xyzm
+          )
+          .then_some(3.0),
+          m: matches!(
+            dimensions,
+            CoordinateDimensions::Xym | CoordinateDimensions::Xyzm
+          )
+          .then_some(4.0),
         }]
       );
     }
@@ -801,23 +773,9 @@ mod tests {
 
   #[test]
   fn reverses_polygon_rings_for_esri_order() {
-    let polygon = polygon!(
-      exterior: [
-        (x: 0.0, y: 0.0),
-        (x: 4.0, y: 0.0),
-        (x: 4.0, y: 4.0),
-        (x: 0.0, y: 4.0),
-        (x: 0.0, y: 0.0),
-      ],
-      interiors: [[
-        (x: 1.0, y: 1.0),
-        (x: 1.0, y: 3.0),
-        (x: 3.0, y: 3.0),
-        (x: 3.0, y: 1.0),
-        (x: 1.0, y: 1.0),
-      ]],
-    );
-    let bytes = write_test_geometry(&geo::Geometry::Polygon(polygon));
+    let exterior = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0), (0.0, 0.0)];
+    let interior = [(1.0, 1.0), (1.0, 3.0), (3.0, 3.0), (3.0, 1.0), (1.0, 1.0)];
+    let bytes = write_test_polygon(&[&exterior, &interior]);
     let mut sink = CoordinateSink::default();
 
     visit_wkb_geometry(&bytes, PolygonRingOrder::Reverse, &mut sink).unwrap();
@@ -914,10 +872,7 @@ mod tests {
 
   #[test]
   fn reads_wkb_into_format_neutral_geometry() {
-    let bytes = write_test_geometry(&geo::Geometry::LineString(geo::LineString::from(vec![
-      (0.0, 1.0),
-      (2.0, 3.0),
-    ])));
+    let bytes = write_test_line_string(&[(0.0, 1.0), (2.0, 3.0)]);
 
     let geometry = Geometry::from_wkb(&bytes).unwrap();
 
@@ -938,9 +893,7 @@ mod tests {
     let mut bytes = vec![1];
     bytes.extend_from_slice(&4_u32.to_le_bytes());
     bytes.extend_from_slice(&1_u32.to_le_bytes());
-    bytes.extend_from_slice(&write_test_geometry(&geo::Geometry::LineString(
-      geo::LineString::from(vec![(0.0, 0.0), (1.0, 1.0)]),
-    )));
+    bytes.extend_from_slice(&write_test_line_string(&[(0.0, 0.0), (1.0, 1.0)]));
     let mut sink = CoordinateSink::default();
 
     let error = visit_wkb_geometry(&bytes, PolygonRingOrder::Preserve, &mut sink).unwrap_err();
@@ -1044,7 +997,7 @@ mod tests {
 
     let header = visit_wkb_geometry(&bytes, PolygonRingOrder::Preserve, &mut sink).unwrap();
 
-    assert_eq!(header.dimensions, Dimensions::Xyzm);
+    assert_eq!(header.dimensions, CoordinateDimensions::Xyzm);
     assert_eq!(sink.coordinates, [(1.0, 2.0)]);
   }
 
@@ -1052,10 +1005,16 @@ mod tests {
   fn strips_z_and_m_independently_from_xyzm_wkb() {
     let input = point_fixture(3);
     for (strip_z, strip_m, expected_dimensions, expected_z, expected_m) in [
-      (false, false, Dimensions::Xyzm, Some(3.0), Some(4.0)),
-      (true, false, Dimensions::Xym, None, Some(4.0)),
-      (false, true, Dimensions::Xyz, Some(3.0), None),
-      (true, true, Dimensions::Xy, None, None),
+      (
+        false,
+        false,
+        CoordinateDimensions::Xyzm,
+        Some(3.0),
+        Some(4.0),
+      ),
+      (true, false, CoordinateDimensions::Xym, None, Some(4.0)),
+      (false, true, CoordinateDimensions::Xyz, Some(3.0), None),
+      (true, true, CoordinateDimensions::Xy, None, None),
     ] {
       let output = strip_wkb_dimensions(&input, strip_z, strip_m).unwrap();
       let header = WkbHeader::read(&output).unwrap();
@@ -1077,7 +1036,7 @@ mod tests {
     let mut sink = CoordinateSink::default();
     let header = visit_wkb_geometry(&output, PolygonRingOrder::Preserve, &mut sink).unwrap();
 
-    assert_eq!(header.dimensions, Dimensions::Xym);
+    assert_eq!(header.dimensions, CoordinateDimensions::Xym);
     assert_eq!(sink.lengths, [4]);
     assert!(
       sink

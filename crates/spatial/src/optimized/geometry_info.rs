@@ -1,7 +1,5 @@
 //! Owns geometry classification and validation for spatially optimized output.
 
-use anyhow::Result;
-
 use crate::geometry::{GeometryColumn, GeometryType};
 use crate::pipeline::ResolvedSpatialSource;
 
@@ -31,15 +29,15 @@ pub(crate) struct GeometryInfo {
 
 impl GeometryInfo {
   /// Resolve optimized geometry from normalized source geometry facts.
-  pub(crate) fn resolve(source: &ResolvedSpatialSource) -> Result<Self> {
+  pub(crate) fn resolve(source: &ResolvedSpatialSource) -> Self {
     let ty = source.geometry_type;
-    Ok(Self {
+    Self {
       geometry: source.geometry.clone(),
       ty,
       clustering_family: ClusteringFamily::from_geometry_type(ty),
       has_z: source.has_z,
       has_m: source.has_m,
-    })
+    }
   }
 }
 

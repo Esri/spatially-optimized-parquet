@@ -3,7 +3,6 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
 use arrow_array::RecordBatch;
 use arrow_schema::{Schema, SchemaRef};
 use datafusion::dataframe::DataFrame;
@@ -38,12 +37,11 @@ pub fn write_parquet(
   writer.close().unwrap();
 }
 
-pub async fn scan_parquet(input_path: &str) -> Result<DataFrame> {
+pub async fn scan_parquet(input_path: &str) -> datafusion::common::Result<DataFrame> {
   let session_config = SessionConfig::new().with_collect_statistics(false);
   SessionContext::new_with_config(session_config)
     .read_parquet(input_path, ParquetReadOptions::default())
     .await
-    .context("read parquet")
 }
 
 pub fn geoparquet_kv(primary_column: &str, geometry_types: &[&str]) -> KeyValue {

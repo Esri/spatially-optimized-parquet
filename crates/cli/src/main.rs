@@ -11,13 +11,14 @@
 mod write_progress;
 
 use std::path::PathBuf;
+use std::process::ExitCode;
 use std::sync::Arc;
 
-use anyhow::Result;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use spatial::{
-  DEFAULT_OUTPUT_WKID, InputOptions, MultiscaleEncoding, OutputMode, OutputOptions, RowRange,
-  SourceFormat, SpatialPipelineOptions, ValidationReport,
+  DEFAULT_OUTPUT_WKID, InputOptions, MultiscaleEncoding, OutputMode, OutputOptions, PipelineError,
+  RowRange, SourceFormat, SpatialPipelineOptions, ValidationError, ValidationFailure,
+  ValidationReport,
 };
 
 use crate::write_progress::StdoutWriteReporter;
@@ -178,7 +179,21 @@ struct ValidateCommand {
   input: PathBuf,
 }
 
-fn main() -> Result<()> {
+#[derive(Debug, thiserror::Error)]
+enum CliError {
+  #[error(transparent)]
+  Runtime(#[from] std::io::Error),
+  #[error(transparent)]
+  Pipeline(#[from] PipelineError),
+  #[error(transparent)]
+  Validation(#[from] ValidationError),
+  #[error(transparent)]
+  InvalidDataset(#[from] ValidationFailure),
+}
+
+type CliResult<T> = std::result::Result<T, CliError>;
+
+fn main() -> ExitCode {
   let cli = Cli::parse();
   let worker_threads = match &cli.command {
     Command::Write(args) => args.cores,
@@ -189,10 +204,20 @@ fn main() -> Result<()> {
   if let Some(worker_threads) = worker_threads {
     runtime.worker_threads(worker_threads);
   }
-  runtime.build()?.block_on(run(cli))
+  let result = runtime
+    .build()
+    .map_err(CliError::from)
+    .and_then(|runtime| runtime.block_on(run(cli)));
+  match result {
+    Ok(()) => ExitCode::SUCCESS,
+    Err(error) => {
+      eprintln!("Error: {error}");
+      ExitCode::FAILURE
+    }
+  }
 }
 
-async fn run(cli: Cli) -> Result<()> {
+async fn run(cli: Cli) -> CliResult<()> {
   match cli.command {
     Command::Write(args) => {
       let reporter = StdoutWriteReporter::new(!args.no_progress);
@@ -263,14 +288,14 @@ fn render_validation_report(report: &ValidationReport) {
 }
 
 /// Parse a zero-based input row offset.
-fn parse_start(value: &str) -> Result<usize, String> {
+fn parse_start(value: &str) -> std::result::Result<usize, String> {
   value
     .parse::<usize>()
     .map_err(|_| format!("invalid value for --start: {value}"))
 }
 
 /// Parse a non-zero maximum row count.
-fn parse_num(value: &str) -> Result<usize, String> {
+fn parse_num(value: &str) -> std::result::Result<usize, String> {
   let num = value
     .parse::<usize>()
     .map_err(|_| format!("invalid value for --num: {value}"))?;
@@ -281,7 +306,7 @@ fn parse_num(value: &str) -> Result<usize, String> {
 }
 
 /// Parse a non-zero whole-GiB DataFusion memory limit.
-fn parse_memory_gb(value: &str) -> Result<usize, String> {
+fn parse_memory_gb(value: &str) -> std::result::Result<usize, String> {
   let memory_gb = parse_positive_usize(value, "--memory")?;
   memory_gb
     .checked_mul(1024 * 1024 * 1024)
@@ -289,16 +314,16 @@ fn parse_memory_gb(value: &str) -> Result<usize, String> {
 }
 
 /// Parse a non-zero DataFusion sort concurrency.
-fn parse_sort_concurrency(value: &str) -> Result<usize, String> {
+fn parse_sort_concurrency(value: &str) -> std::result::Result<usize, String> {
   parse_positive_usize(value, "--sort-concurrency")
 }
 
 /// Parse a non-zero Tokio worker-thread count.
-fn parse_cores(value: &str) -> Result<usize, String> {
+fn parse_cores(value: &str) -> std::result::Result<usize, String> {
   parse_positive_usize(value, "--cores")
 }
 
-fn parse_positive_usize(value: &str, option: &str) -> Result<usize, String> {
+fn parse_positive_usize(value: &str, option: &str) -> std::result::Result<usize, String> {
   let parsed = value
     .parse::<usize>()
     .map_err(|_| format!("invalid value for {option}: {value}"))?;
@@ -308,7 +333,7 @@ fn parse_positive_usize(value: &str, option: &str) -> Result<usize, String> {
   Ok(parsed)
 }
 
-fn parse_cluster_depth(value: &str) -> Result<u32, String> {
+fn parse_cluster_depth(value: &str) -> std::result::Result<u32, String> {
   let depth = value
     .parse::<u32>()
     .map_err(|_| format!("invalid value for --cluster-depth: {value}"))?;

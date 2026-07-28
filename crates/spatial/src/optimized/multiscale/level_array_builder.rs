@@ -4,7 +4,7 @@ use arrow_array::ArrayRef;
 use arrow_schema::DataType;
 
 use super::MultiscaleEncoding;
-use crate::geometry::GeometryType;
+use crate::geometry::{GeometryError, GeometryType};
 
 use super::{GEOLOD_COLUMN, MultiscaleLevel};
 use crate::geometry::{NativeGeometryArrayBuilder, PbfArrayBuilder, QuantizedGeometry};
@@ -74,9 +74,9 @@ impl MultiscaleEncoding {
 }
 
 impl MultiscaleLevelArrayBuilder {
-  pub(crate) fn append(&mut self, geometry: &QuantizedGeometry) -> anyhow::Result<()> {
+  pub(crate) fn append(&mut self, geometry: &QuantizedGeometry) -> Result<(), GeometryError> {
     match self {
-      Self::Pbf(writer) => writer.append(geometry),
+      Self::Pbf(writer) => Ok(writer.append(geometry)?),
       Self::QuantizedNative(writer) => {
         writer.append_quantized_geometry(geometry);
         Ok(())

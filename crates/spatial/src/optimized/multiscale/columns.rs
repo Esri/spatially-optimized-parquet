@@ -1,8 +1,8 @@
 //! Names generated and intermediate columns used by optimized multiscale output.
 
-use anyhow::{Result, bail};
 use arrow_schema::Schema;
 
+use crate::geometry::GeometryError;
 /// Defines the persisted spatial ordering key column.
 pub(crate) const GEOKEY_COLUMN: &str = "geokey";
 /// Defines the generated point x-coordinate column.
@@ -30,12 +30,14 @@ const GENERATED_OUTPUT_COLUMNS: [&str; 8] = [
 ];
 
 /// Reject source columns reserved for internal projection state.
-pub(crate) fn validate_internal_projection_columns(schema: &Schema) -> Result<()> {
+pub(crate) fn validate_internal_projection_columns(schema: &Schema) -> Result<(), GeometryError> {
   if let Some(column) = GENERATED_OUTPUT_COLUMNS
     .iter()
     .find(|column| schema.field_with_name(column).is_ok())
   {
-    bail!("input column '{column}' conflicts with an internal projection column");
+    return Err(GeometryError::InvalidGeometry(format!(
+      "input column '{column}' conflicts with an internal projection column"
+    )));
   }
   Ok(())
 }

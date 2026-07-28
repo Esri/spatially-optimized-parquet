@@ -7,13 +7,12 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::Result;
 use arrow_schema::SchemaRef;
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
 use futures_util::future::BoxFuture;
 
-use super::{SourceDatasetMetadata, SourceFormat, gpkg, parquet};
+use super::{InputError, SourceDatasetMetadata, SourceFormat, gpkg, parquet};
 use crate::geometry::GeometryColumn;
 
 /// Selects a zero-based contiguous range of source rows.
@@ -103,14 +102,14 @@ pub(super) fn is_http_location(value: &str) -> bool {
 pub(crate) async fn open_input(
   format: SourceFormat,
   options: &InputOpenOptions,
-) -> Result<Arc<dyn InputSource>> {
+) -> Result<Arc<dyn InputSource>, InputError> {
   if let Some(path) = options.local_path()
     && !path.exists()
   {
-    return Err(anyhow::anyhow!(
+    return Err(InputError::Metadata(format!(
       "input path does not exist: {}",
       path.display()
-    ));
+    )));
   }
 
   match format {
@@ -122,17 +121,17 @@ pub(crate) async fn open_input(
 /// Defines the normalized input contract consumed by output layout resolution.
 pub(crate) trait InputSource: Send + Sync {
   /// Load the normalized Arrow schema.
-  fn schema(&self) -> Result<SchemaRef>;
+  fn schema(&self) -> Result<SchemaRef, InputError>;
   /// Return the row count discovered from source metadata.
-  fn total_rows(&self) -> Result<u64>;
+  fn total_rows(&self) -> Result<u64, InputError>;
   /// Infer the geometry column and encoding when metadata permits it.
-  fn inferred_geometry_column(&self) -> Result<Option<GeometryColumn>>;
+  fn inferred_geometry_column(&self) -> Result<Option<GeometryColumn>, InputError>;
   /// Return normalized geometry and pass-through file metadata.
-  fn source_metadata(&self) -> Result<SourceDatasetMetadata>;
+  fn source_metadata(&self) -> Result<SourceDatasetMetadata, InputError>;
   /// Create a lazy DataFusion DataFrame for a selected row range.
   fn to_dataframe<'a>(
     &'a self,
     ctx: &'a SessionContext,
     row_range: RowRange,
-  ) -> BoxFuture<'a, Result<DataFrame>>;
+  ) -> BoxFuture<'a, Result<DataFrame, InputError>>;
 }

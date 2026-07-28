@@ -1,6 +1,6 @@
 //! Defines cluster keys and range partitions for spatially optimized output.
 
-use anyhow::{Result, bail};
+use datafusion::error::Result as DataFusionResult;
 use datafusion::logical_expr::expr_fn::ident;
 use datafusion::logical_expr::{Expr, SortExpr, when};
 use datafusion::prelude::lit;
@@ -42,10 +42,12 @@ impl ClusteringFamily {
   pub(crate) fn validate_partition_column(
     self,
     source_schema: &arrow_schema::Schema,
-  ) -> Result<()> {
+  ) -> Result<(), String> {
     let partition_column = self.cluster_partition_column();
     if source_schema.field_with_name(partition_column).is_ok() {
-      bail!("output partition column '{partition_column}' conflicts with an existing input column");
+      return Err(format!(
+        "output partition column '{partition_column}' conflicts with an existing input column"
+      ));
     }
     Ok(())
   }
@@ -59,7 +61,7 @@ impl ClusterRangeBoundaries {
     }
   }
 
-  pub(crate) fn partition_expr(&self, cluster_key_column: &str) -> Result<Expr> {
+  pub(crate) fn partition_expr(&self, cluster_key_column: &str) -> DataFusionResult<Expr> {
     let mut lower_bounds = Vec::with_capacity(self.boundaries.len() + 1);
     lower_bounds.push(self.min_value);
     lower_bounds.extend(self.boundaries.iter().copied());

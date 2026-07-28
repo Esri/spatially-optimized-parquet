@@ -3,7 +3,6 @@ mod common;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use anyhow::Result;
 use arrow_array::{
   Array, BinaryArray, Float64Array, Int32Array, Int64Array, ListArray, RecordBatch, StringArray,
   StructArray, UInt64Array,
@@ -12,7 +11,7 @@ use arrow_schema::{DataType, Field, Schema};
 use gdal_sys::OGRwkbGeometryType;
 use parquet::basic::LogicalType;
 use spatial::{
-  InputOptions, MultiscaleEncoding, OutputMode, OutputOptions, Pipeline, RowRange,
+  InputOptions, MultiscaleEncoding, OutputMode, OutputOptions, Pipeline, PipelineError, RowRange,
   SpatialPipelineOptions, SpatialPipelineResult, ValidationRule, WriteProgress, validate,
 };
 use tempfile::TempDir;
@@ -41,7 +40,7 @@ fn run_optimized(
   geometry_column: Option<String>,
   input_wkid: Option<u32>,
   covering: bool,
-) -> Result<SpatialPipelineResult> {
+) -> Result<SpatialPipelineResult, PipelineError> {
   run_optimized_with_stripping(
     input,
     output,
@@ -55,7 +54,10 @@ fn run_optimized(
   )
 }
 
-fn run_optimized_native(input: &Path, output: &Path) -> Result<SpatialPipelineResult> {
+fn run_optimized_native(
+  input: &Path,
+  output: &Path,
+) -> Result<SpatialPipelineResult, PipelineError> {
   run_optimized_multiscale(input, output, MultiscaleEncoding::QuantizedNative)
 }
 
@@ -63,7 +65,7 @@ fn run_optimized_multiscale(
   input: &Path,
   output: &Path,
   encoding: MultiscaleEncoding,
-) -> Result<SpatialPipelineResult> {
+) -> Result<SpatialPipelineResult, PipelineError> {
   runtime().block_on(Pipeline::run(SpatialPipelineOptions {
     input: InputOptions {
       location: input.to_string_lossy().into_owned(),
@@ -92,7 +94,7 @@ fn run_optimized_with_stripping(
   covering: bool,
   strip_z: bool,
   strip_m: bool,
-) -> Result<SpatialPipelineResult> {
+) -> Result<SpatialPipelineResult, PipelineError> {
   runtime().block_on(Pipeline::run(SpatialPipelineOptions {
     input: InputOptions {
       location: input.to_string_lossy().into_owned(),
@@ -1063,12 +1065,7 @@ fn optimized_output_writes_complex_geometry_display_struct_and_metadata() {
     parquet::basic::Compression::SNAPPY,
     &[geoparquet_kv("geometry", &["Polygon"])],
   );
-  run_optimized_multiscale(
-    &input,
-    &output,
-    MultiscaleEncoding::Pbf,
-  )
-  .unwrap();
+  run_optimized_multiscale(&input, &output, MultiscaleEncoding::Pbf).unwrap();
   let validation = validate(&output).unwrap();
   assert!(
     validation

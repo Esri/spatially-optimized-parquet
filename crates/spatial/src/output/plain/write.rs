@@ -1,11 +1,10 @@
 //! Selects and writes plain GeoParquet output.
 
-use anyhow::{Context, Result};
 use arrow_schema::Schema;
 use datafusion::logical_expr::Expr;
 use datafusion::logical_expr::expr_fn::ident;
 
-use crate::output::{OutputPath, Writer, WriterOptions};
+use crate::output::{OutputError, OutputPath, Writer, WriterOptions};
 use crate::pipeline::SharedWriteReporter;
 
 use crate::geoparquet::{COVERING_BBOX_COLUMN, GeoMetadata, GeoMetadataInput};
@@ -38,7 +37,11 @@ impl<'a> PlainWriter<'a> {
   }
 
   /// Write one GeoParquet file from prepared spatial data.
-  pub(crate) async fn write(self, covering: bool, compression: Option<&str>) -> Result<u64> {
+  pub(crate) async fn write(
+    self,
+    covering: bool,
+    compression: Option<&str>,
+  ) -> Result<u64, OutputError> {
     let mut expressions: Vec<Expr> = self
       .source_schema
       .fields()
@@ -52,7 +55,15 @@ impl<'a> PlainWriter<'a> {
     debug_assert!(expressions.iter().any(|expression| {
       matches!(expression, Expr::Column(column) if column.name == self.context.source().geometry.column)
     }));
-    let dataframe = self.context.frame().dataframe().select(expressions)?;
+    let dataframe = self
+      .context
+      .frame()
+      .dataframe()
+      .select(expressions)
+      .map_err(|source| OutputError::DataFusion {
+        operation: "select plain output columns",
+        source,
+      })?;
     let geo_metadata = GeoMetadataInput {
       geometry_column: &self.context.source().geometry.column,
       geometry_types: &self.context.source().geometry_types,
@@ -77,7 +88,9 @@ impl<'a> PlainWriter<'a> {
         .reprojection()
         .target_spatial_reference()
         .wkid
-        .context("missing output spatial-reference WKID")?
+        .ok_or_else(|| {
+          OutputError::Configuration("missing output spatial-reference WKID".to_string())
+        })?
     );
     let writer_options = WriterOptions::new(compression.unwrap_or("snappy"), &metadata)?
       .with_geometry_column(geometry_column, geometry_crs);
@@ -86,7 +99,7 @@ impl<'a> PlainWriter<'a> {
       .paths()?
       .into_iter()
       .next()
-      .context("missing output path")?
+      .ok_or_else(|| OutputError::Configuration("missing output path".to_string()))?
       .to_string_lossy()
       .into_owned();
     Writer::new(self.total_rows, self.write_reporter)

@@ -1,35 +1,55 @@
 //! Scans selected WKB values for exact geometry kinds and extents.
 
-use anyhow::{Context, Result, bail};
 use futures_util::StreamExt;
 
 use crate::geometry::{Extent2D, GeometryArray, GeometryKind, WkbHeader};
+use crate::pipeline::PipelineError;
 
 pub(super) async fn scan_geometry_metadata(
   dataframe: datafusion::dataframe::DataFrame,
   geometry_column: &str,
-) -> Result<(Vec<GeometryKind>, Extent2D)> {
+) -> Result<(Vec<GeometryKind>, Extent2D), PipelineError> {
   let mut geometry_types = Vec::new();
   let mut full_extent: Option<Extent2D> = None;
   let mut stream = dataframe
-    .select_columns(&[geometry_column])?
+    .select_columns(&[geometry_column])
+    .map_err(|source| PipelineError::DataFusion {
+      operation: "select geometry metadata column",
+      source,
+    })?
     .execute_stream()
     .await
-    .context("scan selected geometry metadata")?;
+    .map_err(|source| PipelineError::DataFusion {
+      operation: "scan selected geometry metadata",
+      source,
+    })?;
   while let Some(batch) = stream.next().await {
-    let batch = batch?;
-    let array = batch
-      .column_by_name(geometry_column)
-      .with_context(|| format!("missing geometry column '{geometry_column}'"))?;
-    let geometry = GeometryArray::try_new(array.as_ref()).map_err(anyhow::Error::from)?;
+    let batch = batch.map_err(|source| PipelineError::DataFusion {
+      operation: "read geometry metadata batch",
+      source,
+    })?;
+    let array = batch.column_by_name(geometry_column).ok_or_else(|| {
+      PipelineError::InvalidRequest(format!("missing geometry column '{geometry_column}'"))
+    })?;
+    let geometry =
+      GeometryArray::try_new(array.as_ref()).map_err(|source| PipelineError::DataFusion {
+        operation: "read geometry metadata array",
+        source,
+      })?;
     scan_binary_values(&geometry, &mut geometry_types, &mut full_extent)?;
   }
   if geometry_types.is_empty() {
-    bail!("unable to determine geometry type from selected rows");
+    return Err(PipelineError::InvalidRequest(
+      "unable to determine geometry type from selected rows".to_string(),
+    ));
   }
   Ok((
     geometry_types,
-    full_extent.context("unable to determine geometry extent from selected rows")?,
+    full_extent.ok_or_else(|| {
+      PipelineError::InvalidRequest(
+        "unable to determine geometry extent from selected rows".to_string(),
+      )
+    })?,
   ))
 }
 
@@ -37,7 +57,7 @@ fn scan_binary_values(
   geometry: &GeometryArray<'_>,
   geometry_types: &mut Vec<GeometryKind>,
   full_extent: &mut Option<Extent2D>,
-) -> Result<()> {
+) -> Result<(), PipelineError> {
   for value in geometry.values() {
     let Some(bytes) = value else {
       continue;

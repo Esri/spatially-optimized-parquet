@@ -1,7 +1,7 @@
 //! Adds geometry helpers and spatial cluster keys to DataFusion dataframes.
 
-use anyhow::Result;
 use datafusion::dataframe::DataFrame;
+use datafusion::error::Result;
 use datafusion::functions::core::expr_ext::FieldAccessor;
 
 use crate::geometry::Extent2D;

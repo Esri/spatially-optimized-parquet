@@ -10,13 +10,12 @@ use gdal::spatial_ref::SpatialRef;
 use gdal::vector::{Feature, Geometry, LayerAccess, LayerOptions};
 use gdal::{Dataset, DriverManager};
 use gdal_sys::{OGRFieldType, OGRwkbGeometryType};
-use geo_traits::Dimensions;
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
 use crate::geometry::{
-  Extent2D, GeometryArray, GeometryKind, PolygonRingOrder, WkbCoordinate, WkbPartRole, WkbSink,
-  visit_wkb_geometry,
+  CoordinateDimensions, Extent2D, GeometryArray, GeometryKind, PolygonRingOrder, WkbCoordinate,
+  WkbPartRole, WkbSink, visit_wkb_geometry,
 };
 use crate::input::{InputOpenOptions, InputSource, RowRange, SourceFormat, open_input};
 use crate::session::DataFusionSession;
@@ -599,7 +598,7 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
     dimension_values: &'static str,
     has_z: bool,
     has_m: bool,
-    dimensions: Dimensions,
+    dimensions: CoordinateDimensions,
   }
 
   struct GeometryCase {
@@ -615,21 +614,21 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
       dimension_values: "3",
       has_z: true,
       has_m: false,
-      dimensions: Dimensions::Xyz,
+      dimensions: CoordinateDimensions::Xyz,
     },
     DimensionCase {
       suffix: "M",
       dimension_values: "4",
       has_z: false,
       has_m: true,
-      dimensions: Dimensions::Xym,
+      dimensions: CoordinateDimensions::Xym,
     },
     DimensionCase {
       suffix: "ZM",
       dimension_values: "3 4",
       has_z: true,
       has_m: true,
-      dimensions: Dimensions::Xyzm,
+      dimensions: CoordinateDimensions::Xyzm,
     },
   ];
   let geometry_cases = [

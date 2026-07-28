@@ -1596,16 +1596,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "earcutr"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79127ed59a85d7687c409e9978547cffb7dc79675355ed22da6b66fd5f6ead01"
-dependencies = [
- "itertools 0.11.0",
- "num-traits",
-]
-
-[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1676,12 +1666,6 @@ dependencies = [
  "miniz_oxide",
  "zlib-rs",
 ]
-
-[[package]]
-name = "float_next_after"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8bf7cc16383c4b8d58b9905a8509f02926ce3058053c056376248d958c9df1e8"
 
 [[package]]
 name = "fnv"
@@ -1846,26 +1830,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "geo"
-version = "0.32.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f3901269ec6d4f6068d3f09e5f02f995bd076398dcd1dfec407cd230b02d11b"
-dependencies = [
- "earcutr",
- "float_next_after",
- "geo-types",
- "geographiclib-rs",
- "i_overlay",
- "log",
- "num-traits",
- "rand 0.8.5",
- "robust",
- "rstar",
- "sif-itree",
- "spade",
-]
-
-[[package]]
 name = "geo-traits"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1882,18 +1846,7 @@ checksum = "24f8647af4005fa11da47cd56252c6ef030be8fa97bdbf355e7dfb6348f0a82c"
 dependencies = [
  "approx",
  "num-traits",
- "rayon",
- "rstar",
  "serde",
-]
-
-[[package]]
-name = "geographiclib-rs"
-version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5a7f08910fd98737a6eda7568e7c5e645093e073328eeef49758cfe8b0489c7"
-dependencies = [
- "libm",
 ]
 
 [[package]]
@@ -1975,15 +1928,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hash32"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47d60b12902ba28e2730cd37e95b8c9223af2808df9e902d4df49588d1470606"
-dependencies = [
- "byteorder",
-]
-
-[[package]]
 name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1995,8 +1939,6 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
- "allocator-api2",
- "equivalent",
  "foldhash 0.1.5",
 ]
 
@@ -2009,16 +1951,6 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash 0.2.0",
-]
-
-[[package]]
-name = "heapless"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bfb9eb618601c89945a70e254898da93b13be0388091d42117462b265bb3fad"
-dependencies = [
- "hash32",
- "stable_deref_trait",
 ]
 
 [[package]]
@@ -2146,49 +2078,6 @@ dependencies = [
  "tower-service",
  "tracing",
 ]
-
-[[package]]
-name = "i_float"
-version = "1.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "010025c2c532c8d82e42d0b8bb5184afa449fa6f06c709ea9adcb16c49ae405b"
-dependencies = [
- "libm",
-]
-
-[[package]]
-name = "i_key_sort"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9190f86706ca38ac8add223b2aed8b1330002b5cdbbce28fb58b10914d38fc27"
-
-[[package]]
-name = "i_overlay"
-version = "4.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "413183068e6e0289e18d7d0a1f661b81546e6918d5453a44570b9ab30cbed1b3"
-dependencies = [
- "i_float",
- "i_key_sort",
- "i_shape",
- "i_tree",
- "rayon",
-]
-
-[[package]]
-name = "i_shape"
-version = "1.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ea154b742f7d43dae2897fcd5ead86bc7b5eefcedd305a7ebf9f69d44d61082"
-dependencies = [
- "i_float",
-]
-
-[[package]]
-name = "i_tree"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35e6d558e6d4c7b82bc51d9c771e7a927862a161a7d87bf2b0541450e0e20915"
 
 [[package]]
 name = "iana-time-zone"
@@ -2351,15 +2240,6 @@ name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
-
-[[package]]
-name = "itertools"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1c173a5686ce8bfa551b3563d0c2170bf24ca44da99c7ca4bfdab5418c3fe57"
-dependencies = [
- "either",
-]
 
 [[package]]
 name = "itertools"
@@ -3140,22 +3020,11 @@ checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
 name = "rand"
-version = "0.8.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
-dependencies = [
- "libc",
- "rand_chacha 0.3.1",
- "rand_core 0.6.4",
-]
-
-[[package]]
-name = "rand"
 version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6db2770f06117d490610c7488547d543617b21bfa07796d7a12f6f1bd53850d1"
 dependencies = [
- "rand_chacha 0.9.0",
+ "rand_chacha",
  "rand_core 0.9.5",
 ]
 
@@ -3172,31 +3041,12 @@ dependencies = [
 
 [[package]]
 name = "rand_chacha"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
-dependencies = [
- "ppv-lite86",
- "rand_core 0.6.4",
-]
-
-[[package]]
-name = "rand_chacha"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
 dependencies = [
  "ppv-lite86",
  "rand_core 0.9.5",
-]
-
-[[package]]
-name = "rand_core"
-version = "0.6.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
-dependencies = [
- "getrandom 0.2.17",
 ]
 
 [[package]]
@@ -3355,23 +3205,6 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "robust"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e27ee8bb91ca0adcf0ecb116293afa12d393f9c2b9b9cd54d33e8078fe19839"
-
-[[package]]
-name = "rstar"
-version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "421400d13ccfd26dfa5858199c30a5d76f9c54e0dba7575273025b43c5175dbb"
-dependencies = [
- "heapless",
- "num-traits",
- "smallvec",
 ]
 
 [[package]]
@@ -3593,12 +3426,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
-name = "sif-itree"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7f45b8998ced5134fb1d75732c77842a3e888f19c1ff98481822e8fbfbf930b"
-
-[[package]]
 name = "simd-adler32"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3645,22 +3472,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "spade"
-version = "2.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb313e1c8afee5b5647e00ee0fe6855e3d529eb863a0fdae1d60006c4d1e9990"
-dependencies = [
- "hashbrown 0.15.5",
- "num-traits",
- "robust",
- "smallvec",
-]
-
-[[package]]
 name = "spatial"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "arrow-array",
  "arrow-schema",
  "async-trait",
@@ -3671,9 +3485,6 @@ dependencies = [
  "gdal",
  "gdal-src",
  "gdal-sys",
- "geo",
- "geo-traits",
- "geo-types",
  "object_store",
  "parquet",
  "parquet-geospatial",
@@ -3691,13 +3502,13 @@ dependencies = [
 name = "spatial-cli"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "arrow-array",
  "arrow-schema",
  "clap",
  "parquet",
  "spatial",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
 ]
 

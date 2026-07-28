@@ -1,7 +1,5 @@
 //! Plans the multiscale geometry representations emitted for complex geometry features.
 
-use anyhow::Result;
-
 use crate::geometry::{GeometryType, QuantizationTransform};
 use crate::geoparquet::{DEFAULT_OUTPUT_WKID, WEB_MERCATOR_OUTPUT_WKID};
 
@@ -37,7 +35,7 @@ pub(crate) struct MultiscaleLevel {
 
 impl MultiscaleLevel {
   /// Create supported even-numbered level specifications for the target spatial reference.
-  pub(crate) fn create_all(output_wkid: u32, geometry_type: GeometryType) -> Result<Vec<Self>> {
+  pub(crate) fn create_all(output_wkid: u32, geometry_type: GeometryType) -> Vec<Self> {
     let min_length = Self::min_vertex_count(geometry_type);
     let mut resolution = match output_wkid {
       DEFAULT_OUTPUT_WKID => FIRST_LEVEL_RESOLUTION,
@@ -65,7 +63,7 @@ impl MultiscaleLevel {
       scale /= 2.0;
     }
 
-    Ok(levels)
+    levels
   }
 
   fn min_vertex_count(geometry_type: GeometryType) -> usize {
@@ -83,7 +81,7 @@ mod tests {
 
   #[test]
   fn creates_even_wgs84_levels() {
-    let levels = MultiscaleLevel::create_all(DEFAULT_OUTPUT_WKID, GeometryType::Polygon).unwrap();
+    let levels = MultiscaleLevel::create_all(DEFAULT_OUTPUT_WKID, GeometryType::Polygon);
     assert_eq!(levels.first().unwrap().level, 0);
     assert_eq!(levels.last().unwrap().level, 16);
     assert_eq!(levels[0].min_length, 3);
@@ -100,8 +98,7 @@ mod tests {
 
   #[test]
   fn creates_web_mercator_levels() {
-    let levels =
-      MultiscaleLevel::create_all(WEB_MERCATOR_OUTPUT_WKID, GeometryType::Polygon).unwrap();
+    let levels = MultiscaleLevel::create_all(WEB_MERCATOR_OUTPUT_WKID, GeometryType::Polygon);
     assert_eq!(levels[0].resolution, FIRST_PROJECTED_LEVEL_RESOLUTION);
     assert_eq!(
       levels[0].transform.scale,

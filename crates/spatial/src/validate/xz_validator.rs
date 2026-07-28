@@ -8,6 +8,7 @@ use crate::input::parquet::PartitionFamily;
 use crate::optimized::{ClusterKey, GeometryPartRole, GeometryPartSink};
 use crate::optimized::{ClusteringIndexXZ, GeodisplayEncoding};
 
+use super::ValidationError;
 use super::dataset_validator::ClusteringRange;
 use super::file_validator::FileValidator;
 use super::geometry_validator::GeometryValidator;
@@ -131,7 +132,7 @@ impl XzValidator {
       let level_values = level_paths
         .iter()
         .map(|path| FileValidator::array_at_path(batch, path))
-        .collect::<anyhow::Result<Vec<_>>>()?;
+        .collect::<Result<Vec<_>, ValidationError>>()?;
       let covering_view = CoveringExtentView::from_batch(batch, contract);
 
       for row_index in 0..batch.num_rows() {

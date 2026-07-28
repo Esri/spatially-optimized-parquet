@@ -13,7 +13,6 @@
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use anyhow::{Context, Result, bail};
 use datafusion::execution::context::SessionContext;
 use datafusion_execution::config::SessionConfig;
 use datafusion_execution::memory_pool::{FairSpillPool, TrackConsumersPool};
@@ -25,6 +24,26 @@ const DEFAULT_SORT_SPILL_RESERVATION_BYTES: usize = 10 * 1024 * 1024;
 const TRACKED_MEMORY_CONSUMER_COUNT: usize = 5;
 const NO_IN_PLACE_SORT_THRESHOLD_BYTES: usize = 1;
 const SORT_SPILL_RESERVATION_ENV: &str = "OPT_PARQUET_DF_SORT_SPILL_RESERVATION_BYTES";
+
+/// Represents failures while configuring one DataFusion execution session.
+#[derive(Debug, thiserror::Error)]
+pub enum SessionError {
+  /// Reports an invalid requested memory limit.
+  #[error("DataFusion memory limit must be >= 1 byte")]
+  InvalidMemoryLimit,
+  /// Reports an invalid requested partition count.
+  #[error("DataFusion target partitions must be >= 1")]
+  InvalidPartitionCount,
+  /// Reports temporary spill-directory creation failures.
+  #[error("create DataFusion spill directory: {0}")]
+  SpillDirectory(#[source] std::io::Error),
+  /// Reports DataFusion runtime construction failures.
+  #[error("create DataFusion runtime: {0}")]
+  Runtime(#[source] datafusion::common::DataFusionError),
+  /// Reports unavailable or unrepresentable system memory.
+  #[error("{0}")]
+  Memory(String),
+}
 
 /// Owns a DataFusion context and the temporary spill directory required by its runtime.
 ///
@@ -42,16 +61,17 @@ impl DataFusionSession {
   pub(crate) fn new(
     memory_limit_bytes: Option<usize>,
     target_partitions: Option<usize>,
-  ) -> Result<Self> {
+  ) -> Result<Self, SessionError> {
     if memory_limit_bytes == Some(0) {
-      bail!("DataFusion memory limit must be >= 1 byte");
+      return Err(SessionError::InvalidMemoryLimit);
     }
     if target_partitions == Some(0) {
-      bail!("DataFusion target partitions must be >= 1");
+      return Err(SessionError::InvalidPartitionCount);
     }
     let spill_dir = tempfile::Builder::new()
       .prefix("opt-parquet-datafusion-spill-")
-      .tempdir()?;
+      .tempdir()
+      .map_err(SessionError::SpillDirectory)?;
     let memory_limit_bytes = memory_limit_bytes.unwrap_or(Self::default_memory_limit_bytes()?);
     let runtime = Arc::new(Self::new_runtime_env(spill_dir.path(), memory_limit_bytes)?);
     let mut session_config = SessionConfig::new()
@@ -76,7 +96,10 @@ impl DataFusionSession {
     &self.ctx
   }
 
-  fn new_runtime_env(spill_dir: &std::path::Path, memory_limit_bytes: usize) -> Result<RuntimeEnv> {
+  fn new_runtime_env(
+    spill_dir: &std::path::Path,
+    memory_limit_bytes: usize,
+  ) -> Result<RuntimeEnv, SessionError> {
     let memory_pool = Arc::new(TrackConsumersPool::new(
       FairSpillPool::new(memory_limit_bytes),
       NonZeroUsize::new(TRACKED_MEMORY_CONSUMER_COUNT)
@@ -86,23 +109,29 @@ impl DataFusionSession {
       RuntimeEnvBuilder::new()
         .with_memory_pool(memory_pool)
         .with_temp_file_path(spill_dir)
-        .build()?,
+        .build()
+        .map_err(SessionError::Runtime)?,
     )
   }
 
-  fn default_memory_limit_bytes() -> Result<usize> {
+  fn default_memory_limit_bytes() -> Result<usize, SessionError> {
     let mut system = System::new();
     system.refresh_memory();
     Self::half_physical_memory(system.total_memory())
   }
 
-  fn half_physical_memory(total_memory_bytes: u64) -> Result<usize> {
+  fn half_physical_memory(total_memory_bytes: u64) -> Result<usize, SessionError> {
     let memory_limit_bytes = total_memory_bytes / 2;
     if memory_limit_bytes == 0 {
-      bail!("unable to determine total physical memory");
+      return Err(SessionError::Memory(
+        "unable to determine total physical memory".to_string(),
+      ));
     }
-    usize::try_from(memory_limit_bytes)
-      .context("half of total physical memory exceeds this platform's address space")
+    usize::try_from(memory_limit_bytes).map_err(|_| {
+      SessionError::Memory(
+        "half of total physical memory exceeds this platform's address space".to_string(),
+      )
+    })
   }
 
   fn configured_sort_spill_reservation_bytes() -> usize {

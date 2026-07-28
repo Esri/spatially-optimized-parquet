@@ -5,10 +5,9 @@ use std::ops::Bound;
 use std::path::Path;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
-
 use crate::input::parquet::{DiscoveryMode, ParquetDataset, PartitionDescriptor, PartitionFamily};
 
+use super::ValidationError;
 use super::file_validator::FileValidator;
 use super::metadata_validator::MetadataValidator;
 use super::report::{ValidationLocation, ValidationReport, ValidationRule, ValidationSeverity};
@@ -18,13 +17,12 @@ pub struct DatasetValidator;
 
 impl DatasetValidator {
   /// Validate one Parquet file or recursive partitioned directory as one SOP dataset.
-  pub fn validate(path: impl AsRef<Path>) -> Result<ValidationReport> {
+  pub fn validate(path: impl AsRef<Path>) -> Result<ValidationReport, ValidationError> {
     let path = path.as_ref();
-    let dataset = ParquetDataset::discover(path, DiscoveryMode::Recursive)?.with_context(|| {
-      format!(
-        "validation path must be a .parquet file or directory: {}",
-        path.display()
-      )
+    let dataset = ParquetDataset::discover(path, DiscoveryMode::Recursive)?.ok_or_else(|| {
+      ValidationError::InvalidPath {
+        path: path.to_path_buf(),
+      }
     })?;
     let mut report = ValidationReport::new(dataset.root().to_path_buf());
     Self::validate_dataset(&dataset, &mut report);
@@ -202,8 +200,7 @@ mod tests {
   }
 
   fn wkb_point(x: f64, y: f64) -> Vec<u8> {
-    let geometry = geo::Geometry::Point(geo::Point::new(x, y));
-    crate::geometry::write_test_geometry(&geometry)
+    crate::geometry::write_test_point(x, y)
   }
 
   fn write_parquet(

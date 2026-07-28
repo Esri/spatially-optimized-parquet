@@ -505,8 +505,7 @@ mod tests {
     let levels = MultiscaleLevel::create_all(
       crate::geoparquet::DEFAULT_OUTPUT_WKID,
       GeometryType::Polygon,
-    )
-    .expect("levels");
+    );
     let original = GeolodUdf::new(GeometryType::Polygon, false, false, levels.clone());
     let mut changed_levels = levels;
     mutate(&mut changed_levels[0]);
@@ -546,8 +545,7 @@ mod tests {
     let levels = MultiscaleLevel::create_all(
       crate::geoparquet::DEFAULT_OUTPUT_WKID,
       GeometryType::Polygon,
-    )
-    .expect("levels");
+    );
     let original = GeolodUdf::new(GeometryType::Polygon, false, false, levels.clone());
     let equal = GeolodUdf::new(GeometryType::Polygon, false, false, levels.clone());
     assert_eq!(original, equal);
@@ -576,8 +574,7 @@ mod tests {
     let levels = MultiscaleLevel::create_all(
       crate::geoparquet::DEFAULT_OUTPUT_WKID,
       GeometryType::Polyline,
-    )
-    .expect("levels");
+    );
     let warnings = PipelineWarnings::default();
     let udf = GeolodUdf::new_with_warnings(
       GeometryType::Polyline,
@@ -610,8 +607,7 @@ mod tests {
     let levels = MultiscaleLevel::create_all(
       crate::geoparquet::DEFAULT_OUTPUT_WKID,
       GeometryType::Polyline,
-    )
-    .expect("levels");
+    );
     let warnings = PipelineWarnings::default();
     let udf = GeolodUdf::new_with_warnings(
       GeometryType::Polyline,
