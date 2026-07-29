@@ -1,0 +1,26 @@
+.maplibre-workspace {
+  height: calc(100% - 2rem);
+  margin: 1rem;
+}
+
+.maplibre-panel {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  box-shadow: var(--calcite-shadow-sm);
+  --calcite-panel-corner-radius: var(--calcite-corner-radius-sm);
+}
+
+.maplibre-map {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+}
+
+.maplibre-status {
+  align-self: center;
+  color: var(--calcite-color-text-2);
+  font-size: var(--calcite-font-size--1);
+  font-variant-numeric: tabular-nums;
+  padding-inline-end: 1rem;
+}

@@ -168,11 +168,6 @@ body {
   background: var(--calcite-color-border-1);
 }
 
-.details-count-chip {
-  align-self: center;
-  margin-inline: 0.75rem;
-}
-
 .metric-heading {
   display: inline-flex;
   align-items: center;
@@ -202,6 +197,10 @@ calcite-shell {
   display: block;
 }
 
+.grid-container.details-disabled {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .grid-container.compact .grid-map {
   width: 100%;
   height: 100%;
@@ -218,7 +217,7 @@ calcite-shell {
   position: absolute;
   z-index: 100;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   inset-block: 3rem 0;
   inset-inline-end: 0;
   width: min(400px, 100%);
@@ -229,20 +228,30 @@ calcite-shell {
   color: var(--calcite-color-text-1);
 }
 
-.responsive-details-summary {
-  display: flex;
-  justify-content: flex-end;
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--calcite-color-border-1);
-}
-
-.responsive-details-summary .details-count-chip {
-  margin-inline: 0;
-}
-
 .responsive-details-content {
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
+}
+
+.download-details-content {
+  display: grid;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.download-details-content {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.file-download-content {
+  box-sizing: border-box;
+  display: grid;
+  min-height: 0;
+  height: 100%;
+  padding: 0.75rem;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  overflow: hidden;
 }
 
 .grid-map arcgis-map {
@@ -256,14 +265,586 @@ calcite-shell {
   padding: 0.75rem;
 }
 
+.file-structure-button {
+  flex: 0 0 2.5rem;
+  height: 2.5rem;
+  margin: 0 0.75rem;
+  width: calc(100% - 1.5rem);
+}
+
+calcite-dialog {
+  --calcite-dialog-size-x: min(85vw, 90rem);
+  --calcite-dialog-size-y: 80vh;
+}
+
+.file-structure-dialog-content {
+  display: grid;
+  gap: 1.5rem;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.file-structure-breadcrumb {
+  display: flex;
+  align-items: baseline;
+  gap: 0.375rem;
+}
+
+.file-structure-breadcrumb button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--calcite-color-text-link);
+  font: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+}
+
+.file-structure-breadcrumb button:hover {
+  text-decoration: underline;
+}
+
+.file-structure-header-switches {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.file-structure-header-switches calcite-switch {
+  align-self: center;
+}
+
+.file-structure-dialog-content h3,
+.file-structure-dialog-content h4 {
+  margin: 0 0 0.5rem;
+}
+
+.file-structure-column-detail h4 {
+  margin-bottom: 0;
+}
+
+.file-structure-block-map {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.file-structure-block {
+  position: relative;
+  display: flex;
+  flex: var(--file-block-weight) 1 10rem;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 4.5rem;
+  min-height: 4rem;
+  padding: 0.5rem 1rem;
+  overflow: hidden;
+  border: 1px solid var(--calcite-color-border-2);
+  border-radius: var(--calcite-corner-radius-sm);
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--calcite-color-brand) 55%, transparent)
+        var(--file-block-loaded),
+      transparent var(--file-block-loaded)
+    ),
+    var(--calcite-color-foreground-2);
+  color: var(--calcite-color-text-1);
+  font: inherit;
+  text-align: start;
+}
+
+.file-structure-block span {
+  color: var(--calcite-color-text-2);
+  font-size: var(--calcite-font-size--2);
+}
+
+.file-structure-block.partial {
+  border-color: var(--calcite-color-brand);
+}
+
+.file-structure-block.loaded {
+  border-color: var(--calcite-color-brand);
+  box-shadow: inset 0 0 0 1px var(--calcite-color-brand);
+}
+
+.file-structure-block.selected {
+  border-color: white;
+  box-shadow: inset 0 0 0 1px white;
+}
+
+.file-structure-block.metadata {
+  border-style: dashed;
+  flex: 0 0 3.5rem;
+  min-width: 3.5rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.375rem;
+}
+
+.file-structure-block.footer {
+  flex: 1 1 100%;
+  width: 100%;
+  min-height: 55px;
+  border-color: var(--calcite-color-brand);
+  background: color-mix(
+    in srgb,
+    var(--calcite-color-brand) 55%,
+    var(--calcite-color-foreground-2)
+  );
+}
+
+.file-structure-block.gap {
+  opacity: 0.72;
+}
+
+.file-structure-block.page,
+.file-structure-block.gap {
+  flex: 0 0 3.5rem;
+  min-width: 3.5rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.375rem;
+}
+
+.file-structure-block.row-group {
+  flex: 0 0 5rem;
+  min-width: 5rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.375rem;
+}
+
+.file-structure-block.column {
+  flex: 0 0 5rem;
+  min-width: 5rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.375rem;
+}
+
+.file-structure-row-group {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.file-structure-row-group {
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.file-structure-column-picker {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+.file-structure-selected-column {
+  display: grid;
+  height: 10rem;
+  min-height: 12rem;
+  gap: 0.125rem;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.file-structure-column-details-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.file-structure-column-details-heading h4 {
+  margin-bottom: 0;
+}
+
+.file-structure-column-details-heading span {
+  overflow: hidden;
+  color: var(--calcite-color-text-2);
+  font-size: var(--calcite-font-size--1);
+  font-weight: var(--calcite-font-weight-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-structure-column-details-heading span.empty {
+  visibility: hidden;
+}
+
+.file-structure-empty-detail {
+  box-sizing: border-box;
+  display: grid;
+  min-height: 0;
+  place-items: center;
+  border: 1px solid var(--calcite-color-border-1);
+  border-radius: var(--calcite-corner-radius-sm);
+  color: var(--calcite-color-text-2);
+}
+
+.file-structure-spinner {
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 2px solid var(--calcite-color-border-2);
+  border-top-color: var(--calcite-color-brand);
+  border-radius: 50%;
+  animation: file-structure-spin 0.8s linear infinite;
+}
+
+@keyframes file-structure-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.file-structure-columns {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.file-structure-overview {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  gap: 1rem;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.file-structure-file-details {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;;
+  border: 1px solid var(--calcite-color-border-1);
+  border-radius: var(--calcite-corner-radius-sm);
+  gap: 0.5rem;
+}
+
+.file-structure-file-detail-fields {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.file-structure-file-detail-fields dl {
+  display: grid;
+  margin: 0;
+  justify-content: start;
+  grid-template-columns: repeat(4, minmax(0, max-content));
+  gap: 24px;
+}
+
+.file-structure-file-details dl div {
+  display: grid;
+  min-width: 0;
+  gap: 0.125rem;
+}
+
+.file-structure-file-details dt {
+  color: var(--calcite-color-text-3);
+  font-size: var(--calcite-font-size--1);
+  font-weight: var(--calcite-font-weight-bold);
+}
+
+.file-structure-file-details dd {
+  overflow: hidden;
+  margin: 0;
+  font-size: var(--calcite-font-size--1);
+  font-weight: var(--calcite-font-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-structure-metadata-popover {
+  --calcite-popover-max-size-x: min(48rem, calc(100vw - 2rem));
+  --calcite-popover-max-size-y: min(36rem, calc(100vh - 2rem));
+}
+
+.file-structure-metadata-popover pre {
+  box-sizing: border-box;
+  min-width: min(40rem, calc(100vw - 4rem));
+  max-width: min(48rem, calc(100vw - 2rem));
+  max-height: min(36rem, calc(100vh - 4rem));
+  margin: 0;
+  padding: 1rem;
+  overflow: auto;
+  color: var(--calcite-color-text-1);
+  font-family: var(--calcite-font-family-monospace);
+  font-size: var(--calcite-font-size--1);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.file-structure-file-columns {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.file-structure-column-chart {
+  display: grid;
+  grid-template-rows: auto auto 1.25rem auto;
+  gap: 0.25rem 0;
+}
+
+.file-structure-column-leaders {
+  width: 100%;
+  height: 1.25rem;
+  overflow: visible;
+}
+
+.file-structure-column-leaders polyline {
+  stroke: var(--calcite-color-text-3);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.file-structure-column-leader-labels {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.file-structure-column-leader-labels span {
+  display: grid;
+  min-width: 0;
+  gap: 0;
+  text-align: center;
+  line-height: 1.1;
+}
+
+.file-structure-column-leader-labels strong {
+  overflow: hidden;
+  font-size: var(--calcite-font-size--2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-structure-column-leader-labels small {
+  color: var(--calcite-color-text-2);
+}
+
+.file-structure-column-share-bar {
+  display: flex;
+  height: 5rem;
+  overflow: hidden;
+  border: 1px solid var(--calcite-color-border-1);
+  border-radius: var(--calcite-corner-radius-sm);
+  background: var(--calcite-color-foreground-2);
+}
+
+.file-structure-column-share {
+  flex: var(--column-share-weight) 1 0;
+  min-width: 1px;
+  border-inline-end: 1px solid var(--calcite-color-foreground-1);
+  background: var(--column-share-background);
+}
+
+.file-structure-column-share.palette-0 {
+  --column-share-background: #e60049;
+}
+
+.file-structure-column-share.palette-1 {
+  --column-share-background: #0bb4ff;
+}
+
+.file-structure-column-share.palette-2 {
+  --column-share-background: #50e991;
+}
+
+.file-structure-column-share.palette-3 {
+  --column-share-background: #e6d800;
+}
+
+.file-structure-column-share.palette-4 {
+  --column-share-background: #9b19f5;
+}
+
+.file-structure-column-share.palette-5 {
+  --column-share-background: #ffa300;
+}
+
+.file-structure-column-share.palette-6 {
+  --column-share-background: #dc0ab4;
+}
+
+.file-structure-column-share.palette-7 {
+  --column-share-background: #b3d4ff;
+}
+
+.file-structure-column-share.palette-8 {
+  --column-share-background: #00bfa0;
+}
+
+.file-structure-column-share.palette-9 {
+  --column-share-background: #f0cccc;
+}
+
+.file-structure-column-share:hover {
+  position: relative;
+  z-index: 1;
+  box-shadow: inset 0 0 0 2px white;
+}
+
+.file-structure-row-groups {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.file-structure-row-group-picker {
+  min-height: 0;
+  overflow: auto;
+}
+
+.file-structure-row-group-picker .file-structure-block-map,
+.file-structure-column-picker .file-structure-block-map {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(5rem, 1fr));
+}
+
+.file-structure-row-group-picker .file-structure-block,
+.file-structure-column-picker .file-structure-block {
+  width: 100%;
+  min-width: 0;
+}
+
+.file-structure-footer {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.file-structure-column-detail {
+  display: grid;
+  gap: 0;
+  min-height: 0;
+  padding: 0.5rem;
+  overflow: hidden;
+  border: 1px solid var(--calcite-color-border-1);
+  border-radius: var(--calcite-corner-radius-sm);
+  grid-template-columns: minmax(0, 1fr) 24rem;
+}
+
+.file-structure-column-visuals {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.375rem;
+  padding-right: 0.5rem;
+  overflow: hidden;
+}
+
+.file-structure-column-visual-area {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.file-structure-column-size {
+  display: grid;
+  width: 2rem;
+  height: 100%;
+  align-self: center;
+  place-items: center;
+  padding: 1.25rem 0.25rem;
+  color: var(--calcite-color-text-2);
+  font-size: var(--calcite-font-size--1);
+  font-weight: var(--calcite-font-weight-medium);
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+
+.file-structure-column-size span {
+  padding-block: 0.25rem;
+}
+
+.file-structure-column-facts {
+  display: grid;
+  align-content: center;
+  padding-left: 0.5rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+
+.file-structure-column-facts > div {
+  display: flex;
+  min-width: 0;
+  gap: 0.125rem;
+  white-space: nowrap;
+}
+
+.file-structure-column-facts span {
+  color: var(--calcite-color-text-2);
+  font-size: var(--calcite-font-size--1);
+  font-weight: var(--calcite-font-weight-medium);
+}
+
+.file-structure-column-facts strong {
+  overflow: hidden;
+  color: var(--calcite-color-text-1);
+  font-size: var(--calcite-font-size--1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-structure-tooltip {
+  max-width: min(24rem, calc(100vw - 2rem));
+  white-space: normal;
+}
+
+.file-structure-metadata-group {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.file-structure-metadata-group > span {
+  color: var(--calcite-color-text-2);
+  font-size: var(--calcite-font-size--0);
+  font-weight: var(--calcite-font-weight-medium);
+}
+
+.file-structure-index-blocks {
+  padding: 0.3rem;
+  border: 1px dashed var(--calcite-color-text-3);
+  border-radius: var(--calcite-corner-radius-sm);
+}
+
+.file-structure-index-blocks .file-structure-block-map {
+  flex-wrap: nowrap;
+}
+
+.file-structure-page-scroll {
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-left: 4px;
+}
+
+.file-structure-page-scroll .file-structure-block-map {
+  flex-wrap: nowrap;
+  width: max-content;
+  min-width: 100%;
+}
+
+.file-structure-status,
+.file-structure-hint {
+  margin: 0;
+  color: var(--calcite-color-text-2);
+}
+
+.file-structure-status.error {
+  color: var(--calcite-color-status-danger);
+}
+
 .row-group-overview-heading {
   color: var(--calcite-color-text-2);
   font-size: var(--calcite-font-size--1);
   font-weight: var(--calcite-font-weight-medium);
 }
 
-.row-group-overview arcgis-map {
-  display: block;
+.row-group-overview-map-frame,
+.row-group-overview-placeholder {
   width: 100%;
   height: 14rem;
   overflow: hidden;
@@ -271,8 +852,36 @@ calcite-shell {
   border-radius: var(--calcite-corner-radius-sm);
 }
 
+.row-group-overview-map-frame {
+  position: relative;
+}
+
+.row-group-overview arcgis-map {
+  display: block;
+  width: 100%;
+  height: 100%;
+  visibility: hidden;
+}
+
+.row-group-overview arcgis-map.ready {
+  visibility: visible;
+}
+
+.row-group-overview-placeholder {
+  box-sizing: border-box;
+  display: grid;
+  position: absolute;
+  inset: 0;
+  place-items: center;
+  background: var(--calcite-color-foreground-2);
+  color: var(--calcite-color-text-3);
+  font-size: var(--calcite-font-size--1);
+}
+
 .occupancy-grid-frame {
-  padding: 0.5rem;
+  min-height: 0;
+  overflow: auto;
+  padding: 0.5rem 0.5rem 0.5rem 0.25rem;
   border: 1px solid var(--calcite-color-border-1);
   border-radius: var(--calcite-corner-radius-sm);
   background: var(--calcite-color-foreground-2);
@@ -285,14 +894,48 @@ calcite-shell {
 }
 
 .occupancy-summary {
+  display: block;
+  padding-top: 0.5rem;
   color: var(--calcite-color-text-3);
   font-size: var(--calcite-font-size--1);
+  text-align: right;
+}
+
+.column-threshold-control {
+  display: grid;
+  gap: 0.25rem;
+  color: var(--calcite-color-text-2);
+  font-size: var(--calcite-font-size--1);
+}
+
+.column-threshold-frame {
+  margin-bottom: 8px;
+  padding: 0.75rem;
+  border: 1px solid var(--calcite-color-border-1);
+  background: var(--calcite-color-foreground-2);
+}
+
+.column-threshold-control > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.column-threshold-control strong {
+  color: var(--calcite-color-text-1);
+  font-variant-numeric: tabular-nums;
 }
 
 .column-range {
   display: grid;
   width: 100%;
-  gap: 0.25rem;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  gap: 0.375rem;
+}
+
+.column-range-content {
+  display: grid;
+  min-width: 0;
 }
 
 .column-blocks {
@@ -302,10 +945,21 @@ calcite-shell {
 }
 
 .column-label {
+  display: flex;
+  align-items: baseline;
   color: var(--calcite-color-text-2);
   font-size: var(--calcite-font-size--1);
   font-weight: var(--calcite-font-weight-medium);
   white-space: nowrap;
+}
+
+.column-download-share {
+  align-self: start;
+  color: var(--calcite-color-text-3);
+  font-size: var(--calcite-font-size--1);
+  font-weight: var(--calcite-font-weight-normal);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
 }
 
 .column-progress {
@@ -314,105 +968,176 @@ calcite-shell {
   font-weight: var(--calcite-font-weight-normal);
 }
 
-.footer-range {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
 .chunk {
-  position: relative;
-  display: inline-block;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(4, 1fr);
+  gap: 1px;
   width: 20px;
   height: 20px;
   min-width: 20px;
+  overflow: hidden;
   border: 1px solid var(--calcite-color-border-2);
   border-radius: var(--calcite-corner-radius-sm);
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--calcite-color-foreground-3) 88%, white),
-    var(--calcite-color-foreground-3)
-  );
-  opacity: 0.48;
+  background: var(--calcite-color-foreground-3);
 }
 
-.chunk:hover {
+.chunk-subpart {
+  background: color-mix(in srgb, var(--calcite-color-foreground-3) 88%, white);
+}
+
+.chunk-subpart.cached {
+  background: color-mix(in srgb, var(--calcite-color-brand) 85%, white);
+}
+
+.chunk-subpart.loading {
+  background: color-mix(in srgb, var(--calcite-color-status-warning) 72%, white);
+}
+
+.chunk-subpart.active {
+  background: var(--calcite-color-brand-press);
+}
+
+.chunk-subpart.selected {
+  background: white;
+}
+
+.column-range-selected .chunk {
   outline: 1px solid white;
   outline-offset: 1px;
 }
 
-.download-block-tooltip {
+.column-row-group-tooltip {
   position: fixed;
   z-index: 10000;
-  width: max-content;
-  max-width: min(420px, calc(100vw - 24px));
-  max-height: 50vh;
-  overflow: hidden;
-  padding: 0.5rem 0.625rem;
+  box-sizing: border-box;
+  display: grid;
+  gap: 0.5rem;
+  width: min(320px, calc(100vw - 24px));
+  max-height: min(720px, calc(100vh - 24px));
+  overflow: auto;
+  padding: 0.625rem;
   border: 1px solid var(--calcite-color-border-2);
   border-radius: var(--calcite-corner-radius-sm);
   background: var(--calcite-color-foreground-1);
   box-shadow: var(--calcite-shadow-2);
   color: var(--calcite-color-text-1);
+}
+
+.column-row-group-tooltip-title {
+  font-size: var(--calcite-font-size--1);
+  font-weight: var(--calcite-font-weight-medium);
+}
+
+.column-row-group-tooltip-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+
+.column-row-group-tooltip-cell {
+  display: grid;
+  min-height: 24px;
+  place-items: center;
+  border: 1px solid var(--calcite-color-border-2);
+  border-radius: var(--calcite-corner-radius-sm);
+  background:
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--calcite-color-brand) 85%, white)
+        var(--row-group-download-percent),
+      var(--calcite-color-foreground-2)
+        var(--row-group-download-percent)
+    );
   font-size: var(--calcite-font-size--2);
-  line-height: 1.35;
-  pointer-events: none;
+  font-variant-numeric: tabular-nums;
 }
 
-.chunk.loading {
-  border-color: var(--calcite-color-status-warning);
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--calcite-color-status-warning) 72%, white),
-    color-mix(
-      in srgb,
-      var(--calcite-color-status-warning) 68%,
-      var(--calcite-color-foreground-2)
-    )
-  );
-  opacity: 1;
-  transform: scale(0.84);
+.column-row-group-tooltip-cell.selected {
+  outline: 1px solid white;
+  outline-offset: 1px;
 }
 
-.chunk.cached {
-  border-color: color-mix(
-    in srgb,
-    var(--calcite-color-brand) 55%,
-    var(--calcite-color-border-2)
-  );
-  background: var(--chunk-fill-background);
-  opacity: 1;
+.row-group-detail-tooltip {
+  position: fixed;
+  z-index: 10001;
+  box-sizing: border-box;
+  display: grid;
+  gap: 0.2rem;
+  width: min(336px, calc(100vw - 16px));
+  padding: 0.5rem;
+  border: 1px solid var(--calcite-color-border-2);
+  border-radius: var(--calcite-corner-radius-sm);
+  background: var(--calcite-color-foreground-1);
+  box-shadow: var(--calcite-shadow-2);
+  color: var(--calcite-color-text-1);
+  font-size: var(--calcite-font-size--1);
+  font-variant-numeric: tabular-nums;
 }
 
-.chunk.active {
-  border-color: var(--calcite-color-brand-press);
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--calcite-color-brand) 90%, white),
-    var(--calcite-color-brand-press)
-  );
-  box-shadow: 0 0 9px
-    color-mix(in srgb, var(--calcite-color-brand) 35%, transparent);
-  opacity: 1;
-  transform: scale(1.04);
+.page-index-column-title {
+  margin-top: 0.25rem;
+  color: var(--calcite-color-text-2);
+  font-size: var(--calcite-font-size--2);
 }
 
-.chunk.failed {
-  border-color: var(--calcite-color-status-danger);
-  background: linear-gradient(
-    to bottom,
-    color-mix(
-      in srgb,
-      var(--calcite-color-status-danger) 38%,
-      var(--calcite-color-foreground-2)
-    ),
-    color-mix(
-      in srgb,
-      var(--calcite-color-status-danger) 28%,
-      var(--calcite-color-foreground-2)
-    )
-  );
-  opacity: 1;
+.page-index-column-grid {
+  display: grid;
+  grid-template-columns: repeat(16, minmax(0, 1fr));
+  gap: 0.2rem;
+}
+
+.page-index-column-cell {
+  position: relative;
+  aspect-ratio: 1;
+  border: 1px solid var(--calcite-color-border-2);
+  border-radius: 2px;
+  background: var(--calcite-color-foreground-2);
+}
+
+.page-index-column-cell.downloaded {
+  background: color-mix(in srgb, var(--calcite-color-brand) 85%, white);
+}
+
+.page-index-column-detail-tooltip {
+  position: fixed;
+  z-index: 10002;
+  box-sizing: border-box;
+  display: grid;
+  gap: 0.2rem;
+  width: max-content;
+  min-width: min(220px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+  padding: 0.5rem;
+  border: 1px solid var(--calcite-color-border-2);
+  border-radius: var(--calcite-corner-radius-sm);
+  background: var(--calcite-color-foreground-1);
+  box-shadow: var(--calcite-shadow-2);
+  color: var(--calcite-color-text-1);
+  font-size: var(--calcite-font-size--1);
+  font-variant-numeric: tabular-nums;
+}
+
+.page-index-column-detail-tooltip > span:first-child {
+  overflow-wrap: anywhere;
+}
+
+.page-index-column-statistics {
+  display: grid;
+  margin-top: 0.25rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.15rem 0.5rem;
+}
+
+.page-index-column-statistics > span {
+  color: var(--calcite-color-text-3);
+}
+
+.page-index-column-statistics > strong {
+  overflow-wrap: anywhere;
+  color: var(--calcite-color-text-1);
+  font-weight: var(--calcite-font-weight-medium);
+  text-align: end;
 }
 
 .occupancy-status {

@@ -1,0 +1,807 @@
+import {
+  type CSSProperties,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+
+import { formatByteSize } from "./formatByteSize";
+import type { ArcgisParquetPageIndexSource } from "./arcgisParquetPageIndexes";
+import type { ParquetByteCoverage } from "./parquetByteCoverage";
+import {
+  ParquetFileStructureStore,
+  type ColumnDetailState,
+  type FileStructureSnapshot,
+} from "./parquetFileStructureStore";
+import {
+  deriveFileDetailSummary,
+  type FileDetailSummary,
+} from "./parquetFileDetails";
+import { formatParquetKeyValueMetadata } from "./parquetKeyValueMetadata";
+import {
+  orderByDescendingValue,
+  orderByLoadedByteLength,
+} from "./loadedSizeOrder";
+import type {
+  ColumnLayout,
+  FileLayout,
+  RowGroupLayout,
+} from "./parquetFileLayout";
+import type { PageIndexLayout } from "./parquetFileLayout";
+import { assignLeaderLineLanes } from "./leaderLineLayout";
+import {
+  ProportionalByteBlockMap,
+  type VisualByteBlock,
+} from "./ProportionalByteBlockMap";
+
+export function ParquetFileStructureDialog({
+  snapshot,
+  source,
+  onClose,
+}: {
+  snapshot: FileStructureSnapshot;
+  source: ArcgisParquetPageIndexSource;
+  onClose(): void;
+}) {
+  const store = useMemo(
+    () => new ParquetFileStructureStore(snapshot, source),
+    [snapshot, source],
+  );
+  const state = useSyncExternalStore(store.subscribe, store.getState);
+  const [downloadedOnly, setDownloadedOnly] = useState(false);
+  const [orderBySize, setOrderBySize] = useState(false);
+  const selectedRowGroup = state.selectedRowGroupIndex === null
+    ? null
+    : store.rowGroup(state.selectedRowGroupIndex);
+
+  return (
+    <calcite-dialog
+      className="calcite-mode-dark"
+      fullscreenDisabled
+      modal
+      open
+      outsideCloseDisabled
+      placement="center"
+      width="l"
+      oncalciteDialogClose={() => {
+        store.close();
+        onClose();
+      }}
+    >
+      <div className="file-structure-breadcrumb" slot="heading">
+        {selectedRowGroup ? (
+          <>
+            <button
+              onClick={() => store.selectRowGroup(selectedRowGroup.index)}
+              type="button"
+            >
+              File
+            </button>
+            <span>/ Row group {selectedRowGroup.index}</span>
+          </>
+        ) : (
+          <span>File</span>
+        )}
+      </div>
+      <div className="file-structure-header-switches" slot="header-actions-end">
+        <calcite-switch
+          checked={downloadedOnly}
+          label="Show loaded data only"
+          labelTextEnd="Loaded"
+          oncalciteSwitchChange={(event: Event) =>
+            setDownloadedOnly(
+              (event.currentTarget as HTMLCalciteSwitchElement).checked,
+            )
+          }
+        />
+        <calcite-switch
+          checked={orderBySize}
+          label="Order blocks by loaded size"
+          labelTextEnd="Order by loaded size"
+          oncalciteSwitchChange={(event: Event) =>
+            setOrderBySize(
+              (event.currentTarget as HTMLCalciteSwitchElement).checked,
+            )
+          }
+        />
+      </div>
+      <div className="file-structure-dialog-content">
+        {selectedRowGroup ? (
+          <RowGroupDetail
+            coverage={snapshot.coverage}
+            details={state.details}
+            expandedColumnIds={state.expandedColumnIds}
+            pageIndexes={snapshot.layout.pageIndexes}
+            downloadedOnly={downloadedOnly}
+            orderBySize={orderBySize}
+            onToggleColumn={(column) => store.toggleColumn(column)}
+            rowGroup={selectedRowGroup}
+          />
+        ) : (
+          <FileOverview
+            coverage={snapshot.coverage}
+            layout={snapshot.layout}
+            onSelectRowGroup={(index) => store.selectRowGroup(index)}
+            downloadedOnly={downloadedOnly}
+            orderBySize={orderBySize}
+            selectedRowGroupIndex={state.selectedRowGroupIndex}
+          />
+        )}
+      </div>
+    </calcite-dialog>
+  );
+}
+
+function FileOverview({
+  coverage,
+  layout,
+  selectedRowGroupIndex,
+  onSelectRowGroup,
+  downloadedOnly,
+  orderBySize,
+}: {
+  coverage: ParquetByteCoverage;
+  layout: FileLayout;
+  selectedRowGroupIndex: number | null;
+  onSelectRowGroup(index: number): void;
+  downloadedOnly: boolean;
+  orderBySize: boolean;
+}) {
+  const { footer, rowGroups } = layout;
+  const detailSummary = useMemo(
+    () => deriveFileDetailSummary(layout),
+    [layout],
+  );
+  const leaderSvgRef = useRef<SVGSVGElement>(null);
+  const columnSegmentRefs = useRef(new Map<string, HTMLSpanElement>());
+  const columnLabelRefs = useRef(new Map<string, HTMLSpanElement>());
+  const [leaderLines, setLeaderLines] = useState<
+    ReadonlyArray<{ fieldName: string; points: string }>
+  >([]);
+  const filteredRowGroups = downloadedOnly
+    ? rowGroups.filter((rowGroup) =>
+        rowGroup.columns.some(
+          (column) => coverage.coveredByteLength(column.byteRange) > 0,
+        ),
+      )
+    : rowGroups;
+  const visibleRowGroups = orderByLoadedByteLength(
+    filteredRowGroups,
+    coverage,
+    orderBySize,
+  );
+  const {
+    columnOverview,
+    largestColumns,
+    totalColumnByteLength,
+  } = useMemo(() => {
+    const aggregatedColumns = Array.from(
+      rowGroups.reduce((columnMap, rowGroup) => {
+        for (const column of rowGroup.columns) {
+          const summary = columnMap.get(column.fieldName) ?? {
+            fieldName: column.fieldName,
+            byteLength: 0,
+            loadedByteLength: 0,
+          };
+          summary.byteLength += rangeLength(column.byteRange);
+          summary.loadedByteLength += coverage.coveredByteLength(
+            column.byteRange,
+          );
+          columnMap.set(column.fieldName, summary);
+        }
+        return columnMap;
+      }, new Map<string, {
+        fieldName: string;
+        byteLength: number;
+        loadedByteLength: number;
+      }>()),
+    ).map(([, column], index) => ({
+      ...column,
+      paletteIndex: index % 10,
+    }));
+    const filteredColumns = downloadedOnly
+      ? aggregatedColumns.filter((column) => column.loadedByteLength > 0)
+      : aggregatedColumns;
+    const orderedColumns = orderByDescendingValue(
+      filteredColumns,
+      (column) => column.loadedByteLength,
+      orderBySize,
+    );
+    const columns = orderedColumns.map((column) => ({
+      ...column,
+      byteLength: downloadedOnly
+        ? column.loadedByteLength
+        : column.byteLength,
+    }));
+    const columnOrder = new Map(
+      columns.map((column, index) => [column.fieldName, index]),
+    );
+
+    return {
+      columnOverview: columns,
+      largestColumns: [...columns]
+        .sort((first, second) => second.byteLength - first.byteLength)
+        .slice(0, 5)
+        .sort(
+          (first, second) =>
+            (columnOrder.get(first.fieldName) ?? 0) -
+            (columnOrder.get(second.fieldName) ?? 0),
+        ),
+      totalColumnByteLength: columns.reduce(
+        (total, column) => total + column.byteLength,
+        0,
+      ),
+    };
+  }, [coverage, downloadedOnly, orderBySize, rowGroups]);
+
+  useLayoutEffect(() => {
+    const svg = leaderSvgRef.current;
+    if (!svg) {
+      return;
+    }
+
+    const updateLeaderLines = () => {
+      const svgBounds = svg.getBoundingClientRect();
+      if (svgBounds.width === 0) {
+        return;
+      }
+
+      const measuredLines = largestColumns.flatMap((column) => {
+          const segment = columnSegmentRefs.current.get(column.fieldName);
+          const label = columnLabelRefs.current.get(column.fieldName);
+          if (!segment || !label) {
+            return [];
+          }
+
+          const segmentBounds = segment.getBoundingClientRect();
+          const labelBounds = label.getBoundingClientRect();
+          const segmentCenter =
+            ((segmentBounds.left + segmentBounds.width / 2 - svgBounds.left) /
+              svgBounds.width) *
+            100;
+          const labelCenter =
+            ((labelBounds.left + labelBounds.width / 2 - svgBounds.left) /
+              svgBounds.width) *
+            100;
+
+          return [{
+            id: column.fieldName,
+            start: segmentCenter,
+            end: labelCenter,
+          }];
+        });
+      const minimumGap = (2 / svgBounds.width) * 100;
+      const positionedLines = assignLeaderLineLanes(
+        measuredLines,
+        minimumGap,
+      );
+      setLeaderLines(positionedLines.map((line) => {
+        const laneY = 3 + line.lane * 4;
+
+        return {
+          fieldName: line.id,
+          points: `${line.start},0 ${line.start},${laneY} ${line.end},${laneY} ${line.end},20`,
+        };
+      }));
+    };
+
+    updateLeaderLines();
+
+    const resizeObserver = new ResizeObserver(updateLeaderLines);
+    resizeObserver.observe(svg);
+
+    return () => resizeObserver.disconnect();
+  }, [largestColumns]);
+
+  const rowGroupBlocks: VisualByteBlock[] = visibleRowGroups.map((rowGroup) => ({
+      id: `row-group-${rowGroup.index}`,
+      byteRange: rowGroup.byteRange,
+      className: `row-group${
+        selectedRowGroupIndex === rowGroup.index ? " selected" : ""
+      }`,
+      onClick: () => onSelectRowGroup(rowGroup.index),
+      label: (
+        <>
+          <strong>RG {rowGroup.index}</strong>
+          <span>{formatByteSize(rangeLength(rowGroup.byteRange))}</span>
+        </>
+      ),
+    }));
+
+  return (
+    <section className="file-structure-overview">
+      <FileDetails layout={layout} summary={detailSummary} />
+      <div className="file-structure-file-columns">
+        <div className="file-structure-column-chart">
+          <h4>Aggregated by Column</h4>
+          <div className="file-structure-column-share-bar">
+            {columnOverview.map((column) => {
+            const filePercent =
+              totalColumnByteLength === 0
+                ? 0
+                : (column.byteLength / totalColumnByteLength) * 100;
+              return (
+                <ColumnOverviewSegment
+                  filePercent={filePercent}
+                  fieldName={column.fieldName}
+                  loadedOnly={downloadedOnly}
+                  paletteIndex={column.paletteIndex}
+                  key={column.fieldName}
+                  byteLength={column.byteLength}
+                  elementRef={(element) => {
+                    if (element) {
+                      columnSegmentRefs.current.set(column.fieldName, element);
+                    } else {
+                      columnSegmentRefs.current.delete(column.fieldName);
+                    }
+                  }}
+                />
+              );
+            })}
+          </div>
+          <svg
+            aria-hidden="true"
+            className="file-structure-column-leaders"
+            preserveAspectRatio="none"
+            ref={leaderSvgRef}
+            viewBox="0 0 100 20"
+          >
+            {leaderLines.map((line) => (
+              <polyline
+                fill="none"
+                key={line.fieldName}
+                points={line.points}
+              />
+            ))}
+          </svg>
+          <div className="file-structure-column-leader-labels">
+            {largestColumns.map((column) => (
+              <span
+                key={column.fieldName}
+                ref={(element) => {
+                  if (element) {
+                    columnLabelRefs.current.set(column.fieldName, element);
+                  } else {
+                    columnLabelRefs.current.delete(column.fieldName);
+                  }
+                }}
+              >
+                <strong>{column.fieldName}</strong>
+                <small>{formatByteSize(column.byteLength)}</small>
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="file-structure-row-groups">
+        <h4>Row Groups</h4>
+        <div className="file-structure-row-group-picker">
+          <ProportionalByteBlockMap
+            ariaLabel="Parquet row groups"
+            blocks={rowGroupBlocks}
+            coverage={coverage}
+          />
+        </div>
+      </div>
+      <div className="file-structure-footer">
+        <h4>Footer</h4>
+        <ProportionalByteBlockMap
+          ariaLabel="Parquet footer"
+          blocks={[{
+            id: "footer",
+            byteRange: footer,
+            className: "metadata footer",
+            label: <span>{formatByteSize(rangeLength(footer))}</span>,
+          }]}
+          coverage={coverage}
+        />
+      </div>
+    </section>
+  );
+}
+
+function FileDetails({
+  layout,
+  summary,
+}: {
+  layout: FileLayout;
+  summary: FileDetailSummary;
+}) {
+  const [metadataButton, setMetadataButton] =
+    useState<HTMLCalciteButtonElement | null>(null);
+  const [metadataOpen, setMetadataOpen] = useState(false);
+  const compressionCodecs = summary.compressionCodecs
+    .map((codec) => codec.toUpperCase());
+  const compressionName = compressionCodecs.length === 1
+    ? compressionCodecs[0]
+    : compressionCodecs.length > 1
+      ? "Mixed"
+      : "Unavailable";
+  const compressionRatio = summary.compressedSize > 0
+    ? `${(summary.uncompressedSize / summary.compressedSize).toFixed(1)}×`
+    : "Unavailable";
+  const fileName = formatFileName(layout.fileName);
+
+  return (
+    <div className="file-structure-file-details">
+      <div className="file-structure-file-detail-fields">
+        <dl>
+          <FileDetail label="File name" title={layout.fileName} value={fileName} />
+          <FileDetail
+            label="Size"
+            title={compressionCodecs.join(", ")}
+            value={`${formatByteSize(layout.byteLength)} · ${compressionName} · ${compressionRatio}`}
+          />
+          <FileDetail label="Rows" value={summary.rowCount.toLocaleString()} />
+          <FileDetail label="Columns" value={summary.columnCount.toLocaleString()} />
+        </dl>
+      </div>
+      <calcite-button
+        ref={setMetadataButton}
+        appearance="outline"
+        kind="neutral"
+        label="Metadata"
+        scale="m"
+        onClick={() => {
+          requestAnimationFrame(() => setMetadataOpen((open) => !open));
+        }}
+      >
+        Metadata
+      </calcite-button>
+      {metadataButton ? (
+        <calcite-popover
+          className="file-structure-metadata-popover"
+          label="Parquet key-value metadata"
+          open={metadataOpen}
+          overlayPositioning="fixed"
+          placement="bottom-end"
+          referenceElement={metadataButton}
+          oncalcitePopoverClose={() => setMetadataOpen(false)}
+        >
+          <pre>{formatParquetKeyValueMetadata(layout.keyValueMetadata)}</pre>
+        </calcite-popover>
+      ) : null}
+    </div>
+  );
+}
+
+function formatFileName(value: string): string {
+  const path = value.split(/[?#]/, 1)[0].replaceAll("\\", "/");
+  return path.slice(path.lastIndexOf("/") + 1) || value;
+}
+
+function FileDetail({
+  label,
+  title,
+  value,
+}: {
+  label: string;
+  title?: string;
+  value: string;
+}) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd title={title}>{value}</dd>
+    </div>
+  );
+}
+
+function ColumnOverviewSegment({
+  byteLength,
+  elementRef,
+  fieldName,
+  filePercent,
+  loadedOnly,
+  paletteIndex,
+}: {
+  byteLength: number;
+  elementRef(element: HTMLSpanElement | null): void;
+  fieldName: string;
+  filePercent: number;
+  loadedOnly: boolean;
+  paletteIndex: number;
+}) {
+  const targetId = useId().replaceAll(":", "");
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  return (
+    <>
+      <span
+        className={`file-structure-column-share palette-${paletteIndex}`}
+        id={targetId}
+        onMouseEnter={() => setTooltipOpen(true)}
+        onMouseLeave={() => setTooltipOpen(false)}
+        ref={elementRef}
+        style={{
+          "--column-share-weight": Math.max(byteLength, 1),
+        } as CSSProperties}
+      />
+      <calcite-tooltip
+        className="file-structure-tooltip"
+        open={tooltipOpen}
+        overlayPositioning="fixed"
+        referenceElement={targetId}
+      >
+        <strong>{fieldName}</strong>
+        <br />
+        {formatByteSize(byteLength)} · {filePercent.toFixed(2)}% of{" "}
+        {loadedOnly ? "loaded column bytes" : "column bytes"}
+      </calcite-tooltip>
+    </>
+  );
+}
+
+function RowGroupDetail({
+  coverage,
+  details,
+  expandedColumnIds,
+  pageIndexes,
+  rowGroup,
+  onToggleColumn,
+  downloadedOnly,
+  orderBySize,
+}: {
+  coverage: ParquetByteCoverage;
+  details: ReadonlyMap<string, ColumnDetailState>;
+  expandedColumnIds: ReadonlySet<string>;
+  pageIndexes: readonly PageIndexLayout[];
+  rowGroup: RowGroupLayout;
+  onToggleColumn(column: ColumnLayout): void;
+  downloadedOnly: boolean;
+  orderBySize: boolean;
+}) {
+  const selectedColumn = rowGroup.columns.find((column) =>
+    expandedColumnIds.has(column.id),
+  );
+  const filteredColumns = downloadedOnly
+    ? rowGroup.columns.filter(
+        (column) => coverage.coveredByteLength(column.byteRange) > 0,
+      )
+    : rowGroup.columns;
+  const visibleColumns = orderByLoadedByteLength(
+    filteredColumns,
+    coverage,
+    orderBySize,
+  );
+
+  return (
+    <section className="file-structure-row-group">
+      <div className="file-structure-selected-column">
+        <div className="file-structure-column-details-heading">
+          <h4>Column Details</h4>
+          <span className={selectedColumn ? "" : "empty"}>
+            {selectedColumn?.fieldName ?? "No column selected"}
+          </span>
+        </div>
+        {selectedColumn ? (
+          <ColumnDetail
+            column={selectedColumn}
+            coverage={coverage}
+            detail={details.get(selectedColumn.id) ?? { type: "idle" }}
+            pageIndexes={pageIndexes.filter(
+              (index) =>
+                index.rowGroupIndex === selectedColumn.rowGroupIndex &&
+                index.fieldName === selectedColumn.fieldName,
+            )}
+          />
+        ) : (
+          <div className="file-structure-empty-detail">
+            Select a column for more details.
+          </div>
+        )}
+      </div>
+      <div className="file-structure-columns">
+        <h4>Columns</h4>
+        <div className="file-structure-column-picker">
+          <ProportionalByteBlockMap
+            ariaLabel={`Row group ${rowGroup.index} columns`}
+            coverage={coverage}
+            blocks={visibleColumns.map((column) => ({
+              id: column.id,
+              byteRange: column.byteRange,
+              className: `column${
+                expandedColumnIds.has(column.id) ? " selected" : ""
+              }`,
+              onClick: () => onToggleColumn(column),
+              label: (
+                <>
+                  <strong>{column.fieldName}</strong>
+                  <span>{formatByteSize(rangeLength(column.byteRange))}</span>
+                </>
+              ),
+            }))}
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ColumnDetail({
+  column,
+  coverage,
+  detail,
+  pageIndexes,
+}: {
+  column: ColumnLayout;
+  coverage: ParquetByteCoverage;
+  detail: ColumnDetailState;
+  pageIndexes: readonly PageIndexLayout[];
+}) {
+  if (detail.type === "loading" || detail.type === "idle") {
+    return <DelayedColumnLoading />;
+  }
+
+  function ColumnFact({
+    label,
+    value,
+    title = value,
+  }: {
+    label: string;
+    value: string;
+    title?: string;
+  }) {
+    const tooltipTargetId = useId().replaceAll(":", "");
+    const tooltipContent = title !== value ? title : `${label}: ${value}`;
+    return (
+      <div id={tooltipTargetId}>
+        <span>{label}:</span>
+        <strong>{value}</strong>
+        <calcite-tooltip
+          className="file-structure-tooltip"
+          overlayPositioning="fixed"
+          referenceElement={tooltipTargetId}
+        >
+          {tooltipContent}
+        </calcite-tooltip>
+      </div>
+    );
+  }
+
+  function formatOptionalValue(value: number | string | null): string {
+    return value === null ? "—" : String(value);
+  }
+
+  function formatCompressionRatio(column: ColumnLayout): string {
+    if (column.compressedSize === 0) {
+      return "—";
+    }
+    return `${(column.uncompressedSize / column.compressedSize).toFixed(2)}×`;
+  }
+
+  function DelayedColumnLoading() {
+    const [visible, setVisible] = useState(false);
+
+    useEffect(() => {
+      const timeout = setTimeout(() => setVisible(true), 500);
+      return () => clearTimeout(timeout);
+    }, []);
+
+    return (
+      <div className="file-structure-empty-detail">
+        {visible ? (
+          <>
+            <span className="file-structure-spinner" aria-hidden="true" />
+            <span>Loading column details…</span>
+          </>
+        ) : null}
+      </div>
+    );
+  }
+  if (detail.type === "failed") {
+    return <div className="file-structure-status error">{detail.message}</div>;
+  }
+  if (detail.type === "unavailable") {
+    return (
+      <div className="file-structure-status">
+        Offset index unavailable. Page boundaries cannot be expanded.
+      </div>
+    );
+  }
+
+  const blocks: VisualByteBlock[] = [
+    ...detail.pages.map((page) => ({
+      id: `${column.id}-page-${page.pageIndex}`,
+      byteRange: page.byteRange,
+      className: "page",
+      label: (
+        <>
+          <strong>Page {page.pageIndex}</strong>
+          <span>{formatByteSize(page.compressedPageSize)}</span>
+        </>
+      ),
+    })),
+    ...detail.gaps.map((gap, index) => ({
+      id: `${column.id}-gap-${index}`,
+      byteRange: gap.byteRange,
+      className: "gap",
+      label: (
+        <>
+          <strong>Dict</strong>
+          <span>{formatByteSize(rangeLength(gap.byteRange))}</span>
+        </>
+      ),
+    })),
+  ].sort((first, second) => first.byteRange.start - second.byteRange.start);
+
+  return (
+    <div className="file-structure-column-detail">
+      <div className="file-structure-column-visual-area">
+        <span className="file-structure-column-size">
+          <span>{formatByteSize(rangeLength(column.byteRange))}</span>
+        </span>
+        <div className="file-structure-column-visuals">
+          {pageIndexes.length > 0 ? (
+            <div className="file-structure-metadata-group">
+              <div className="file-structure-index-blocks">
+                <ProportionalByteBlockMap
+                  ariaLabel={`${column.fieldName} index byte ranges`}
+                  blocks={pageIndexes.map((index) => ({
+                    id: index.id,
+                    byteRange: index.byteRange,
+                    className: "metadata",
+                    label: (
+                      <>
+                        <strong>{index.kind === "column" ? "Column" : "Offset"}</strong>
+                        <span>{formatByteSize(rangeLength(index.byteRange))}</span>
+                      </>
+                    ),
+                  }))}
+                  coverage={coverage}
+                />
+              </div>
+              <span>Indexes</span>
+            </div>
+          ) : null}
+          <div className="file-structure-page-scroll">
+            <ProportionalByteBlockMap
+              ariaLabel={`${column.fieldName} pages`}
+              blocks={blocks}
+              coverage={coverage}
+            />
+          </div>
+        </div>
+      </div>
+      <div className="file-structure-column-facts">
+        <ColumnFact label="Type" value={column.logicalType ?? column.physicalType} />
+        <ColumnFact label="Physical" value={column.physicalType} />
+        <ColumnFact
+          label="Compression"
+          value={`${column.compression} (${formatCompressionRatio(column)})`}
+        />
+        <ColumnFact
+          label="Def Levels"
+          value={`${column.maxDefinitionLevel} (Nullable ${
+            column.nullable ? "✓" : "✕"
+          })`}
+          title="Maximum definition level: the optional nesting depth used to represent null and missing values."
+        />
+        <ColumnFact label="Nulls" value={formatOptionalValue(column.nullCount)} />
+        <ColumnFact
+          label="Rep Levels"
+          value={column.maxRepetitionLevel.toString()}
+          title="Maximum repetition level: the repeated nesting depth used to represent lists and repeated values."
+        />
+        <ColumnFact
+          label="Encodings"
+          value={column.encodings.length.toString()}
+          title={column.encodings.join(", ")}
+        />
+        <ColumnFact
+          label="Range"
+          value={`${formatOptionalValue(column.minimumValue)}–${formatOptionalValue(
+            column.maximumValue,
+          )}`}
+        />
+      </div>
+    </div>
+  );
+}
+
+function rangeLength(range: { start: number; end: number }): number {
+  return range.end - range.start;
+}

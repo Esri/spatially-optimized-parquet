@@ -1,8 +1,8 @@
-import {
-  asyncBufferFromUrl,
-  parquetMetadataAsync,
-  type FileMetaData,
-} from "hyparquet";
+import type {
+  ArcgisParquetDiagnosticsSnapshotV1,
+  ArcgisParquetFileDiagnosticsV1,
+} from "./arcgisParquetDiagnostics";
+import { resolveSingleDiagnosticsFile } from "./parquetFileLayout";
 
 export interface RowGroupBounds {
   rowGroupIndex: number;
@@ -20,82 +20,38 @@ export interface BoundsExtent {
   ymax: number;
 }
 
-const rowGroupBoundsByUrl = new Map<string, Promise<RowGroupBounds[]>>();
 const earthRadiusMeters = 6_371_008.8;
 const minimumDensityRatio = 10;
 const minimumRetainedRatio = 0.25;
 
-export async function loadParquetRowGroupBounds(url: string): Promise<RowGroupBounds[]> {
-  const cachedBounds = rowGroupBoundsByUrl.get(url);
-  if (cachedBounds) {
-    return cachedBounds;
+export function deriveRowGroupBounds(
+  snapshot: ArcgisParquetDiagnosticsSnapshotV1,
+  file: ArcgisParquetFileDiagnosticsV1 = resolveSingleDiagnosticsFile(snapshot),
+): RowGroupBounds[] {
+  if (!snapshot.files.includes(file)) {
+    throw new Error("The selected diagnostics file does not belong to the snapshot.");
   }
 
-  const boundsPromise = loadRowGroupBounds(url);
-  rowGroupBoundsByUrl.set(url, boundsPromise);
-
-  try {
-    return await boundsPromise;
-  } catch (error) {
-    rowGroupBoundsByUrl.delete(url);
-    throw error;
-  }
-}
-
-async function loadRowGroupBounds(url: string): Promise<RowGroupBounds[]> {
-  const file = await asyncBufferFromUrl({ url });
-  const metadata = await parquetMetadataAsync(file);
-  const geometryColumnPath = resolveGeometryColumnPath(metadata);
-
-  return metadata.row_groups.map((rowGroup, rowGroupIndex) => {
-    const geometryMetadata = rowGroup.columns.find(
-      ({ meta_data: columnMetadata }) =>
-        columnMetadata?.path_in_schema.join(".") === geometryColumnPath,
-    )?.meta_data;
-    const bounds = geometryMetadata?.geospatial_statistics?.bbox;
-
-    if (!bounds) {
-      throw new Error(`Geometry geospatial bbox not found for row group ${rowGroupIndex}.`);
+  return file.rowGroups.map((rowGroup) => {
+    if (!rowGroup.bounds) {
+      throw new Error(
+        `Geometry geospatial bounds not found for row group ${rowGroup.index} in "${file.fileName}".`,
+      );
     }
 
     return {
-      rowGroupIndex,
-      rowCount: Number(rowGroup.num_rows),
-      ...bounds,
+      rowGroupIndex: rowGroup.index,
+      rowCount: rowGroup.rowCount,
+      xmin: rowGroup.bounds.xmin,
+      ymin: rowGroup.bounds.ymin,
+      xmax: rowGroup.bounds.xmax,
+      ymax: rowGroup.bounds.ymax,
     };
   });
 }
 
-function resolveGeometryColumnPath(metadata: FileMetaData): string {
-  const geoMetadataValue = metadata.key_value_metadata?.find(
-    ({ key }) => key === "geo",
-  )?.value;
-
-  if (geoMetadataValue) {
-    const geoMetadata: unknown = JSON.parse(geoMetadataValue);
-    if (
-      typeof geoMetadata === "object" &&
-      geoMetadata !== null &&
-      "primary_column" in geoMetadata &&
-      typeof geoMetadata.primary_column === "string"
-    ) {
-      return geoMetadata.primary_column;
-    }
-  }
-
-  const geometryColumnPath = metadata.row_groups[0]?.columns
-    .find(({ meta_data: columnMetadata }) => columnMetadata?.geospatial_statistics?.bbox)
-    ?.meta_data?.path_in_schema.join(".");
-
-  if (!geometryColumnPath) {
-    throw new Error("Primary geometry column not found in Parquet metadata.");
-  }
-
-  return geometryColumnPath;
-}
-
 export function calculateRowGroupFocusExtent(
-  rowGroups: RowGroupBounds[],
+  rowGroups: readonly RowGroupBounds[],
 ): BoundsExtent | undefined {
   if (rowGroups.length === 0) {
     return undefined;
@@ -146,7 +102,7 @@ function calculateSphericalArea({ xmin, ymin, xmax, ymax }: RowGroupBounds): num
   );
 }
 
-function combineBounds(rowGroups: RowGroupBounds[]): BoundsExtent {
+function combineBounds(rowGroups: readonly RowGroupBounds[]): BoundsExtent {
   const longitudeExtent = combineLongitudes(rowGroups);
 
   return {
@@ -156,7 +112,9 @@ function combineBounds(rowGroups: RowGroupBounds[]): BoundsExtent {
   };
 }
 
-function combineLongitudes(rowGroups: RowGroupBounds[]): Pick<BoundsExtent, "xmin" | "xmax"> {
+function combineLongitudes(
+  rowGroups: readonly RowGroupBounds[],
+): Pick<BoundsExtent, "xmin" | "xmax"> {
   const intervals = rowGroups
     .flatMap(({ xmin, xmax }) => splitLongitudeInterval(xmin, xmax))
     .sort(([leftStart], [rightStart]) => leftStart - rightStart);

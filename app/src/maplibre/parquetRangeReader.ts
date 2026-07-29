@@ -1,0 +1,79 @@
+import type { AsyncBuffer } from "hyparquet";
+
+export interface ParquetRangeReader {
+  readonly byteLength: number;
+  read(start: number, end: number, signal?: AbortSignal): Promise<ArrayBuffer>;
+  asAsyncBuffer(signal?: AbortSignal): AsyncBuffer;
+  clear(): void;
+}
+
+export class HttpParquetRangeReader implements ParquetRangeReader {
+  readonly byteLength: number;
+
+  private readonly completedRangeCache = new Map<string, ArrayBuffer>();
+
+  constructor(
+    private readonly url: string,
+    byteLength: number,
+  ) {
+    this.byteLength = byteLength;
+  }
+
+  async read(
+    start: number,
+    end: number,
+    signal?: AbortSignal,
+  ): Promise<ArrayBuffer> {
+    validateRange(start, end, this.byteLength);
+    const cacheKey = `${start}:${end}`;
+    const cached = this.completedRangeCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const response = await fetch(this.url, {
+      headers: {
+        Range: `bytes=${start}-${end - 1}`,
+      },
+      signal,
+    });
+    if (response.status !== 206) {
+      throw new Error(
+        `Parquet range request ${start}-${end - 1} returned HTTP ${response.status}.`,
+      );
+    }
+
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength !== end - start) {
+      throw new Error(
+        `Parquet range request returned ${buffer.byteLength} bytes, expected ${end - start}.`,
+      );
+    }
+
+    this.completedRangeCache.set(cacheKey, buffer);
+    return buffer;
+  }
+
+  asAsyncBuffer(signal?: AbortSignal): AsyncBuffer {
+    return {
+      byteLength: this.byteLength,
+      slice: (start, end = this.byteLength) => this.read(start, end, signal),
+    };
+  }
+
+  clear(): void {
+    this.completedRangeCache.clear();
+  }
+}
+
+function validateRange(start: number, end: number, byteLength: number): void {
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 0 ||
+    end <= start ||
+    end > byteLength
+  ) {
+    throw new Error(`Invalid Parquet byte range [${start}, ${end}).`);
+  }
+}

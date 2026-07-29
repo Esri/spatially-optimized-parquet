@@ -147,8 +147,8 @@ function createBoundaryRenderer() {
       type: "simple-fill" as const,
       color: "black",
       outline: {
-        color: [255, 255, 255, 0.3],
-        width: 1,
+        color: [255, 255, 255, 0.4],
+        width: "1px",
       },
     },
   };
