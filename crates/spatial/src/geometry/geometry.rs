@@ -37,15 +37,16 @@ impl GeometryType {
     }
   }
 
-  /// Classify source geometry kinds while rejecting mixed representations.
+  /// Classify source geometry kinds while rejecting mixed geometry families.
   pub(crate) fn from_kinds(kinds: &[GeometryKind]) -> Result<Self, GeometryError> {
     let mut ty = None;
     for kind in kinds {
       let next = Self::from_kind(*kind)?;
       if ty.is_some_and(|current| current != next) {
-        return Err(GeometryError::InvalidGeometry(
-          "mixed geometry types are not supported".to_string(),
-        ));
+        return Err(GeometryError::InvalidGeometry(format!(
+          "mixed geometry families are not supported: {kinds:?}; \
+             Polygon/MultiPolygon and LineString/MultiLineString are compatible"
+        )));
       }
       ty = Some(next);
     }
@@ -133,11 +134,21 @@ mod tests {
       GeometryType::from_kinds(&[GeometryKind::Polygon, GeometryKind::MultiPolygon]).unwrap(),
       GeometryType::Polygon
     );
+    assert_eq!(
+      GeometryType::from_kinds(&[GeometryKind::LineString, GeometryKind::MultiLineString,])
+        .unwrap(),
+      GeometryType::Polyline
+    );
   }
 
   #[test]
-  fn rejects_mixed_geometry_types() {
-    assert!(GeometryType::from_kinds(&[GeometryKind::Point, GeometryKind::Polygon]).is_err());
+  fn rejects_mixed_geometry_families() {
+    let error =
+      GeometryType::from_kinds(&[GeometryKind::Point, GeometryKind::Polygon]).unwrap_err();
+
+    assert!(error.to_string().contains("mixed geometry families"));
+    assert!(error.to_string().contains("Point"));
+    assert!(error.to_string().contains("Polygon"));
   }
 
   #[test]

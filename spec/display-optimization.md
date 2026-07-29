@@ -93,7 +93,7 @@ where:
 | `fullExtent` | Full geographical extent of the geometries in the clustering spatial reference. |
 | `wkid` | Optional EPSG or Esri latest WKID for the spatial reference used by the clustering. Currently only `4326` or `3857` are supported. |
 | `wkt` | Optional spatial reference WKT. Used when `wkid` is undefined. |
-| `geometryType` | Geometry type for all geometries in the clustering. One of `"point"`, `"multipoint"`, `"polygon"`, or `"polyline"`. |
+| `geometryType` | Normalized geometry family for all geometries in the clustering. One of `"point"`, `"multipoint"`, `"polygon"`, or `"polyline"`. Polygon and MultiPolygon inputs share `"polygon"`; LineString and MultiLineString inputs share `"polyline"`. Mixing different families in one clustering is not supported. |
 | `hasZ` | Whether geometries and display columns contain Z values. |
 | `hasM` | Whether geometries and display columns contain M values. |
 
