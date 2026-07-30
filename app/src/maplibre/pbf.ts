@@ -1,4 +1,12 @@
 import type {
+  LineString,
+  MultiLineString,
+  MultiPolygon,
+  Polygon,
+  Position,
+} from "geojson";
+
+import type {
   QuantizationTransform,
   XZDisplayMetadata,
 } from "./datasetParquetMetadata";
@@ -8,18 +16,19 @@ interface PbfGeometry {
   coordinates: number[];
 }
 
-type Ring = GeoJSON.Position[];
+type Ring = Position[];
 
-export function decodeEsriPbfGeometry(
+export type SupportedGeometry =
+  | Polygon
+  | MultiPolygon
+  | LineString
+  | MultiLineString;
+
+export function decodeGeometry(
   bytes: Uint8Array,
   transform: QuantizationTransform,
   geometryType: XZDisplayMetadata["geometryType"],
-):
-  | GeoJSON.Polygon
-  | GeoJSON.MultiPolygon
-  | GeoJSON.LineString
-  | GeoJSON.MultiLineString
-  | null {
+): SupportedGeometry | null {
   const pbf = parsePbfGeometry(bytes);
   const parts = unquantizeRings(pbf, transform);
   if (geometryType === "polyline") {
@@ -174,6 +183,10 @@ function signedRingArea(ring: Ring): number {
   return area / 2;
 }
 
+/**
+ * Owns the cursor used to decode the small Protobuf subset required by Esri PBF geometry.
+ * This boundary keeps wire-format validation separate from geometry reconstruction.
+ */
 class ProtobufReader {
   private _offset = 0;
 
