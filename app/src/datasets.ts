@@ -4,6 +4,7 @@ export type DatasetId =
   | "building-footprints-japan"
   | "national-building-database-france"
   | "alaska-3d-hydrography"
+  | "unified-schools"
   | "country-borders";
 
 export interface Dataset {
@@ -107,12 +108,23 @@ export const datasets: Dataset[] = [
     name: "Country Borders, Overture",
     source: "OpenStreetMap contributors, Overture Maps Foundation",
     sourceUrl: "https://overturemaps.org/",
-    count: 850_655,
-    url: "https://stgeadlsv278968f2d.blob.core.windows.net/parquet/sop/0.1/land.parquet",
+    count: 219,
+    url: "https://stgeadlsv278968f2d.blob.core.windows.net/parquet/sop/0.1/country_borders.parquet",
     bookmarks: [],
-    center: [-95.7129, 37.0902],
-    scale: 144_448 * 128,
-    // maxScale: 144_448 / 2, 
-    byteSize: 1_259_735_771,
+    center: [0, 0],
+    scale: 144_448 * 512,
+    byteSize: 7.91e+7,
+  },
+  {
+    id: "unified-schools",
+    name: "Unified School Districts",
+    source: "United States Census",
+    sourceUrl: "https://www.census.gov/geographies/mapping-files/time-series/geo/tiger-geopackage-file.html",
+    count: 10867,
+    url: "https://stgeadlsv278968f2d.blob.core.windows.net/parquet/sop/0.1/us_schools.parquet",
+    bookmarks: [],
+    center: [-77.03, 38.895],
+    scale: 144_448 * 64,
+    byteSize: 310481871,
   },
 ]
