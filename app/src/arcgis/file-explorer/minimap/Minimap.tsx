@@ -26,6 +26,10 @@ function createDatasetSpatialReference(wkid?: number): SpatialReference {
   return new SpatialReference({ wkid: wkid ?? 3857 });
 }
 
+/**
+ * Shows row-group bounds beside the main map and mirrors its current extent.
+ * It owns the two-way view coordination so contributors can change overview behavior without coupling it to the main viewer.
+ */
 export const Minimap = memo(function Minimap({
   basemapId,
   bounds,

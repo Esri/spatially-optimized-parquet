@@ -40,6 +40,10 @@ export interface LeafPage<T> {
   values: T[];
 }
 
+/**
+ * Resolves Parquet metadata and page indexes into decoded leaf-column pages.
+ * It owns page selection and range-read details so dataset queries fetch only the rows and columns they need.
+ */
 export class HyparquetLeafReader {
   private readonly _rowGroupStarts: number[];
 

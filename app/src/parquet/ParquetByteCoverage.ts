@@ -3,6 +3,10 @@ import { rangesOverlap } from "./fileLayout";
 
 export type ByteCoverageState = "empty" | "partial" | "loaded";
 
+/**
+ * Tracks the merged, non-overlapping byte ranges already available for a Parquet file.
+ * It owns coverage arithmetic so download, cache, and visualization code share the same interval rules.
+ */
 export class ParquetByteCoverage {
   private _ranges: ByteRange[];
 

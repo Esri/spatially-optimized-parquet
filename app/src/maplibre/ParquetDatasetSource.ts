@@ -1,4 +1,9 @@
 import type {
+  Feature,
+  FeatureCollection,
+  Position,
+} from "geojson";
+import type {
   GeoJSONSource,
   Map as MaplibreMap,
   Source,
@@ -11,7 +16,10 @@ import {
   type DatasetParquetMetadata,
   type LODLevel,
 } from "./datasetParquetMetadata";
-import { decodeEsriPbfGeometry } from "./pbf";
+import {
+  decodeGeometry,
+  type SupportedGeometry,
+} from "./pbf";
 import {
   HyparquetLeafReader,
   type PhysicalColumn,
@@ -58,11 +66,15 @@ interface MatchingRowStore {
   rowsByGroup: Map<number, number[]>;
 }
 
-const emptyFeatureCollection: GeoJSON.FeatureCollection = {
+const emptyFeatureCollection: FeatureCollection = {
   type: "FeatureCollection",
   features: [],
 };
 
+/**
+ * Coordinates viewport queries that turn Parquet row and geometry pages into a MapLibre GeoJSON source.
+ * It owns map-layer setup, request cancellation, and query state so the React viewer only manages the source lifecycle.
+ */
 export class ParquetDatasetSource {
   private readonly _rangeReader: ParquetRangeReader;
   private readonly _onStatusChange: ParquetDatasetSourceOptions["onStatusChange"];
@@ -265,8 +277,8 @@ export class ParquetDatasetSource {
     matchingRows: MatchingRowStore,
     queryExtents: Bounds[],
     signal: AbortSignal,
-  ): Promise<GeoJSON.FeatureCollection> {
-    const features: GeoJSON.Feature[] = [];
+  ): Promise<FeatureCollection> {
+    const features: Feature[] = [];
     const leafReader = this._requireLeafReader();
 
     for (const [rowGroupIndex, rowIds] of matchingRows.rowsByGroup) {
@@ -288,7 +300,7 @@ export class ParquetDatasetSource {
           continue;
         }
 
-        const geometry = decodeEsriPbfGeometry(
+        const geometry = decodeGeometry(
           bytes,
           lodLevel.transform,
           metadata.display.geometryType,
@@ -342,7 +354,7 @@ export class ParquetDatasetSource {
   private _publish(
     queryVersion: number,
     signal: AbortSignal,
-    featureCollection: GeoJSON.FeatureCollection,
+    featureCollection: FeatureCollection,
     lod: number,
     featureLimitReached: boolean,
     compression: string | null,
@@ -531,11 +543,7 @@ function getMapSourceResolution(map: MaplibreMap): number {
 }
 
 function geometryIntersectsExtents(
-  geometry:
-    | GeoJSON.Polygon
-    | GeoJSON.MultiPolygon
-    | GeoJSON.LineString
-    | GeoJSON.MultiLineString,
+  geometry: SupportedGeometry,
   extents: Bounds[],
 ): boolean {
   const bounds = geometryBounds(geometry);
@@ -548,13 +556,7 @@ function geometryIntersectsExtents(
   );
 }
 
-function geometryBounds(
-  geometry:
-    | GeoJSON.Polygon
-    | GeoJSON.MultiPolygon
-    | GeoJSON.LineString
-    | GeoJSON.MultiLineString,
-): Bounds {
+function geometryBounds(geometry: SupportedGeometry): Bounds {
   const bounds: Bounds = {
     xmin: Number.POSITIVE_INFINITY,
     ymin: Number.POSITIVE_INFINITY,
@@ -572,13 +574,7 @@ function geometryBounds(
   return bounds;
 }
 
-function getGeometryPositions(
-  geometry:
-    | GeoJSON.Polygon
-    | GeoJSON.MultiPolygon
-    | GeoJSON.LineString
-    | GeoJSON.MultiLineString,
-): GeoJSON.Position[] {
+function getGeometryPositions(geometry: SupportedGeometry): Position[] {
   switch (geometry.type) {
     case "LineString":
       return geometry.coordinates;

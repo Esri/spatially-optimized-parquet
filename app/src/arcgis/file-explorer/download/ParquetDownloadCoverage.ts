@@ -4,6 +4,10 @@ import type {
   FileLayout,
 } from "../../../parquet/fileLayout";
 
+/**
+ * Tracks downloaded Parquet ranges together with their cumulative byte count.
+ * It owns the mutable coverage used by a download session and creates isolated snapshots for file inspection.
+ */
 export class ParquetDownloadCoverage {
   private _coverage = new ParquetByteCoverage();
   private _downloadedByteLength = 0;

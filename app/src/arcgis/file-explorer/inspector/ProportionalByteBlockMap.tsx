@@ -13,6 +13,10 @@ export interface VisualByteBlock {
   onClick?: () => void;
 }
 
+/**
+ * Renders byte ranges with widths proportional to their file size and fills that reflect download coverage.
+ * This shared view keeps the inspector's row-group and page diagrams visually consistent.
+ */
 export function ProportionalByteBlockMap({
   blocks,
   coverage,

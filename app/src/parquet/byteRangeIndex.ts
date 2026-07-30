@@ -5,6 +5,10 @@ export interface IndexedByteRange<Value> {
   value: Value;
 }
 
+/**
+ * Stores byte ranges in an order that supports efficient overlap queries.
+ * It owns the search index so callers can find relevant file regions without scanning every entry.
+ */
 export class ByteRangeIndex<Value> {
   private readonly _entries: readonly IndexedByteRange<Value>[];
   private readonly _prefixMaximumEnds: readonly number[];

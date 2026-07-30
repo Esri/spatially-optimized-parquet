@@ -15,6 +15,10 @@ import styles from "./MaplibreViewer.module.css";
 const openFreeMapDarkStyleUrl = "https://tiles.openfreemap.org/styles/dark";
 const mapScaleAtZoomZero = 295_829_355.4545656;
 
+/**
+ * Renders the MapLibre dataset workspace and connects the selected dataset to its Parquet-backed map source.
+ * It owns map and source lifecycles so dataset changes cancel and replace the previous query pipeline cleanly.
+ */
 export default function MaplibreViewer() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);

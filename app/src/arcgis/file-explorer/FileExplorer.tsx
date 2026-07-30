@@ -977,6 +977,10 @@ export interface FileExplorerProps {
   visible?: boolean;
 }
 
+/**
+ * Presents live Parquet download activity as file tracks, row-group details, and inspection tools.
+ * It coordinates the session's external stores with responsive explorer state so high-frequency byte updates remain localized.
+ */
 export const FileExplorer = memo(function FileExplorer({
   basemap,
   center,

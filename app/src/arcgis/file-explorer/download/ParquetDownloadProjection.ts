@@ -58,6 +58,10 @@ export interface ProjectionTopologyInput {
   error: Error | null;
 }
 
+/**
+ * Represents download activity as the block, track, and row-group state consumed by the file explorer.
+ * It owns byte-to-display indexes and request masks so rendering code never translates physical ranges itself.
+ */
 export class ParquetDownloadProjection {
   private _displayLayout: DownloadDisplayLayout | null = null;
   private _physicalIndex = new ByteRangeIndex<DownloadPhysicalSegment>([]);

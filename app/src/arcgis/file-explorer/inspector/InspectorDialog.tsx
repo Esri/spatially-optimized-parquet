@@ -51,6 +51,10 @@ import {
 } from "./ProportionalByteBlockMap";
 import styles from "./InspectorDialog.module.css";
 
+/**
+ * Presents an interactive breakdown of Parquet row groups, columns, pages, and downloaded coverage.
+ * It owns the inspector store lifecycle so closing or replacing the dialog also retires pending detail loads.
+ */
 export function InspectorDialog({
   snapshot,
   source,

@@ -15,6 +15,10 @@ interface SnapshotProvider {
   createTrackSnapshot(trackId: string): DownloadTrackSnapshot;
 }
 
+/**
+ * Provides a React-compatible external store around one snapshot reader.
+ * It owns subscriber notification so the session model does not depend on component lifecycle details.
+ */
 class ExternalStoreChannel<Snapshot> implements ReadonlyExternalStore<Snapshot> {
   private readonly _listeners = new Set<() => void>();
 
@@ -36,6 +40,10 @@ class ExternalStoreChannel<Snapshot> implements ReadonlyExternalStore<Snapshot> 
   }
 }
 
+/**
+ * Provides lazily created external-store channels for independently addressable snapshots.
+ * It owns the channel registry so updates notify only subscribers for the affected key.
+ */
 class KeyedExternalStoreChannel<Key, Snapshot> {
   private readonly _channels = new Map<Key, ExternalStoreChannel<Snapshot>>();
 
@@ -58,6 +66,10 @@ class KeyedExternalStoreChannel<Key, Snapshot> {
   }
 }
 
+/**
+ * Coordinates batched snapshot refreshes and external-store notifications for a download session.
+ * It owns publication timing so high-frequency range events do not force every view to update at once.
+ */
 export class DownloadSessionPublisher {
   private _topologySnapshot: DownloadTopologySnapshot;
   private _summarySnapshot: DownloadSummarySnapshot;

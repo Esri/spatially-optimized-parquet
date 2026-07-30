@@ -120,6 +120,10 @@ function formatFeatureCount(featureCount: number | null): string {
   return formatCompactCount(featureCount);
 }
 
+/**
+ * Renders the ArcGIS dataset workspace and coordinates its map, dataset session, and download explorer.
+ * This component owns viewer-level state so map integration and file diagnostics stay synchronized when the active dataset changes.
+ */
 export function ArcgisViewer() {
   const [datasetIndex, setDatasetIndex] = useState(0);
   const [mapReady, setMapReady] = useState(false);

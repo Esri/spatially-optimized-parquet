@@ -57,6 +57,10 @@ const emptyTrackSnapshot: DownloadTrackSnapshot = {
   visibleBlockIds: [],
 };
 
+/**
+ * Coordinates diagnostics, byte coverage, request activity, and published download snapshots.
+ * It owns the session lifecycle so file-explorer views consume one consistent model instead of synchronizing those concerns themselves.
+ */
 export class ParquetDownloadSession implements DownloadSessionView {
   private _diagnostics: ArcgisParquetDiagnosticsSnapshotV1 | null = null;
   private _layout: FileLayout | null = null;

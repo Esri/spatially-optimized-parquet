@@ -49,6 +49,10 @@ export interface FileStructureState {
   details: ReadonlyMap<string, ColumnDetailState>;
 }
 
+/**
+ * Owns inspector selection state and asynchronously loaded Parquet page-index details.
+ * It provides one external-store boundary so the dialog can react to navigation and loading without duplicating request state.
+ */
 export class ParquetFileStructureStore {
   private _selectedRowGroupIndex: number | null = null;
   private _expandedColumnIds = new Set<string>();

@@ -23,6 +23,10 @@ export type RangeReadChange =
       replacedLatestRequest: boolean;
     };
 
+/**
+ * Tracks active and completed Parquet range requests while rejecting duplicate diagnostic events.
+ * It owns request identity and ordering so projection updates can apply each lifecycle transition once.
+ */
 export class RangeReadLedger {
   private readonly _activeRequests = new Map<string, ActiveRequest>();
   private readonly _handledEventKeys = new Set<string>();

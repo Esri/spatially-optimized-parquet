@@ -7,6 +7,10 @@ export interface ParquetRangeReader {
   clear(): void;
 }
 
+/**
+ * Provides validated HTTP range reads for a single Parquet file and caches completed requests.
+ * It owns transport and `AsyncBuffer` adaptation so Parquet consumers can work with byte ranges instead of HTTP responses.
+ */
 export class HttpParquetRangeReader implements ParquetRangeReader {
   readonly byteLength: number;
 
