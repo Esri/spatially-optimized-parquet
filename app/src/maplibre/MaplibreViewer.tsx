@@ -5,6 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import { DatasetSelectionPanel } from "../common/dataset/DatasetSelectionPanel";
 import { datasets } from "../common/dataset/datasets";
+import { formatCompactCount } from "../common/formatCompactCount";
 import {
   ParquetDatasetSource,
   type DatasetLayerStatus,
@@ -135,10 +136,7 @@ function formatFeatureCount(status: DatasetLayerStatus): string {
     return "…";
   }
 
-  const count = new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: 1,
-    notation: "compact",
-  }).format(status.featureCount);
+  const count = formatCompactCount(status.featureCount);
 
   return status.featureLimitReached
     ? `${count}+`

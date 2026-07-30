@@ -17,6 +17,8 @@ import {
 
 import { DatasetSelectionPanel } from "../common/dataset/DatasetSelectionPanel";
 import { datasets, type Dataset } from "../common/dataset/datasets";
+import { formatCompactCount } from "../common/formatCompactCount";
+import { formatRatio } from "../common/formatNumber";
 import { deriveFileDetailSummary } from "../parquet/fileDetails";
 import {
   resolveDatasetMapProfile,
@@ -49,10 +51,13 @@ function formatCompressionSummary(
   const codec = summary.compressionCodecs.length === 1
     ? summary.compressionCodecs[0].toUpperCase()
     : "Mixed";
-  const ratio = summary.compressedSize > 0
-    ? summary.uncompressedSize / summary.compressedSize
-    : null;
-  return ratio ? `${codec} ${ratio.toFixed(1)}x` : codec;
+  const ratio = formatRatio(
+    summary.uncompressedSize,
+    summary.compressedSize,
+    1,
+    "x",
+  );
+  return ratio ? `${codec} ${ratio}` : codec;
 }
 
 function createDatasetSpatialReference(wkid?: number): SpatialReference {
@@ -112,10 +117,7 @@ function formatFeatureCount(featureCount: number | null): string {
     return "…";
   }
 
-  return new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: 1,
-    notation: "compact",
-  }).format(featureCount);
+  return formatCompactCount(featureCount);
 }
 
 export function ArcgisViewer() {

@@ -10,8 +10,8 @@ describe("ParquetByteCoverage", () => {
     const clone = coverage.clone();
     clone.add({ start: 20, end: 30 });
 
-    expect(coverage.values()).toEqual([{ start: 0, end: 15 }]);
-    expect(clone.values()).toEqual([
+    expect(coverage.values).toEqual([{ start: 0, end: 15 }]);
+    expect(clone.values).toEqual([
       { start: 0, end: 15 },
       { start: 20, end: 30 },
     ]);

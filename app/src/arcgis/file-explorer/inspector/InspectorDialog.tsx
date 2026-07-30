@@ -11,6 +11,12 @@ import {
 } from "react";
 
 import { formatByteSize } from "../../../common/formatByteSize";
+import { formatCompactCount } from "../../../common/formatCompactCount";
+import {
+  formatInteger,
+  formatPercent,
+  formatRatio,
+} from "../../../common/formatNumber";
 import type { ParquetByteCoverage } from "../../../parquet/ParquetByteCoverage";
 import {
   deriveFileDetailSummary,
@@ -472,9 +478,12 @@ function FileDetails({
     : compressionCodecs.length > 1
       ? "Mixed"
       : "Unavailable";
-  const compressionRatio = summary.compressedSize > 0
-    ? `${(summary.uncompressedSize / summary.compressedSize).toFixed(1)}×`
-    : "Unavailable";
+  const compressionRatio = formatRatio(
+    summary.uncompressedSize,
+    summary.compressedSize,
+    1,
+    "×",
+  ) ?? "Unavailable";
   const fileName = formatFileName(layout.fileName);
   const geodisplayVersion =
     extractGeodisplayVersion(layout.keyValueMetadata) ?? "—";
@@ -491,7 +500,7 @@ function FileDetails({
       <div className={styles.fileStructureFileDetailFields}>
         <dl>
           <FileDetail label="Rows" value={formatCompactCount(summary.rowCount)} />
-          <FileDetail label="Columns" value={summary.columnCount.toLocaleString()} />
+          <FileDetail label="Columns" value={formatInteger(summary.columnCount)} />
           <FileDetail
             label="Size"
             value={formatByteSize(layout.byteLength)}
@@ -552,13 +561,6 @@ function formatFileName(value: string): string {
   return path.slice(path.lastIndexOf("/") + 1) || value;
 }
 
-function formatCompactCount(count: number): string {
-  return new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: 1,
-    notation: "compact",
-  }).format(count);
-}
-
 function FileDetail({
   label,
   title,
@@ -613,7 +615,7 @@ function ColumnOverviewSegment({
       >
         <strong>{fieldName}</strong>
         <br />
-        {formatByteSize(byteLength)} · {filePercent.toFixed(2)}% of{" "}
+        {formatByteSize(byteLength)} · {formatPercent(filePercent, 2)} of{" "}
         {loadedOnly ? "loaded column bytes" : "column bytes"}
       </calcite-tooltip>
     </>
@@ -783,10 +785,12 @@ function ColumnDetail({
   }
 
   function formatCompressionRatio(column: ColumnLayout): string {
-    if (column.compressedSize === 0) {
-      return "—";
-    }
-    return `${(column.uncompressedSize / column.compressedSize).toFixed(2)}×`;
+    return formatRatio(
+      column.uncompressedSize,
+      column.compressedSize,
+      2,
+      "×",
+    ) ?? "—";
   }
 
   function DelayedColumnLoading() {
@@ -894,11 +898,11 @@ function ColumnDetail({
               >
                 <strong>Page {page.pageIndex}</strong>
                 <br />
-                Bytes {page.byteRange.start.toLocaleString()}–
-                {(page.byteRange.end - 1).toLocaleString()}
+                Bytes {formatInteger(page.byteRange.start)}–
+                {formatInteger(page.byteRange.end - 1)}
                 <br />
-                Rows {page.rowStart.toLocaleString()}–
-                {(page.rowEnd - 1).toLocaleString()}
+                Rows {formatInteger(page.rowStart)}–
+                {formatInteger(page.rowEnd - 1)}
                 <br />
                 Compressed size {formatByteSize(page.compressedPageSize)}
                 <br />

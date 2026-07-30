@@ -19,15 +19,15 @@ export class ParquetDownloadCoverage {
     return result;
   }
 
-  values(): readonly ByteRange[] {
-    return this._coverage.values();
+  get values(): readonly ByteRange[] {
+    return this._coverage.values;
   }
 
   overlaps(range: ByteRange): boolean {
     return this._coverage.overlaps(range);
   }
 
-  currentDownloadedByteLength(): number {
+  get downloadedByteLength(): number {
     return this._downloadedByteLength;
   }
 

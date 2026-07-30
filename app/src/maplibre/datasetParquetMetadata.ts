@@ -4,6 +4,8 @@ import {
   type FileMetaData,
 } from "hyparquet";
 
+import { formatRatio } from "../common/formatNumber";
+
 export interface Bounds {
   xmin: number;
   ymin: number;
@@ -83,10 +85,13 @@ function formatCompression(metadata: FileMetaData): string | null {
     return null;
   }
   const codec = codecs.size === 1 ? [...codecs][0] : "Mixed";
-  const ratio = compressedSize > 0n
-    ? Number(uncompressedSize) / Number(compressedSize)
-    : null;
-  return ratio ? `${codec.toUpperCase()} ${ratio.toFixed(1)}x` : codec;
+  const ratio = formatRatio(
+    Number(uncompressedSize),
+    Number(compressedSize),
+    1,
+    "x",
+  );
+  return ratio ? `${codec.toUpperCase()} ${ratio}` : codec;
 }
 
 export function selectLODLevel(

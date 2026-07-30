@@ -17,7 +17,7 @@ export class ParquetByteCoverage {
     return new ParquetByteCoverage(this._ranges);
   }
 
-  values(): readonly ByteRange[] {
+  get values(): readonly ByteRange[] {
     return this._ranges;
   }
 

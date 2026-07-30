@@ -1,6 +1,7 @@
 import type { Dataset } from "./datasets";
 import { DatasetSelectionMenu } from "./DatasetSelectionMenu";
 import { formatByteSize } from "../formatByteSize";
+import { formatCompactCount } from "../formatCompactCount";
 import styles from "./DatasetSelectionPanel.module.css";
 
 interface DatasetSelectionPanelProps {
@@ -92,11 +93,4 @@ export function DatasetSelectionPanel({
       </div>
     </section>
   );
-}
-
-function formatCompactCount(count: number): string {
-  return new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: 1,
-    notation: "compact",
-  }).format(count);
 }

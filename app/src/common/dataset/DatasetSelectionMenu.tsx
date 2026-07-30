@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 
 import { datasets, type Dataset } from "./datasets";
 import { formatByteSize } from "../formatByteSize";
+import { formatInteger } from "../formatNumber";
 import styles from "./DatasetSelectionPanel.module.css";
 
 interface DatasetSelectionMenuProps {
@@ -60,7 +61,7 @@ export function DatasetSelectionMenu({
                   <span className={styles.datasetOptionName}>{dataset.name}</span>
                   <span className={styles.datasetOptionMetadata}>
                     {formatByteSize(dataset.byteSize)} ·{" "}
-                    {dataset.count.toLocaleString()} features
+                    {formatInteger(dataset.count)} features
                   </span>
                   <span className={styles.datasetOptionSource}>
                     {dataset.source}

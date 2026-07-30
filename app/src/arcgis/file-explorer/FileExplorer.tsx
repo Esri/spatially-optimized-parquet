@@ -16,6 +16,7 @@ import {
   type ArcgisParquetPageIndexSource,
 } from "./inspector/arcgisPageIndexes";
 import { formatByteSize } from "../../common/formatByteSize";
+import { formatInteger, formatPercent } from "../../common/formatNumber";
 import type {
   DownloadBlockLayout,
   DownloadTrackLayout,
@@ -639,7 +640,7 @@ function formatColumnStatisticValue(
 function formatColumnStatisticCount(value: number | null | undefined): string {
   return value === null || value === undefined || !Number.isFinite(value)
     ? "Unavailable"
-    : new Intl.NumberFormat().format(value);
+    : formatInteger(value);
 }
 
 function createColumnTooltipStyle(
@@ -675,11 +676,11 @@ function createColumnTooltipStyle(
 }
 
 function formatDownloadPercent(percent: number): string {
-  return `${Math.round(percent)}%`;
+  return formatPercent(percent);
 }
 
 function formatPreciseDownloadPercent(percent: number): string {
-  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(percent)}%`;
+  return formatPercent(percent, 2);
 }
 
 function createAdjacentTooltipStyle(

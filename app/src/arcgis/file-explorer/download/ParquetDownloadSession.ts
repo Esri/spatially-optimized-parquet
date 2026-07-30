@@ -80,12 +80,12 @@ export class ParquetDownloadSession implements DownloadSessionView {
           error: this._error,
         }),
         createSummarySnapshot: () => this._projection.createSummarySnapshot(
-          this._coverage.currentDownloadedByteLength(),
-          this._ledger.currentCompletedRequestCount(),
+          this._coverage.downloadedByteLength,
+          this._ledger.completedRequestCount,
         ),
         createBlockSnapshot: (blockId) => this._projection.createBlockSnapshot(
           blockId,
-          this._ledger.currentLatestRequestKey(),
+          this._ledger.latestRequestKey,
         ),
         createTrackSnapshot: (trackId) => this._projection.createTrackSnapshot(trackId),
       },
@@ -225,11 +225,11 @@ export class ParquetDownloadSession implements DownloadSessionView {
   }
 
   private _replayCoverage(): void {
-    for (const range of this._coverage.values()) {
+    for (const range of this._coverage.values) {
       this._publishChange(this._projection.applyCachedRange(range));
     }
-    this._publishChange(this._projection.addCoveredRanges(this._coverage.values()));
-    for (const [requestKey, request] of this._ledger.activeRequestEntries()) {
+    this._publishChange(this._projection.addCoveredRanges(this._coverage.values));
+    for (const [requestKey, request] of this._ledger.activeRequestEntries) {
       this._publishChange(
         this._projection.applyLoadingRequestImpact(requestKey, request.range, 1),
       );

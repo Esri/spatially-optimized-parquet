@@ -80,15 +80,15 @@ export class RangeReadLedger {
     };
   }
 
-  activeRequestEntries(): IterableIterator<[string, ActiveRequest]> {
+  get activeRequestEntries(): IterableIterator<[string, ActiveRequest]> {
     return this._activeRequests.entries();
   }
 
-  currentLatestRequestKey(): string | null {
+  get latestRequestKey(): string | null {
     return this._latestRequestKey;
   }
 
-  currentCompletedRequestCount(): number {
+  get completedRequestCount(): number {
     return this._completedRequestCount;
   }
 }
