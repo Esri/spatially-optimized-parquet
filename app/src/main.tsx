@@ -23,7 +23,7 @@ import "@esri/calcite-components/components/calcite-tooltip";
 import "@arcgis/map-components/main.css";
 import "@esri/calcite-components/main.css";
 
-import { App } from "./app/App";
+import { App } from "./App";
 import "./styles/app.css";
 
 const rootElement = document.getElementById("root");

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ByteRangeIndex } from "./byteRangeIndex";
+import { ByteRangeIndex } from "./ByteRangeIndex";
 
 describe("ByteRangeIndex", () => {
   it("returns every nested and duplicate-start interval that overlaps a range", () => {
