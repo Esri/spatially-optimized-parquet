@@ -1,7 +1,7 @@
 import type { ViewerType } from "./Viewer";
-import styles from "./ApplicationHeader.module.css";
+import styles from "./AppHeader.module.css";
 
-interface ApplicationHeaderProps {
+interface AppHeaderProps {
   viewer: ViewerType;
   onViewerChange(viewer: ViewerType): void;
 }
@@ -10,10 +10,10 @@ function viewerToggleLabel(viewer: ViewerType): string {
   return viewer === "arcgis" ? "MapLibre Starter Code" : "ArcGIS Maps SDK";
 }
 
-export function ApplicationHeader({
+export function AppHeader({
   viewer,
   onViewerChange,
-}: ApplicationHeaderProps) {
+}: AppHeaderProps) {
   const nextViewer = viewer === "arcgis" ? "maplibre" : "arcgis";
   const toggleLabel = viewerToggleLabel(viewer);
 
