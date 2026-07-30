@@ -1,7 +1,7 @@
 import type { ArcgisParquetNumericValue } from "./arcgisParquetDiagnostics";
 
 export interface ArcgisParquetPageIndexTarget {
-  fileId: string;
+  fileId: number;
   rowGroupIndex: number;
   columnIndex: number;
 }

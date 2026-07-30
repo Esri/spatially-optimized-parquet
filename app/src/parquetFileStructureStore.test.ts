@@ -128,6 +128,75 @@ describe("ParquetFileStructureStore", () => {
       new Set([secondColumn.id]),
     );
   });
+
+  it("keeps the current details visible until the next column loads", async () => {
+    const firstColumn = createColumn("first", 0, { start: 0, end: 100 });
+    const secondColumn = createColumn("second", 1, { start: 100, end: 200 });
+    let resolveSecondOffsetIndex:
+      | ((value: {
+          pages: {
+            pageIndex: number;
+            rowStart: number;
+            rowEnd: number;
+            byteStart: number;
+            byteEnd: number;
+            compressedPageSize: number;
+          }[];
+        }) => void)
+      | undefined;
+    const secondOffsetIndex = new Promise<{
+      pages: {
+        pageIndex: number;
+        rowStart: number;
+        rowEnd: number;
+        byteStart: number;
+        byteEnd: number;
+        compressedPageSize: number;
+      }[];
+    }>((resolve) => {
+      resolveSecondOffsetIndex = resolve;
+    });
+    const source = {
+      getColumnIndex: vi.fn().mockResolvedValue(null),
+      getOffsetIndex: vi
+        .fn()
+        .mockResolvedValueOnce({ pages: [] })
+        .mockReturnValueOnce(secondOffsetIndex),
+    };
+    const store = new ParquetFileStructureStore({
+      coverage: new ParquetByteCoverage(),
+      layout: {
+        fileId: "file.parquet",
+        fileName: "file.parquet",
+        byteLength: 300,
+        footer: { start: 280, end: 300 },
+        keyValueMetadata: [],
+        rowGroups: [{
+          index: 0,
+          byteRange: { start: 0, end: 200 },
+          columns: [firstColumn, secondColumn],
+        }],
+        pageIndexes: [],
+      },
+    }, source);
+
+    store.selectRowGroup(0);
+    await vi.waitFor(() => {
+      expect(store.getState().detailColumnId).toBe(firstColumn.id);
+    });
+
+    store.toggleColumn(secondColumn);
+
+    expect(store.getState().expandedColumnIds).toEqual(
+      new Set([secondColumn.id]),
+    );
+    expect(store.getState().detailColumnId).toBe(firstColumn.id);
+
+    resolveSecondOffsetIndex?.({ pages: [] });
+    await vi.waitFor(() => {
+      expect(store.getState().detailColumnId).toBe(secondColumn.id);
+    });
+  });
 });
 
 function createColumn(

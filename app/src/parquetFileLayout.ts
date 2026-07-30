@@ -51,7 +51,7 @@ export interface PageIndexLayout {
 }
 
 export interface FileLayout {
-  fileId: string;
+  fileId: number;
   fileName: string;
   byteLength: number;
   footer: ByteRange;

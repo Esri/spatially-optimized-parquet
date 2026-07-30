@@ -4,10 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./maplibre.css";
 
-import { DatasetSelectionMenu } from "../DatasetSelectionMenu";
+import { DatasetSelectionPanel } from "../DatasetSelectionPanel";
 import { datasets } from "../datasets";
 import {
-  datasetFeatureLimit,
   ParquetDatasetSource,
   type DatasetLayerStatus,
 } from "./ParquetDatasetSource";
@@ -86,14 +85,41 @@ export default function MaplibreViewer() {
 
   return (
     <main className="maplibre-workspace">
+      <DatasetSelectionPanel
+        activeDataset={activeDataset}
+        compression={
+          status.type === "ready" ? status.compression : null
+        }
+        onDatasetSelect={setDatasetIndex}
+      />
       <calcite-panel className="maplibre-panel">
-        <DatasetSelectionMenu
-          activeDataset={activeDataset}
-          onDatasetSelect={setDatasetIndex}
-        />
-        <span className="maplibre-status" slot="header-actions-end">
-          {formatStatus(status)}
-        </span>
+        <calcite-label
+          className="panel-metric"
+          layout="inline"
+          slot="header-actions-start"
+        >
+          Features
+          <strong>{formatFeatureCount(status)}</strong>
+          <span className="map-header-action-divider" aria-hidden="true">
+            |
+          </span>
+          LOD
+          <strong>{status.type === "ready" ? status.lod : "…"}</strong>
+        </calcite-label>
+        {status.type === "loading" ? (
+          <span className="maplibre-status" slot="header-actions-end">
+            <calcite-loader
+              inline
+              label="Loading dataset"
+              scale="s"
+            />
+            Loading...
+          </span>
+        ) : status.type === "failed" ? (
+          <span className="maplibre-status" slot="header-actions-end">
+            Dataset failed: {status.message}
+          </span>
+        ) : null}
         <div
           ref={containerRef}
           aria-label={`OpenFreeMap dark basemap with ${activeDataset.name}`}
@@ -104,21 +130,19 @@ export default function MaplibreViewer() {
   );
 }
 
-function formatStatus(status: DatasetLayerStatus): string {
-  switch (status.type) {
-    case "idle":
-      return "Features: idle";
-    case "loading":
-      return "Features: loading...";
-    case "ready":
-      return `${status.featureCount.toLocaleString()} features · LOD ${status.lod}${
-        status.featureLimitReached
-          ? ` · limited to first ${datasetFeatureLimit.toLocaleString()} matches`
-          : ""
-      }`;
-    case "failed":
-      return `Dataset failed: ${status.message}`;
+function formatFeatureCount(status: DatasetLayerStatus): string {
+  if (status.type !== "ready") {
+    return "…";
   }
+
+  const count = new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 1,
+    notation: "compact",
+  }).format(status.featureCount);
+
+  return status.featureLimitReached
+    ? `${count}+`
+    : count;
 }
 
 function scaleToZoom(scale: number): number {

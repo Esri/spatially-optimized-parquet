@@ -45,12 +45,14 @@ export interface FileStructureSnapshot {
 export interface FileStructureState {
   selectedRowGroupIndex: number | null;
   expandedColumnIds: ReadonlySet<string>;
+  detailColumnId: string | null;
   details: ReadonlyMap<string, ColumnDetailState>;
 }
 
 export class ParquetFileStructureStore {
   private selectedRowGroupIndex: number | null = null;
   private expandedColumnIds = new Set<string>();
+  private detailColumnId: string | null = null;
   private details = new Map<string, ColumnDetailState>();
   private listeners = new Set<() => void>();
   private generation = 0;
@@ -77,6 +79,7 @@ export class ParquetFileStructureStore {
     const openingRowGroup = this.selectedRowGroupIndex !== index;
     this.selectedRowGroupIndex = openingRowGroup ? index : null;
     this.expandedColumnIds.clear();
+    this.detailColumnId = null;
     const defaultColumn = openingRowGroup
       ? this.defaultColumn(this.rowGroup(index))
       : undefined;
@@ -92,6 +95,7 @@ export class ParquetFileStructureStore {
   toggleColumn(column: ColumnLayout): void {
     if (this.expandedColumnIds.has(column.id)) {
       this.expandedColumnIds.delete(column.id);
+      this.detailColumnId = null;
       this.publish();
       return;
     }
@@ -108,9 +112,12 @@ export class ParquetFileStructureStore {
 
   private selectColumn(column: ColumnLayout): boolean {
     this.expandedColumnIds = new Set([column.id]);
-    const shouldLoad = !this.details.has(column.id);
+    const existingDetail = this.details.get(column.id);
+    const shouldLoad = existingDetail === undefined;
     if (shouldLoad) {
       this.details.set(column.id, { type: "loading" });
+    } else if (existingDetail.type !== "loading") {
+      this.detailColumnId = column.id;
     }
     return shouldLoad;
   }
@@ -163,6 +170,9 @@ export class ParquetFileStructureStore {
           gaps: deriveGaps(column.byteRange, offsetIndex),
         });
       }
+      if (this.expandedColumnIds.has(column.id)) {
+        this.detailColumnId = column.id;
+      }
     } catch (error) {
       if (generation !== this.generation) {
         return;
@@ -171,6 +181,9 @@ export class ParquetFileStructureStore {
         type: "failed",
         message: error instanceof Error ? error.message : String(error),
       });
+      if (this.expandedColumnIds.has(column.id)) {
+        this.detailColumnId = column.id;
+      }
     }
     this.publish();
   }
@@ -204,6 +217,7 @@ export class ParquetFileStructureStore {
     return {
       selectedRowGroupIndex: this.selectedRowGroupIndex,
       expandedColumnIds: new Set(this.expandedColumnIds),
+      detailColumnId: this.detailColumnId,
       details: new Map(this.details),
     };
   }

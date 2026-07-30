@@ -38,7 +38,7 @@ export const datasets: Dataset[] = [
     count: 11_155_486,
     url: "https://fd-stgeadlsv278968f2d-g4hrhshhhuaxgqc7.a02.azurefd.net/sop/0.1/census_blocks.parquet",
     center: [-74.006, 40.68],
-    scale: 577_791 / 4,
+    scale: 577_791 / 2,
     byteSize: 12_975_526_811,
     bookmarks: [
       {

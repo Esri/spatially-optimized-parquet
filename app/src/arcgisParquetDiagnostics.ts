@@ -79,7 +79,7 @@ export interface ArcgisParquetRowGroupDiagnosticsV1 {
 
 export interface ArcgisParquetFileDiagnosticsV1 {
   version: 1;
-  fileId: string;
+  fileId: number;
   fileName: string;
   byteLength: number;
   footerRange: ArcgisParquetByteRange;
@@ -144,7 +144,7 @@ export function parseParquetDiagnosticsSnapshot(
   const files = readArray(snapshot.files, "diagnostics snapshot.files").map(
     (file, fileIndex) => parseFileDiagnostics(file, `diagnostics snapshot.files[${fileIndex}]`),
   );
-  const fileIds = new Set<string>();
+  const fileIds = new Set<number>();
   for (const file of files) {
     if (fileIds.has(file.fileId)) {
       throw new TypeError(`Duplicate diagnostics fileId "${file.fileId}".`);
@@ -191,7 +191,7 @@ function parseFileDiagnostics(
 ): ArcgisParquetFileDiagnosticsV1 {
   const file = readRecord(value, name);
   readVersion(file.version, `${name}.version`);
-  const fileId = readNonEmptyString(file.fileId, `${name}.fileId`);
+  const fileId = readStructuralInteger(file.fileId, `${name}.fileId`);
   const fileName = readNonEmptyString(file.fileName, `${name}.fileName`);
   const byteLength = readStructuralInteger(file.byteLength, `${name}.byteLength`);
   const footerRange = readBoundedByteRange(

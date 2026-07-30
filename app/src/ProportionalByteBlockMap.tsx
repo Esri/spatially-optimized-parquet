@@ -8,6 +8,7 @@ export interface VisualByteBlock {
   byteRange: ByteRange;
   label: ReactNode;
   className?: string;
+  elementId?: string;
   onClick?: () => void;
 }
 
@@ -36,6 +37,7 @@ export function ProportionalByteBlockMap({
         return block.onClick ? (
           <button
             className={className}
+            id={block.elementId}
             key={block.id}
             onClick={block.onClick}
             style={style}
@@ -44,7 +46,12 @@ export function ProportionalByteBlockMap({
             {block.label}
           </button>
         ) : (
-          <div className={className} key={block.id} style={style}>
+          <div
+            className={className}
+            id={block.elementId}
+            key={block.id}
+            style={style}
+          >
             {block.label}
           </div>
         );

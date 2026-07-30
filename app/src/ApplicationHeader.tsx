@@ -5,12 +5,6 @@ interface ApplicationHeaderProps {
   onViewerChange(viewer: ViewerType): void;
 }
 
-function viewerDescription(viewer: ViewerType): string {
-  return viewer === "arcgis"
-    ? "ArcGIS Maps SDK for JavaScript"
-    : "MapLibre GL JS";
-}
-
 function viewerToggleLabel(viewer: ViewerType): string {
   return viewer === "arcgis" ? "MapLibre Starter Code" : "ArcGIS Maps SDK";
 }
@@ -25,15 +19,20 @@ export function ApplicationHeader({
   return (
     <calcite-navigation slot="header">
       <calcite-navigation-logo
-        description={viewerDescription(viewer)}
+        className="application-logo"
         heading="Spatially Optimized Parquet"
         slot="logo"
       />
+      <div className="application-sdk-label" slot="content-start">
+        <span>{viewer === "arcgis" ? "ArcGIS Maps SDK" : "MapLibre GL JS"}</span>
+      </div>
       <calcite-menu slot="content-end" label="Application links">
         <calcite-menu-item
-          text="Documentation"
-          label="Documentation"
-          iconStart="book"
+          className="viewer-switch-menu-item"
+          text={toggleLabel}
+          label={toggleLabel}
+          iconStart="code"
+          onClick={() => onViewerChange(nextViewer)}
         />
         <calcite-menu-item
           text="GitHub"
@@ -42,12 +41,6 @@ export function ApplicationHeader({
           href="https://github.com"
           target="_blank"
           rel="noopener noreferrer"
-        />
-        <calcite-menu-item
-          text={toggleLabel}
-          label={toggleLabel}
-          iconStart="rotate"
-          onClick={() => onViewerChange(nextViewer)}
         />
       </calcite-menu>
     </calcite-navigation>

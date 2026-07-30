@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 
 import { datasets, type Dataset } from "./datasets";
 import { formatByteSize } from "./formatByteSize";
@@ -12,61 +12,62 @@ export function DatasetSelectionMenu({
   activeDataset,
   onDatasetSelect,
 }: DatasetSelectionMenuProps) {
-  const menuItemRef = useRef<HTMLCalciteMenuItemElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const selectDataset = (index: number) => {
     onDatasetSelect(index);
-    if (menuItemRef.current) {
-      menuItemRef.current.open = false;
-    }
+    setMenuOpen(false);
   };
 
   return (
-    <calcite-menu
-      className="dataset-menu"
-      slot="header-actions-start"
-      label="Dataset selection"
-    >
-      <calcite-menu-item
-        ref={menuItemRef}
-        text={activeDataset.name}
-        label={`Selected dataset: ${activeDataset.name}`}
-        iconStart="layers"
+    <label className="dataset-selection-field dataset-select-field">
+      <span className="dataset-selection-label">Select Dataset</span>
+      <button
+        aria-expanded={menuOpen}
+        aria-haspopup="menu"
+        className="dataset-menu-trigger"
+        onClick={() => {
+          requestAnimationFrame(() => setMenuOpen((open) => !open));
+        }}
+        ref={menuButtonRef}
+        type="button"
       >
-        <div className="dataset-options" role="menu" slot="submenu-item">
-          {datasets.map((dataset, index) => (
-            <div className="dataset-option" key={dataset.id} role="none">
-              <button
-                className="dataset-option-select"
-                disabled={!dataset.url}
-                onClick={() => selectDataset(index)}
-                role="menuitem"
-                type="button"
-              >
-                <span className="dataset-option-name">{dataset.name}</span>
-                <span className="dataset-option-metadata">
-                  {formatByteSize(dataset.byteSize)} ·{" "}
-                  {dataset.count.toLocaleString()} features
-                </span>
-              </button>
-              <span className="dataset-option-source">
-                {dataset.sourceUrl ? (
-                  <calcite-link
-                    href={dataset.sourceUrl}
-                    iconEnd="launch"
-                    rel="noopener noreferrer"
-                    target="_blank"
-                  >
+        {activeDataset.name}
+      </button>
+      {menuButtonRef.current ? (
+        <calcite-popover
+          label="Select dataset"
+          open={menuOpen}
+          overlayPositioning="fixed"
+          placement="bottom-start"
+          referenceElement={menuButtonRef.current}
+          oncalcitePopoverClose={() => setMenuOpen(false)}
+        >
+          <div className="dataset-options" role="menu">
+            {datasets.map((dataset, index) => (
+              <div className="dataset-option" key={dataset.id} role="none">
+                <button
+                  className="dataset-option-select"
+                  disabled={!dataset.url}
+                  onClick={() => selectDataset(index)}
+                  role="menuitem"
+                  type="button"
+                >
+                  <span className="dataset-option-name">{dataset.name}</span>
+                  <span className="dataset-option-metadata">
+                    {formatByteSize(dataset.byteSize)} ·{" "}
+                    {dataset.count.toLocaleString()} features
+                  </span>
+                  <span className="dataset-option-source">
                     {dataset.source}
-                  </calcite-link>
-                ) : (
-                  dataset.source
-                )}
-              </span>
-            </div>
-          ))}
-        </div>
-      </calcite-menu-item>
-    </calcite-menu>
+                  </span>
+                </button>
+              </div>
+            ))}
+          </div>
+        </calcite-popover>
+      ) : null}
+    </label>
   );
 }

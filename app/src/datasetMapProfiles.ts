@@ -12,6 +12,7 @@ export interface DatasetEffectLayer {
 }
 
 export interface DatasetMapSlotProps {
+  headerActionsElement: HTMLElement | null;
   layer: ParquetLayer | null;
 }
 

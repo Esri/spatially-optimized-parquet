@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type {
   DatasetMapProfile,
   DatasetMapSlotProps,
@@ -52,7 +53,10 @@ export const franceMapProfile = {
       ],
     },
   },
-  mapSlotComponent: function FranceMapControls({ layer }: DatasetMapSlotProps) {
+  mapSlotComponent: function FranceMapControls({
+    headerActionsElement,
+    layer,
+  }: DatasetMapSlotProps) {
     const [constructionYear, setConstructionYear] = useState(
       initialConstructionYear,
     );
@@ -98,34 +102,44 @@ export const franceMapProfile = {
     return (
       <>
         <arcgis-legend slot="bottom-left" />
-        <div className="map-renderer-controls" slot="bottom-right">
-          <div className="map-renderer-controls-heading">
-            Construction through{" "}
-            <strong aria-live="polite">{constructionYear}</strong>
-          </div>
-          <calcite-slider
-            label="Construction year"
-            labelHandles
-            max={maximumConstructionYear}
-            min={minimumConstructionYear}
-            oncalciteSliderInput={(event: Event) => {
-              setPlaying(false);
-              setConstructionYear(
-                Number((event.currentTarget as HTMLCalciteSliderElement).value),
-              );
-            }}
-            value={constructionYear}
-          />
-          <calcite-button
-            appearance="solid"
-            iconStart={playing ? "pause" : "play"}
-            kind="brand"
-            label={playing ? "Pause construction animation" : "Play construction animation"}
-            onClick={() => setPlaying((currentPlaying) => !currentPlaying)}
-          >
-            {playing ? "Pause" : "Play"}
-          </calcite-button>
-        </div>
+        {headerActionsElement
+          ? createPortal(
+              <div className="france-map-header-controls">
+                <calcite-label layout="inline">
+                  Year
+                  <strong aria-live="polite">{constructionYear}</strong>
+                </calcite-label>
+                <calcite-slider
+                  label="Construction year"
+                  max={maximumConstructionYear}
+                  min={minimumConstructionYear}
+                  oncalciteSliderInput={(event: Event) => {
+                    setPlaying(false);
+                    setConstructionYear(
+                      Number(
+                        (event.currentTarget as HTMLCalciteSliderElement).value,
+                      ),
+                    );
+                  }}
+                  value={constructionYear}
+                />
+                <calcite-button
+                  appearance="transparent"
+                  iconStart={playing ? "pause" : "play"}
+                  kind="neutral"
+                  label={
+                    playing
+                      ? "Pause construction animation"
+                      : "Play construction animation"
+                  }
+                  onClick={() =>
+                    setPlaying((currentPlaying) => !currentPlaying)
+                  }
+                />
+              </div>,
+              headerActionsElement,
+            )
+          : null}
       </>
     );
   },

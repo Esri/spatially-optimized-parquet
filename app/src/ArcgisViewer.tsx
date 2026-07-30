@@ -8,7 +8,6 @@ import Extent from "@arcgis/core/geometry/Extent";
 import SpatialReference from "@arcgis/core/geometry/SpatialReference";
 import MapViewConstraints from "@arcgis/core/views/2d/MapViewConstraints";
 import Viewpoint from "@arcgis/core/Viewpoint";
-import Bookmark from "@arcgis/core/webmap/Bookmark";
 import Basemap from "@arcgis/core/Basemap";
 import * as reactiveUtils from "@arcgis/core/core/reactiveUtils";
 import {
@@ -26,8 +25,9 @@ import { createPortal } from "react-dom";
 
 import { datasets } from "./datasets";
 import type { Dataset } from "./datasets";
-import { DatasetSelectionMenu } from "./DatasetSelectionMenu";
+import { DatasetSelectionPanel } from "./DatasetSelectionPanel";
 import { formatByteSize } from "./formatByteSize";
+import { deriveFileDetailSummary } from "./parquetFileDetails";
 import {
   resolveDatasetMapProfile,
   type DatasetEffectLayer,
@@ -63,7 +63,7 @@ const defaultScale = 25_000_000;
 const downloadDetailsEnabled = true;
 const columnThresholdSliderMaximum = 1000;
 const minimumPositiveColumnThreshold = 1024;
-const defaultColumnDownloadThreshold = 100 * 1024;
+const defaultColumnDownloadThreshold = 250 * 1024;
 const tooltipOpenDelayMs = 100;
 const tooltipGracePeriodMs = 200;
 const detailsLayoutBreakpoint = 1024;
@@ -79,6 +79,18 @@ function createDatasetBasemap(basemapId?: string): Basemap | string {
         ],
       })
     : "dark-gray-vector";
+}
+
+function formatCompressionSummary(
+  summary: ReturnType<typeof deriveFileDetailSummary>,
+): string {
+  const codec = summary.compressionCodecs.length === 1
+    ? summary.compressionCodecs[0].toUpperCase()
+    : "Mixed";
+  const ratio = summary.compressedSize > 0
+    ? summary.uncompressedSize / summary.compressedSize
+    : null;
+  return ratio ? `${codec} ${ratio.toFixed(1)}x` : codec;
 }
 
 function createDatasetSpatialReference(wkid?: number): SpatialReference {
@@ -183,11 +195,13 @@ function createRowGroupBoundsLayer(
 
 const MapCanvas = memo(function MapCanvas({
   dataset,
+  headerActionsElement,
   mapElementRef,
   profile,
   layer,
 }: {
   dataset: Dataset;
+  headerActionsElement: HTMLElement | null;
   mapElementRef: React.RefObject<HTMLArcgisMapElement | null>;
   profile: DatasetMapProfile;
   layer: ParquetLayer | null;
@@ -216,9 +230,12 @@ const MapCanvas = memo(function MapCanvas({
       center={defaultCenter}
       scale={defaultScale}
     >
-      <arcgis-zoom slot="top-left" />
       {MapSlotComponent ? (
-        <MapSlotComponent key={layer?.id ?? "empty"} layer={layer} />
+        <MapSlotComponent
+          headerActionsElement={headerActionsElement}
+          key={layer?.id ?? "empty"}
+          layer={layer}
+        />
       ) : null}
     </arcgis-map>
   );
@@ -364,7 +381,6 @@ const RowGroupOverviewMap = memo(function RowGroupOverviewMap({
 
   return (
     <div className="row-group-overview">
-      <div className="row-group-overview-heading">Row Group Bounds</div>
       <div className="row-group-overview-map-frame">
         {bounds ? (
           <arcgis-map
@@ -379,7 +395,7 @@ const RowGroupOverviewMap = memo(function RowGroupOverviewMap({
         ) : null}
         {!bounds || !overviewReady ? (
           <div className="row-group-overview-placeholder">
-            Loading row group bounds…
+            Loading row groups…
           </div>
         ) : null}
       </div>
@@ -579,15 +595,16 @@ const DownloadTrack = memo(function DownloadTrack({
       }`}
       onMouseLeave={scheduleTooltipClose}
     >
-      <span className="column-download-share">
-        {formatDownloadPercent(
-          totalDownloadedByteLength === 0
-            ? 0
-            : (snapshot.downloadedByteLength / totalDownloadedByteLength) * 100,
-        )}
-      </span>
       <span className="column-range-content">
         <span className="column-label">
+          <span className="column-download-share">
+            {formatDownloadPercent(
+              totalDownloadedByteLength === 0
+                ? 0
+                : (snapshot.downloadedByteLength / totalDownloadedByteLength) *
+                    100,
+            )}
+          </span>
           {track.label}
           <DownloadTrackProgress
             downloadedByteLength={snapshot.downloadedByteLength}
@@ -1059,7 +1076,7 @@ function createAdjacentTooltipStyle(
   };
 }
 
-const FileDownloadStats = memo(function FileDownloadStats({
+const BytesLoaded = memo(function BytesLoaded({
   downloadStore,
   byteLength,
 }: {
@@ -1071,44 +1088,58 @@ const FileDownloadStats = memo(function FileDownloadStats({
     downloadStore.getSummarySnapshot,
   );
   return (
-    <div className="file-stats-grid">
-      <div className="file-stat">
-        <div className="file-stat-label">Bytes Loaded</div>
-        <div className="file-stat-value">
-          {formatByteSize(summary.downloadedByteLength)}
-          <span className="file-stat-unit">/ {byteLength === null ? "…" : formatByteSize(byteLength)}</span>
-        </div>
-      </div>
-      <div className="file-stat">
-        <div className="file-stat-label">Chunks Loaded</div>
-        <div className="file-stat-value">
-          {summary.cachedSubpartCount}
-          <span className="file-stat-unit">/ {summary.subpartCount}</span>
-        </div>
+    <div className="bytes-loaded">
+      <div className="file-stat-label">Bytes Loaded</div>
+      <div className="file-stat-value">
+        {formatByteSize(summary.downloadedByteLength)}
+        <span className="file-stat-unit">
+          / {byteLength === null ? "…" : formatByteSize(byteLength)}
+        </span>
       </div>
     </div>
   );
 });
 
-const HiddenColumnCount = memo(function HiddenColumnCount({
+const DownloadCoverageFooter = memo(function DownloadCoverageFooter({
   downloadStore,
+  minimumDownloadedByteLength,
+  tracks,
 }: {
   downloadStore: ParquetDownloadStore;
+  minimumDownloadedByteLength: number;
+  tracks: readonly DownloadTrackLayout[];
 }) {
   const summary = useSyncExternalStore(
     downloadStore.subscribeSummary,
     downloadStore.getSummarySnapshot,
   );
-  const hiddenColumnCount = summary.columnCount - summary.visibleColumnCount;
-
-  if (hiddenColumnCount === 0) {
-    return null;
-  }
+  const visibleColumnCount = tracks.filter((track) => {
+    if (track.kind !== "column") {
+      return false;
+    }
+    const snapshot = downloadStore.getTrackSnapshot(track.id);
+    return (
+      snapshot.visibleBlockCount > 0 &&
+      snapshot.downloadedByteLength >= minimumDownloadedByteLength
+    );
+  }).length;
 
   return (
-    <span className="occupancy-summary">
-      {hiddenColumnCount} other {hiddenColumnCount === 1 ? "column" : "columns"} not downloaded
-    </span>
+    <div className="occupancy-footer">
+      <span className="occupancy-summary">
+        {visibleColumnCount}/{summary.columnCount} columns
+      </span>
+      <span className="occupancy-legend" aria-label="Download state">
+        <span>
+          <i className="loaded" aria-hidden="true" />
+          Loaded
+        </span>
+        <span>
+          <i aria-hidden="true" />
+          Not loaded
+        </span>
+      </span>
+    </div>
   );
 });
 
@@ -1129,8 +1160,8 @@ const ColumnDownloadThreshold = memo(function ColumnDownloadThreshold({
   return (
     <label className="column-threshold-control">
       <span>
-        Show columns with at least
-        <strong>{formatByteSize(minimumDownloadedByteLength)} downloaded</strong>
+        Show with at least
+        <strong>{formatByteSize(minimumDownloadedByteLength)}</strong>
       </span>
       <calcite-slider
         label="Minimum downloaded bytes required to show a column"
@@ -1207,15 +1238,14 @@ const FileDownload = memo(function FileDownload({
       .filter((track) => track.kind === "column")
       .map((track) => track.byteLength),
   );
-
   return (
-    <div className="file-download-content">
-      <FileDownloadStats
-        byteLength={topology.layout?.byteLength ?? null}
-        downloadStore={downloadStore}
-      />
+    <>
       {topology.layout ? (
         <div className="column-threshold-frame">
+          <BytesLoaded
+            byteLength={topology.layout.byteLength}
+            downloadStore={downloadStore}
+          />
           <ColumnDownloadThreshold
             maximumByteLength={maximumColumnByteLength}
             minimumDownloadedByteLength={minimumDownloadedByteLength}
@@ -1235,15 +1265,19 @@ const FileDownload = memo(function FileDownload({
             <span className="occupancy-status">
               {topology.error
                 ? "Unable to load Parquet diagnostics."
-                : "Loading Parquet diagnostics…"}
+                : null}
             </span>
           )}
         </div>
       </div>
       {topology.layout ? (
-        <HiddenColumnCount downloadStore={downloadStore} />
+        <DownloadCoverageFooter
+          downloadStore={downloadStore}
+          minimumDownloadedByteLength={minimumDownloadedByteLength}
+          tracks={topology.tracks}
+        />
       ) : null}
-    </div>
+    </>
   );
 });
 
@@ -1294,89 +1328,29 @@ function formatFeatureCount(featureCount: number | null): string {
   }).format(featureCount);
 }
 
-const DownloadDetailsContent = memo(function DownloadDetailsContent({
-  dataset,
-  downloadStore,
-  mainMapElementRef,
-  rowGroupBounds,
-  onOpenFileStructure,
-}: {
-  dataset: Dataset;
-  downloadStore: ParquetDownloadStore;
-  mainMapElementRef: React.RefObject<HTMLArcgisMapElement | null>;
-  rowGroupBounds: readonly RowGroupBounds[] | null;
-  onOpenFileStructure(): void;
-}) {
-  return (
-    <div className="download-details-content">
-      <RowGroupOverviewMap
-        basemapId={dataset.basemap}
-        bounds={rowGroupBounds}
-        center={dataset.center}
-        key={dataset.id}
-        mainMapElementRef={mainMapElementRef}
-        scale={dataset.scale}
-        spatialReferenceWkid={dataset.spatialReference}
-      />
-      <calcite-button
-        appearance="solid"
-        className="file-structure-button"
-        onClick={onOpenFileStructure}
-        width="full"
-      >
-        Explore file structure
-      </calcite-button>
-      <FileDownload downloadStore={downloadStore} />
-    </div>
-  );
-});
-
-const DownloadDetailsPanel = memo(function DownloadDetailsPanel({
-  className,
-  dataset,
-  downloadStore,
-  mainMapElementRef,
-  rowGroupBounds,
-  onOpenFileStructure,
-}: {
-  className?: string;
-  dataset: Dataset;
-  downloadStore: ParquetDownloadStore;
-  mainMapElementRef: React.RefObject<HTMLArcgisMapElement | null>;
-  rowGroupBounds: readonly RowGroupBounds[] | null;
-  onOpenFileStructure(): void;
-}) {
-  return (
-    <calcite-panel className={className} heading="Details">
-      <DownloadDetailsContent
-        dataset={dataset}
-        downloadStore={downloadStore}
-        mainMapElementRef={mainMapElementRef}
-        onOpenFileStructure={onOpenFileStructure}
-        rowGroupBounds={rowGroupBounds}
-      />
-    </calcite-panel>
-  );
-});
-
 export function ArcgisViewer() {
   const [datasetIndex, setDatasetIndex] = useState(0);
   const [mapReady, setMapReady] = useState(false);
-  const [layerFeatureCount, setLayerFeatureCount] = useState<number | null>(null);
+  const [viewCenter, setViewCenter] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
   const [layerViewFeatureCount, setLayerViewFeatureCount] = useState<number | null>(null);
   const [parquetLayer, setParquetLayer] = useState<ParquetLayer | null>(null);
   const [rowGroupBounds, setRowGroupBounds] =
     useState<readonly RowGroupBounds[] | null>(null);
   const [debugEnabled, setDebugEnabled] = useState(false);
-  const [datasetDetailsOpen, setDatasetDetailsOpen] = useState(false);
   const [compactDetailsLayout, setCompactDetailsLayout] = useState(false);
   const [responsiveDetailsOpen, setResponsiveDetailsOpen] = useState(false);
+  const [mapHeaderActionsElement, setMapHeaderActionsElement] =
+    useState<HTMLDivElement | null>(null);
+  const [bookmarksButton, setBookmarksButton] =
+    useState<HTMLCalciteButtonElement | null>(null);
+  const [bookmarksOpen, setBookmarksOpen] = useState(false);
   const [fileStructureDialog, setFileStructureDialog] = useState<{
     snapshot: FileStructureSnapshot;
     source: ArcgisParquetPageIndexSource;
   } | null>(null);
-  const [datasetDetailsButton, setDatasetDetailsButton] =
-    useState<HTMLCalciteButtonElement | null>(null);
   const mapElementRef = useRef<HTMLArcgisMapElement>(null);
   const gridContainerRef = useRef<HTMLElement>(null);
   const parquetLayerRef = useRef<ParquetLayer | null>(null);
@@ -1389,11 +1363,13 @@ export function ArcgisViewer() {
   const downloadStore = downloadStoreRef.current;
   const activeDataset = datasets[datasetIndex];
   const activeProfile = resolveDatasetMapProfile(activeDataset.id);
-  const datasetByteSize = datasetDetailsOpen
-    ? downloadStore.getSnapshot().layout?.byteLength ?? activeDataset.byteSize
-    : activeDataset.byteSize;
+  const datasetByteSize =
+    downloadStore.getSnapshot().layout?.byteLength ?? activeDataset.byteSize;
+  const fileLayout = downloadStore.getSnapshot().layout;
+  const compression = fileLayout
+    ? formatCompressionSummary(deriveFileDetailSummary(fileLayout))
+    : null;
   const selectDataset = (index: number) => {
-    setDatasetDetailsOpen(false);
     setResponsiveDetailsOpen(false);
     if (index === datasetIndex) {
       return;
@@ -1466,7 +1442,6 @@ export function ArcgisViewer() {
       return;
     }
 
-    setLayerFeatureCount(null);
     setLayerViewFeatureCount(null);
     setRowGroupBounds(null);
     downloadStore.reset();
@@ -1546,13 +1521,6 @@ export function ArcgisViewer() {
             error,
           );
         }
-
-        const layerCount = await layer.queryFeatureCount();
-        if (disposed) {
-          return;
-        }
-
-        setLayerFeatureCount(layerCount);
 
         const layerView = await mapElement.whenLayerView(layer);
         if (disposed) {
@@ -1668,37 +1636,25 @@ export function ArcgisViewer() {
   }, [activeDataset.name, debugEnabled, mapReady, rowGroupBounds]);
 
   useEffect(() => {
-    const mapElement = mapElementRef.current;
-    if (!mapReady || !mapElement || !activeDataset.bookmarks?.length) {
+    const view = mapElementRef.current?.view;
+    if (!mapReady || !view) {
+      setViewCenter(null);
       return;
     }
 
-    const bookmarksElement = document.createElement("arcgis-bookmarks");
-    bookmarksElement.bookmarks = activeDataset.bookmarks.map(
-      (bookmark) =>
-        new Bookmark({
-          name: bookmark.name,
-          viewpoint: new Viewpoint({
-            targetGeometry: {
-              type: "point",
-              longitude: bookmark.center[0],
-              latitude: bookmark.center[1],
-            },
-            scale: bookmark.scale,
-          }),
-        }),
-    );
-    const expandElement = document.createElement("arcgis-expand");
-    expandElement.setAttribute("expand-icon", "bookmark");
-    expandElement.setAttribute("expand-tooltip", "Bookmarks");
-    expandElement.setAttribute("slot", "top-right");
-    expandElement.append(bookmarksElement);
-    mapElement.append(expandElement);
-
-    return () => {
-      expandElement.remove();
-    };
-  }, [activeDataset, mapReady]);
+    return reactiveUtils
+      .watch(
+        () => view.center,
+        (center) => {
+          setViewCenter({
+            latitude: center.latitude,
+            longitude: center.longitude,
+          });
+        },
+        { initial: true },
+      )
+      .remove;
+  }, [mapReady]);
 
   return (
     <main
@@ -1707,108 +1663,95 @@ export function ArcgisViewer() {
           downloadDetailsEnabled ? "" : " details-disabled"
         }`}
       >
+        <DatasetSelectionPanel
+          activeDataset={activeDataset}
+          byteSize={datasetByteSize}
+          compression={compression}
+          onDatasetSelect={selectDataset}
+        />
         <calcite-panel className="grid-map">
-          <DatasetSelectionMenu
-            activeDataset={activeDataset}
-            onDatasetSelect={selectDataset}
-          />
-          <calcite-button
-            ref={setDatasetDetailsButton}
-            appearance="transparent"
-            className="dataset-details-button"
-            iconStart="information-f"
-            kind="neutral"
-            label={`Dataset details for ${activeDataset.name}`}
-            scale="s"
+          <calcite-label
+            className="panel-metric"
+            id="map-view-metrics"
+            layout="inline"
             slot="header-actions-start"
-            onClick={() => {
-              requestAnimationFrame(() => setDatasetDetailsOpen((open) => !open));
-            }}
           >
-            <span className="dataset-details-label"></span>
-          </calcite-button>
-          {datasetDetailsButton ? (
-            <calcite-popover
-              className="dataset-details-popover"
-              label="Dataset details"
-              open={datasetDetailsOpen}
-              placement="bottom-start"
-              referenceElement={datasetDetailsButton}
-              oncalcitePopoverClose={() => setDatasetDetailsOpen(false)}
-            >
-              <div className="dataset-details">
-                <strong>{activeDataset.name}</strong>
-                <dl>
-                  <div>
-                    <dt>Source</dt>
-                    <dd>{activeDataset.source}</dd>
-                  </div>
-                  <div>
-                    <dt>Source URL</dt>
-                    <dd>
-                      {activeDataset.sourceUrl ? (
-                        <calcite-link
-                          href={activeDataset.sourceUrl}
-                          iconEnd="launch"
-                          rel="noopener noreferrer"
-                          target="_blank"
-                        >
-                          {activeDataset.sourceUrl}
-                        </calcite-link>
-                      ) : (
-                        "Not provided"
-                      )}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Parquet URL</dt>
-                    <dd>
-                      <calcite-link
-                        href={activeDataset.url}
-                        iconEnd="launch"
-                        rel="noopener noreferrer"
-                        target="_blank"
-                      >
-                        {activeDataset.url}
-                      </calcite-link>
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Byte count</dt>
-                    <dd>{formatByteSize(datasetByteSize)}</dd>
-                  </div>
-                  <div>
-                    <dt>Features</dt>
-                    <dd>{activeDataset.count.toLocaleString()}</dd>
-                  </div>
-                </dl>
-              </div>
-            </calcite-popover>
-          ) : null}
-          <calcite-label
-            className="panel-metric"
-            id="layer-feature-count"
-            slot="header-actions-end"
-            layout="inline"
-          >
-            Layer
-            <strong>{formatFeatureCount(layerFeatureCount)}</strong>
-          </calcite-label>
-          <calcite-tooltip referenceElement="layer-feature-count">
-            Count of features in the dataset.
-          </calcite-tooltip>
-          <calcite-label
-            className="panel-metric"
-            id="layer-view-feature-count"
-            slot="header-actions-end"
-            layout="inline"
-          >
-            LayerView
+            Center
+            <strong>
+              {viewCenter
+                ? `${viewCenter.longitude.toFixed(2)}, ${viewCenter.latitude.toFixed(2)}`
+                : "…"}
+            </strong>
+            <span className="map-header-action-divider" aria-hidden="true">
+              |
+            </span>
+            Features
             <strong>{formatFeatureCount(layerViewFeatureCount)}</strong>
           </calcite-label>
-          <calcite-tooltip referenceElement="layer-view-feature-count">
-            Count of features in the current view.
+          <calcite-tooltip referenceElement="map-view-metrics">
+            Current map center and feature count.
           </calcite-tooltip>
+          <div
+            className="map-profile-header-actions"
+            slot="header-actions-end"
+          >
+            <div
+              className="map-profile-header-action-target"
+              ref={setMapHeaderActionsElement}
+            />
+            {activeDataset.bookmarks?.length ? (
+              <>
+                <calcite-button
+                  ref={setBookmarksButton}
+                  appearance="transparent"
+                  iconStart="bookmark-f"
+                  kind="neutral"
+                  label="Bookmarks"
+                  onClick={() => {
+                    requestAnimationFrame(() =>
+                      setBookmarksOpen((open) => !open),
+                    );
+                  }}
+                />
+                {bookmarksButton ? (
+                  <calcite-popover
+                    label="Bookmarks"
+                    open={bookmarksOpen}
+                    overlayPositioning="fixed"
+                    placement="bottom-end"
+                    referenceElement={bookmarksButton}
+                    oncalcitePopoverClose={() => setBookmarksOpen(false)}
+                  >
+                    <div className="map-bookmark-list">
+                      {activeDataset.bookmarks.map((bookmark) => (
+                        <calcite-button
+                          appearance="transparent"
+                          key={bookmark.name}
+                          kind="neutral"
+                          width="full"
+                          onClick={() => {
+                            setBookmarksOpen(false);
+                            void mapElementRef.current?.view.goTo(
+                              new Viewpoint({
+                                targetGeometry: {
+                                  type: "point",
+                                  longitude: bookmark.center[0],
+                                  latitude: bookmark.center[1],
+                                },
+                                scale: bookmark.scale,
+                              }),
+                            );
+                          }}
+                        >
+                          {bookmark.name}
+                        </calcite-button>
+                      ))}
+                    </div>
+                  </calcite-popover>
+                ) : null}
+              </>
+            ) : null}
+          </div>
           {downloadDetailsEnabled && compactDetailsLayout ? (
             <calcite-button
               appearance="transparent"
@@ -1836,6 +1779,7 @@ export function ArcgisViewer() {
           />
           <MapCanvas
             dataset={activeDataset}
+            headerActionsElement={mapHeaderActionsElement}
             layer={parquetLayer}
             mapElementRef={mapElementRef}
             profile={activeProfile}
@@ -1843,29 +1787,60 @@ export function ArcgisViewer() {
         </calcite-panel>
 
         {downloadDetailsEnabled && !compactDetailsLayout ? (
-          <DownloadDetailsPanel
-            className="grid-panel-desktop"
-            dataset={activeDataset}
-            downloadStore={downloadStore}
-            mainMapElementRef={mapElementRef}
-            onOpenFileStructure={openFileStructure}
-            rowGroupBounds={rowGroupBounds}
-          />
+          <div className="grid-details-column">
+            <div className="file-explorer-overview">
+              <RowGroupOverviewMap
+                basemapId={activeDataset.basemap}
+                bounds={rowGroupBounds}
+                center={activeDataset.center}
+                key={activeDataset.id}
+                mainMapElementRef={mapElementRef}
+                scale={activeDataset.scale}
+                spatialReferenceWkid={activeDataset.spatialReference}
+              />
+              <div className="file-structure-action">
+                <calcite-button
+                  appearance="solid"
+                  className="file-structure-button"
+                  iconStart="magnifying-glass"
+                  onClick={openFileStructure}
+                  width="full"
+                >
+                  Explore file layout
+                </calcite-button>
+              </div>
+            </div>
+            <FileDownload downloadStore={downloadStore} />
+          </div>
         ) : null}
         {downloadDetailsEnabled && compactDetailsLayout && responsiveDetailsOpen ? (
           <aside
             className="responsive-details-overlay"
             aria-label="Details"
           >
-            <div className="responsive-details-content">
-              <DownloadDetailsContent
-                dataset={activeDataset}
-                downloadStore={downloadStore}
+            <div className="file-explorer-overview">
+              <RowGroupOverviewMap
+                basemapId={activeDataset.basemap}
+                bounds={rowGroupBounds}
+                center={activeDataset.center}
+                key={activeDataset.id}
                 mainMapElementRef={mapElementRef}
-                onOpenFileStructure={openFileStructure}
-                rowGroupBounds={rowGroupBounds}
+                scale={activeDataset.scale}
+                spatialReferenceWkid={activeDataset.spatialReference}
               />
+              <div className="file-structure-action">
+                <calcite-button
+                  appearance="solid"
+                  className="file-structure-button"
+                  iconStart="magnifying-glass"
+                  onClick={openFileStructure}
+                  width="full"
+                >
+                  Explore file layout
+                </calcite-button>
+              </div>
             </div>
+            <FileDownload downloadStore={downloadStore} />
           </aside>
         ) : null}
         {fileStructureDialog ? (

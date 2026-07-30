@@ -258,7 +258,7 @@ export class ParquetDownloadStore {
     if (this.handledEventKeys.has(eventKey)) {
       return;
     }
-    if (this.diagnostics && !this.diagnostics.files.some((file) => file.fileId === event.fileId)) {
+    if (this.diagnostics && !this.diagnostics.files.some((file) => file.fileName === event.fileId)) {
       this.setError(new Error(`Range event references unknown diagnostics file "${event.fileId}".`));
       return;
     }

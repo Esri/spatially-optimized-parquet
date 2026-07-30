@@ -29,9 +29,11 @@ export interface XZDisplayMetadata {
   geometryType: "polygon" | "polyline";
   maxLevel: number;
   levels: LODLevel[];
+  version: string | null;
 }
 
 export interface DatasetParquetMetadata {
+  compression: string | null;
   file: FileMetaData;
   display: XZDisplayMetadata;
 }
@@ -56,7 +58,35 @@ export async function loadDatasetParquetMetadata(
     validatePhysicalColumn(metadata, level.columnPath);
   }
 
-  return { file: metadata, display };
+  return {   compression: formatCompression(metadata),
+  file: metadata, display };
+}
+
+function formatCompression(metadata: FileMetaData): string | null {
+  const codecs = new Set<string>();
+  let compressedSize = 0n;
+  let uncompressedSize = 0n;
+
+  for (const rowGroup of metadata.row_groups) {
+    for (const column of rowGroup.columns) {
+      const columnMetadata = column.meta_data;
+      if (!columnMetadata) {
+        continue;
+      }
+      codecs.add(columnMetadata.codec);
+      compressedSize += columnMetadata.total_compressed_size;
+      uncompressedSize += columnMetadata.total_uncompressed_size;
+    }
+  }
+
+  if (codecs.size === 0) {
+    return null;
+  }
+  const codec = codecs.size === 1 ? [...codecs][0] : "Mixed";
+  const ratio = compressedSize > 0n
+    ? Number(uncompressedSize) / Number(compressedSize)
+    : null;
+  return ratio ? `${codec.toUpperCase()} ${ratio.toFixed(1)}x` : codec;
 }
 
 export function selectLODLevel(
@@ -116,6 +146,7 @@ function parseXZDisplayMetadata(value: unknown): XZDisplayMetadata {
     geometryType: value.geometryType,
     maxLevel,
     levels,
+    version: typeof value.version === "string" ? value.version : null,
   };
 }
 

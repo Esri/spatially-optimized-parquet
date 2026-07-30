@@ -33,7 +33,7 @@ const parquetFillLayerId = "maplibre-parquet-fill";
 const parquetOutlineLayerId = "maplibre-parquet-outline";
 const parquetLineCasingLayerId = "maplibre-parquet-line-casing";
 const parquetLineLayerId = "maplibre-parquet-line";
-export const datasetFeatureLimit = 500_000;
+export const datasetFeatureLimit = 650_000;
 
 export type DatasetLayerStatus =
   | { type: "idle" }
@@ -43,6 +43,7 @@ export type DatasetLayerStatus =
       featureCount: number;
       lod: number;
       featureLimitReached: boolean;
+      compression: string | null;
     }
   | { type: "failed"; message: string };
 
@@ -177,6 +178,7 @@ export class ParquetDatasetSource {
         featureCollection,
         lodLevel.level,
         matchingRows.featureLimitReached,
+        metadata.compression,
       );
     } catch (error) {
       if (!isAbortError(error)) {
@@ -343,6 +345,7 @@ export class ParquetDatasetSource {
     featureCollection: GeoJSON.FeatureCollection,
     lod: number,
     featureLimitReached: boolean,
+    compression: string | null,
   ): void {
     if (!this.isCurrentQuery(queryVersion, signal)) {
       return;
@@ -354,6 +357,7 @@ export class ParquetDatasetSource {
       featureCount: featureCollection.features.length,
       lod,
       featureLimitReached,
+      compression,
     });
   }
 

@@ -4,6 +4,46 @@
   background: var(--calcite-color-foreground-1);
 }
 
+.file-structure-download-legend {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  color: var(--calcite-color-text-2);
+  font-size: var(--calcite-font-size--1);
+}
+
+.file-structure-footer-guidance {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--calcite-color-text-2);
+  font-size: var(--calcite-font-size--1);
+}
+
+.file-structure-download-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.file-structure-download-legend i {
+  width: 0.875rem;
+  height: 0.875rem;
+  border: 1px solid var(--calcite-color-border-2);
+  border-radius: var(--calcite-corner-radius-xs);
+  background: var(--calcite-color-foreground-2);
+}
+
+.file-structure-download-legend i.loaded {
+  border-color: var(--calcite-color-brand);
+  background: color-mix(
+    in srgb,
+    var(--calcite-color-brand) 55%,
+    var(--calcite-color-foreground-2)
+  );
+}
+
 html,
 body,
 #root,
@@ -15,6 +55,32 @@ calcite-shell {
 
 body {
   overflow: hidden;
+}
+
+* {
+  scrollbar-color:
+    var(--calcite-color-border-2)
+    transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 0;
+  border-radius: 999px;
+  background: var(--calcite-color-border-2);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .debug-switch {
@@ -38,61 +104,69 @@ body {
   font-weight: var(--calcite-font-weight-medium);
 }
 
+.dataset-select-field {
+  width: 100%;
+}
+
+.dataset-menu-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 32px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  background-image:
+    linear-gradient(
+      var(--calcite-color-text-1),
+      var(--calcite-color-text-1)
+    ),
+    linear-gradient(
+      var(--calcite-color-brand-underline),
+      var(--calcite-color-brand-underline)
+    );
+  background-position: 0 100%;
+  background-repeat: no-repeat;
+  background-size: 0 1px, 100% 1px;
+  color: var(--calcite-color-text-1);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--calcite-font-size-0);
+  font-weight: var(--calcite-font-weight-bold);
+  text-align: start;
+  transition: background-size var(--calcite-animation-timing) ease-in-out;
+}
+
+.dataset-menu-trigger::after {
+  width: 0;
+  height: 0;
+  border-inline: 0.3rem solid transparent;
+  border-block-start: 0.4rem solid currentColor;
+  content: "";
+}
+
+.dataset-menu-trigger:hover {
+  background-size: 100% 1px, 100% 1px;
+}
+
+.dataset-menu-trigger:focus-visible {
+  outline: 1px solid var(--calcite-color-focus);
+  outline-offset: 1px;
+}
+
+.dataset-menu-trigger[aria-expanded="true"] {
+  background-size: 100% 1px, 100% 1px;
+}
+
 .dataset-options {
   width: 24rem;
   max-width: min(24rem, calc(100vw - 2rem));
 }
 
-.dataset-details-button {
-  align-self: center;
-  font-size: var(--calcite-font-size--1);
-  --calcite-font-size-relative-sm: var(--calcite-font-size--1);
-  --calcite-button-text-color: var(--calcite-color-text-1);
-  --calcite-button-text-color-hover: var(--calcite-color-text-1);
-  --calcite-button-text-color-press: var(--calcite-color-text-1);
-}
-
-.dataset-details-label {
-  display: inline-block;
-  transform: translateY(1px);
-}
-
-.dataset-details-popover {
-  --calcite-popover-max-size-y: 24rem;
-}
-
-.dataset-details {
-  display: grid;
-  gap: 0.75rem;
-  width: 24rem;
-  max-width: calc(100vw - 2rem);
-  padding: 0.75rem;
-}
-
-.dataset-details dl {
-  display: grid;
-  gap: 0.625rem;
-  margin: 0;
-}
-
-.dataset-details dl > div {
-  display: grid;
-  gap: 0.125rem;
-}
-
-.dataset-details dt {
-  color: var(--calcite-color-text-3);
-  font-size: var(--calcite-font-size--2);
-}
-
-.dataset-details dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
 .dataset-option {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
   gap: 0.125rem;
   padding: 0.625rem 0.75rem;
   border-bottom: 1px solid var(--calcite-color-border-3);
@@ -131,18 +205,20 @@ body {
 }
 
 .dataset-option-name {
-  font-size: var(--calcite-font-size--1);
+  font-size: var(--calcite-font-size-0);
+  font-weight: var(--calcite-font-weight-bold);
 }
 
-.dataset-option-metadata,
+.dataset-option-metadata {
+  color: var(--calcite-color-text-3);
+  font-size: var(--calcite-font-size--1);
+  line-height: 1.2;
+}
+
 .dataset-option-source {
   color: var(--calcite-color-text-3);
   font-size: var(--calcite-font-size--2);
   line-height: 1.2;
-}
-
-.dataset-option-source calcite-link {
-  color: var(--calcite-color-text-2);
 }
 
 .panel-metric {
@@ -150,6 +226,7 @@ body {
   align-items: center;
   align-self: center;
   height: 100%;
+  min-height: 3rem;
   gap: 0.25rem;
   margin-inline-start: 0.75rem;
   font-variant-numeric: tabular-nums;
@@ -162,10 +239,135 @@ body {
   padding-inline-end: 0.75rem;
 }
 
+.map-profile-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 100%;
+  padding-inline-end: 0.75rem;
+}
+
+.map-profile-header-action-target {
+  display: contents;
+}
+
+.france-map-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 100%;
+}
+
+.france-map-header-controls calcite-label {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  --calcite-label-margin-bottom: 0;
+}
+
+.france-map-header-controls calcite-slider {
+  width: 12rem;
+}
+
+.census-map-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  height: 100%;
+}
+
+.census-map-compact-controls {
+  display: none;
+  align-items: center;
+  height: 100%;
+}
+
+.census-map-header-controls label {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--calcite-color-text-2);
+  font-size: var(--calcite-font-size--1);
+  font-weight: var(--calcite-font-weight-medium);
+}
+
+.census-map-header-controls strong {
+  color: var(--calcite-color-text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.census-map-header-controls calcite-slider {
+  width: 6rem;
+}
+
+.census-map-popover-controls {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 18rem;
+  padding: 0.75rem;
+}
+
+.census-map-popover-controls label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.census-map-popover-controls calcite-slider {
+  width: 100%;
+}
+
+@container map-panel (max-width: 750px) {
+  .census-map-header-controls {
+    display: none;
+  }
+
+  .census-map-compact-controls {
+    display: flex;
+  }
+}
+
+.map-header-action-divider {
+  color: var(--calcite-color-border-1);
+}
+
+.map-bookmark-list {
+  display: grid;
+  min-width: 14rem;
+  padding: 0.25rem;
+}
+
 .header-divider {
   align-self: stretch;
   width: 1px;
   background: var(--calcite-color-border-1);
+}
+
+.application-sdk-label {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  gap: 1rem;
+  color: var(--calcite-color-text-2);
+  font-size: var(--calcite-font-size--1);
+  font-weight: var(--calcite-font-weight-medium);
+}
+
+.application-logo {
+  --calcite-font-size-relative-2xl: var(--calcite-font-size-1);
+}
+
+@media (max-width: 800px) {
+  .viewer-switch-menu-item {
+    display: none;
+  }
+
+  .dataset-selection-panel .dataset-selection-main {
+    align-content: center;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .grid-container.compact .responsive-details-overlay {
+    inset-block-start: calc(144px + 1rem + 3rem);
+  }
 }
 
 .metric-heading {
@@ -181,7 +383,7 @@ body {
 }
 
 calcite-shell {
-  background-color: var(--calcite-color-border-1);
+  background: linear-gradient(135deg, #404040 0%, #252525 100%);
 }
 
 .grid-container {
@@ -189,35 +391,185 @@ calcite-shell {
   display: grid;
   height: calc(100% - 2rem);
   margin: 1rem;
-  grid-template-columns: minmax(0, 1fr) 400px;
+  grid-template-columns:
+    minmax(0, 1fr)
+    clamp(340px, calc(20vw + 92px), 480px);
+  grid-template-rows: 96px minmax(0, 1fr);
   gap: 1rem;
 }
 
 .grid-container.compact {
-  display: block;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .grid-container.details-disabled {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.dataset-selection-panel {
+  box-sizing: border-box;
+  display: grid;
+  align-items: center;
+  grid-column: 1 / -1;
+  grid-template-columns:
+    minmax(0, 1fr)
+    clamp(340px, calc(20vw + 92px), 480px);
+  width: 100%;
+  padding-inline: 1rem;
+  overflow: hidden;
+  border-radius: var(--calcite-corner-radius-sm);
+  background: var(--calcite-color-foreground-1);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
+}
+
+.dataset-selection-main {
+  display: grid;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 18rem minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.dataset-selection-metrics {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  gap: 1rem;
+  margin: 0px 8px;
+}
+
+.dataset-selection-field {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 0;
+  grid-template-rows: 1rem 32px;
+  white-space: nowrap;
+}
+
+.dataset-selection-label {
+  line-height: 1rem;
+  color: var(--calcite-color-text-3);
+  font-size: var(--calcite-font-size--1);
+  font-weight: var(--calcite-font-weight-bold);
+}
+
+.dataset-selection-value {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  color: var(--calcite-color-text-1);
+  font-size: var(--calcite-font-size-0);
+  font-weight: var(--calcite-font-weight-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+.dataset-compression-ratio {
+  margin-inline-start: 0.375rem;
+  color: var(--calcite-color-text-3);
+  font-size: var(--calcite-font-size--1);
+  font-weight: var(--calcite-font-weight-normal);
+}
+
+.dataset-source-metric {
+  min-width: 0;
+}
+
+.dataset-source-metric .dataset-selection-value {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dataset-source-metric calcite-link {
+  max-width: 100%;
+  --calcite-link-text-color: var(--calcite-color-text-1);
+}
+
+.dataset-url-field {
+  display: grid;
+  gap: 0;
+  grid-template-rows: 1rem 32px;
+  min-width: 0;
+  width: 100%;
+}
+
+.dataset-url-field > span {
+  line-height: 1rem;
+  color: var(--calcite-color-text-3);
+  font-size: var(--calcite-font-size--1);
+  font-weight: var(--calcite-font-weight-bold);
+}
+
+.dataset-url-input {
+  width: 100%;
+  font-size: var(--calcite-font-size-0);
+  font-weight: var(--calcite-font-weight-bold);
+  --calcite-input-background-color: var(--calcite-color-foreground-2);
+  --calcite-input-border-color: var(--calcite-color-border-3);
+  --calcite-input-corner-radius: var(--calcite-corner-radius-round);
+  --calcite-input-shadow: none;
+  --calcite-input-text-color: var(--calcite-color-text-1);
+}
+
+.grid-container.compact .dataset-selection-panel {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.grid-container.compact .dataset-selection-metrics {
+  display: none;
+}
+
+@media (max-width: 800px) {
+  .grid-container {
+    grid-template-rows: 144px minmax(0, 1fr);
+  }
+}
+
 .grid-container.compact .grid-map {
   width: 100%;
-  height: 100%;
+  min-height: 0;
 }
 
 .grid-container calcite-panel {
+  container-name: map-panel;
+  container-type: inline-size;
   min-width: 0;
   overflow: hidden;
   box-shadow: var(--calcite-shadow-sm);
   --calcite-panel-corner-radius: var(--calcite-corner-radius-sm);
 }
 
+.grid-details-column {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  gap: 0.5rem;
+}
+
+.file-explorer-overview {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--calcite-color-border-3);
+  border-radius: var(--calcite-corner-radius-sm);
+  background: var(--calcite-color-foreground-1);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
+}
+
+.file-structure-action {
+  display: flex;
+  width: 100%;
+  overflow: hidden;
+  background: var(--calcite-color-foreground-1);
+}
+
 .responsive-details-overlay {
   position: absolute;
   z-index: 100;
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   inset-block: 3rem 0;
   inset-inline-end: 0;
   width: min(400px, 100%);
@@ -226,32 +578,12 @@ calcite-shell {
   background: var(--calcite-color-foreground-1);
   box-shadow: var(--calcite-shadow-2);
   color: var(--calcite-color-text-1);
+  cursor: default;
+  user-select: none;
 }
 
-.responsive-details-content {
-  min-height: 0;
-  overflow: hidden;
-}
-
-.download-details-content {
-  display: grid;
-  min-height: 0;
-  height: 100%;
-  overflow: hidden;
-}
-
-.download-details-content {
-  grid-template-rows: auto auto minmax(0, 1fr);
-}
-
-.file-download-content {
-  box-sizing: border-box;
-  display: grid;
-  min-height: 0;
-  height: 100%;
-  padding: 0.75rem;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-  overflow: hidden;
+.grid-container.compact .responsive-details-overlay {
+  inset-block-start: calc(96px + 1rem + 3rem);
 }
 
 .grid-map arcgis-map {
@@ -260,20 +592,20 @@ calcite-shell {
 }
 
 .row-group-overview {
+  box-sizing: border-box;
   display: grid;
   gap: 0.375rem;
-  padding: 0.75rem;
+  width: 100%;
 }
 
 .file-structure-button {
-  flex: 0 0 2.5rem;
-  height: 2.5rem;
-  margin: 0 0.75rem;
-  width: calc(100% - 1.5rem);
+  flex: 1;
+  height: 48px;
+  width: 100%;
 }
 
 calcite-dialog {
-  --calcite-dialog-size-x: min(85vw, 90rem);
+  --calcite-dialog-size-x: min(85vw, 1240px);
   --calcite-dialog-size-y: 80vh;
 }
 
@@ -310,6 +642,18 @@ calcite-dialog {
   display: flex;
   align-items: center;
   gap: 1rem;
+}
+
+.file-structure-view-control {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.file-structure-view-control > span {
+  color: var(--calcite-color-text-2);
+  font-size: var(--calcite-font-size--1);
+  font-weight: var(--calcite-font-weight-medium);
 }
 
 .file-structure-header-switches calcite-switch {
@@ -352,8 +696,13 @@ calcite-dialog {
     ),
     var(--calcite-color-foreground-2);
   color: var(--calcite-color-text-1);
+  cursor: default;
   font: inherit;
   text-align: start;
+  user-select: none;
+  transition:
+    border-color var(--calcite-animation-timing) ease-in-out,
+    box-shadow var(--calcite-animation-timing) ease-in-out;
 }
 
 .file-structure-block span {
@@ -421,6 +770,34 @@ calcite-dialog {
   padding: 0.25rem 0.375rem;
 }
 
+.file-structure-block.column strong {
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.file-structure-block:is(.row-group, .column, .page)::after {
+  position: absolute;
+  border: 2px solid white;
+  border-radius: inherit;
+  content: "";
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.98);
+}
+
+.file-structure-block:is(.row-group, .column, .page):hover::after {
+  animation: file-block-outline-fill 150ms ease-out forwards;
+}
+
+@keyframes file-block-outline-fill {
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 .file-structure-row-group {
   display: grid;
   gap: 0.75rem;
@@ -429,7 +806,7 @@ calcite-dialog {
 .file-structure-row-group {
   height: 100%;
   min-height: 0;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
 }
 
@@ -514,7 +891,7 @@ calcite-dialog {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.5rem 1rem;;
+  padding: 1.5rem 1rem;
   border: 1px solid var(--calcite-color-border-1);
   border-radius: var(--calcite-corner-radius-sm);
   gap: 0.5rem;
@@ -522,15 +899,38 @@ calcite-dialog {
 
 .file-structure-file-detail-fields {
   min-width: 0;
+  margin-inline-start: auto;
   overflow: hidden;
 }
 
-.file-structure-file-detail-fields dl {
+.file-structure-file-detail-fields dl,
+.file-structure-file-name dl {
   display: grid;
   margin: 0;
   justify-content: start;
-  grid-template-columns: repeat(4, minmax(0, max-content));
+}
+
+.file-structure-file-detail-fields dl {
+  grid-template-columns:
+    repeat(4, minmax(0, max-content))
+    auto
+    repeat(2, minmax(0, max-content));
   gap: 24px;
+}
+
+.file-structure-detail-divider {
+  align-self: center;
+  width: 1px;
+  height: 2rem;
+  background: var(--calcite-color-border-1);
+}
+
+.file-structure-keys-button {
+  margin-inline-start: 16px;
+}
+
+.file-structure-file-name {
+  min-width: 0;
 }
 
 .file-structure-file-details dl div {
@@ -548,8 +948,9 @@ calcite-dialog {
 .file-structure-file-details dd {
   overflow: hidden;
   margin: 0;
-  font-size: var(--calcite-font-size--1);
-  font-weight: var(--calcite-font-weight-medium);
+  color: var(--calcite-color-text-1);
+  font-size: var(--calcite-font-size-0);
+  font-weight: var(--calcite-font-weight-bold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -845,11 +1246,11 @@ calcite-dialog {
 
 .row-group-overview-map-frame,
 .row-group-overview-placeholder {
+  box-sizing: border-box;
   width: 100%;
-  height: 14rem;
+  aspect-ratio: 1;
   overflow: hidden;
-  border: 1px solid var(--calcite-color-border-1);
-  border-radius: var(--calcite-corner-radius-sm);
+  background: var(--calcite-color-foreground-1);
 }
 
 .row-group-overview-map-frame {
@@ -882,9 +1283,6 @@ calcite-dialog {
   min-height: 0;
   overflow: auto;
   padding: 0.5rem 0.5rem 0.5rem 0.25rem;
-  border: 1px solid var(--calcite-color-border-1);
-  border-radius: var(--calcite-corner-radius-sm);
-  background: var(--calcite-color-foreground-2);
 }
 
 .occupancy-flow {
@@ -895,10 +1293,46 @@ calcite-dialog {
 
 .occupancy-summary {
   display: block;
-  padding-top: 0.5rem;
   color: var(--calcite-color-text-3);
   font-size: var(--calcite-font-size--1);
-  text-align: right;
+  text-align: left;
+}
+
+.occupancy-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.occupancy-legend {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 1rem;
+  color: var(--calcite-color-text-2);
+  font-size: var(--calcite-font-size--1);
+}
+
+.occupancy-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.occupancy-legend i {
+  width: 0.875rem;
+  height: 0.875rem;
+  border: 1px solid var(--calcite-color-border-2);
+  border-radius: var(--calcite-corner-radius-xs);
+  background: color-mix(
+    in srgb,
+    var(--calcite-color-foreground-3) 88%,
+    white
+  );
+}
+
+.occupancy-legend i.loaded {
+  background: color-mix(in srgb, var(--calcite-color-brand) 85%, white);
 }
 
 .column-threshold-control {
@@ -909,16 +1343,23 @@ calcite-dialog {
 }
 
 .column-threshold-frame {
-  margin-bottom: 8px;
-  padding: 0.75rem;
-  border: 1px solid var(--calcite-color-border-1);
-  background: var(--calcite-color-foreground-2);
+  display: grid;
+  align-items: start;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1.5rem;
+  padding: 0.5rem;
+  border-block-end: 1px solid var(--calcite-color-border-3);
+}
+
+.bytes-loaded {
+  min-width: max-content;
 }
 
 .column-threshold-control > span {
   display: flex;
   justify-content: space-between;
   gap: 0.5rem;
+  line-height: 1.25;
 }
 
 .column-threshold-control strong {
@@ -927,10 +1368,7 @@ calcite-dialog {
 }
 
 .column-range {
-  display: grid;
   width: 100%;
-  grid-template-columns: 2rem minmax(0, 1fr);
-  gap: 0.375rem;
 }
 
 .column-range-content {
@@ -954,12 +1392,11 @@ calcite-dialog {
 }
 
 .column-download-share {
-  align-self: start;
+  margin-inline-end: 0.375rem;
   color: var(--calcite-color-text-3);
   font-size: var(--calcite-font-size--1);
   font-weight: var(--calcite-font-weight-normal);
   font-variant-numeric: tabular-nums;
-  text-align: end;
 }
 
 .column-progress {
@@ -973,9 +1410,9 @@ calcite-dialog {
   grid-template-columns: repeat(4, 1fr);
   grid-template-rows: repeat(4, 1fr);
   gap: 1px;
-  width: 20px;
-  height: 20px;
-  min-width: 20px;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
   overflow: hidden;
   border: 1px solid var(--calcite-color-border-2);
   border-radius: var(--calcite-corner-radius-sm);
@@ -1051,6 +1488,8 @@ calcite-dialog {
     );
   font-size: var(--calcite-font-size--2);
   font-variant-numeric: tabular-nums;
+  cursor: default;
+  user-select: none;
 }
 
 .column-row-group-tooltip-cell.selected {
@@ -1071,8 +1510,10 @@ calcite-dialog {
   background: var(--calcite-color-foreground-1);
   box-shadow: var(--calcite-shadow-2);
   color: var(--calcite-color-text-1);
+  cursor: default;
   font-size: var(--calcite-font-size--1);
   font-variant-numeric: tabular-nums;
+  user-select: none;
 }
 
 .page-index-column-title {
@@ -1114,8 +1555,10 @@ calcite-dialog {
   background: var(--calcite-color-foreground-1);
   box-shadow: var(--calcite-shadow-2);
   color: var(--calcite-color-text-1);
+  cursor: default;
   font-size: var(--calcite-font-size--1);
   font-variant-numeric: tabular-nums;
+  user-select: none;
 }
 
 .page-index-column-detail-tooltip > span:first-child {
@@ -1142,23 +1585,7 @@ calcite-dialog {
 
 .occupancy-status {
   color: var(--calcite-color-text-3);
-  font-size: var(--calcite-font-size--2);
-}
-
-.file-stats-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1px;
-  margin-bottom: 8px;
-  overflow: hidden;
-  border: 1px solid var(--calcite-color-border-1);
-  background: var(--calcite-color-border-1);
-}
-
-.file-stat {
-  min-width: 0;
-  padding: 0.75rem;
-  background: var(--calcite-color-foreground-2);
+  font-size: var(--calcite-font-size--1);
 }
 
 .file-stat-label {

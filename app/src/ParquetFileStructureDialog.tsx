@@ -1,5 +1,6 @@
 import {
   type CSSProperties,
+  type ReactNode,
   useEffect,
   useId,
   useLayoutEffect,
@@ -15,13 +16,18 @@ import type { ParquetByteCoverage } from "./parquetByteCoverage";
 import {
   ParquetFileStructureStore,
   type ColumnDetailState,
+  type FileStructurePage,
   type FileStructureSnapshot,
 } from "./parquetFileStructureStore";
 import {
   deriveFileDetailSummary,
   type FileDetailSummary,
 } from "./parquetFileDetails";
-import { formatParquetKeyValueMetadata } from "./parquetKeyValueMetadata";
+import {
+  extractGeoParquetVersion,
+  extractGeodisplayVersion,
+  formatParquetKeyValueMetadata,
+} from "./parquetKeyValueMetadata";
 import {
   orderByDescendingValue,
   orderByLoadedByteLength,
@@ -53,7 +59,7 @@ export function ParquetFileStructureDialog({
   );
   const state = useSyncExternalStore(store.subscribe, store.getState);
   const [downloadedOnly, setDownloadedOnly] = useState(false);
-  const [orderBySize, setOrderBySize] = useState(false);
+  const [orderBySize, setOrderBySize] = useState(true);
   const selectedRowGroup = state.selectedRowGroupIndex === null
     ? null
     : store.rowGroup(state.selectedRowGroupIndex);
@@ -64,7 +70,6 @@ export function ParquetFileStructureDialog({
       fullscreenDisabled
       modal
       open
-      outsideCloseDisabled
       placement="center"
       width="l"
       oncalciteDialogClose={() => {
@@ -88,31 +93,68 @@ export function ParquetFileStructureDialog({
         )}
       </div>
       <div className="file-structure-header-switches" slot="header-actions-end">
-        <calcite-switch
-          checked={downloadedOnly}
-          label="Show loaded data only"
-          labelTextEnd="Loaded"
-          oncalciteSwitchChange={(event: Event) =>
-            setDownloadedOnly(
-              (event.currentTarget as HTMLCalciteSwitchElement).checked,
-            )
-          }
-        />
-        <calcite-switch
-          checked={orderBySize}
-          label="Order blocks by loaded size"
-          labelTextEnd="Order by loaded size"
-          oncalciteSwitchChange={(event: Event) =>
-            setOrderBySize(
-              (event.currentTarget as HTMLCalciteSwitchElement).checked,
-            )
-          }
-        />
+        <div className="file-structure-view-control">
+          <span>Filter</span>
+          <calcite-segmented-control
+            aria-label="Data to show"
+            scale="s"
+            value={downloadedOnly ? "loaded" : "all"}
+            oncalciteSegmentedControlChange={(event: Event) =>
+              setDownloadedOnly(
+                (
+                  event.currentTarget as HTMLCalciteSegmentedControlElement
+                ).value === "loaded",
+              )
+            }
+          >
+            <calcite-segmented-control-item
+              checked={!downloadedOnly}
+              value="all"
+            >
+              All
+            </calcite-segmented-control-item>
+            <calcite-segmented-control-item
+              checked={downloadedOnly}
+              value="loaded"
+            >
+              Loaded
+            </calcite-segmented-control-item>
+          </calcite-segmented-control>
+        </div>
+        <div className="file-structure-view-control">
+          <span>Sort</span>
+          <calcite-segmented-control
+            aria-label="Block order"
+            scale="s"
+            value={orderBySize ? "loaded-size" : "file"}
+            oncalciteSegmentedControlChange={(event: Event) =>
+              setOrderBySize(
+                (
+                  event.currentTarget as HTMLCalciteSegmentedControlElement
+                ).value === "loaded-size",
+              )
+            }
+          >
+            <calcite-segmented-control-item
+              checked={!orderBySize}
+              value="file"
+            >
+              File
+            </calcite-segmented-control-item>
+            <calcite-segmented-control-item
+              checked={orderBySize}
+              value="loaded-size"
+            >
+              Loaded size
+            </calcite-segmented-control-item>
+          </calcite-segmented-control>
+        </div>
       </div>
       <div className="file-structure-dialog-content">
         {selectedRowGroup ? (
           <RowGroupDetail
             coverage={snapshot.coverage}
+            detailColumnId={state.detailColumnId}
             details={state.details}
             expandedColumnIds={state.expandedColumnIds}
             pageIndexes={snapshot.layout.pageIndexes}
@@ -317,7 +359,6 @@ function FileOverview({
       <FileDetails layout={layout} summary={detailSummary} />
       <div className="file-structure-file-columns">
         <div className="file-structure-column-chart">
-          <h4>Aggregated by Column</h4>
           <div className="file-structure-column-share-bar">
             {columnOverview.map((column) => {
             const filePercent =
@@ -400,6 +441,10 @@ function FileOverview({
           coverage={coverage}
         />
       </div>
+      <div className="file-structure-footer-guidance">
+        <span>Click a row group to inspect its columns.</span>
+        <DownloadStateLegend />
+      </div>
     </section>
   );
 }
@@ -425,24 +470,48 @@ function FileDetails({
     ? `${(summary.uncompressedSize / summary.compressedSize).toFixed(1)}×`
     : "Unavailable";
   const fileName = formatFileName(layout.fileName);
+  const geodisplayVersion =
+    extractGeodisplayVersion(layout.keyValueMetadata) ?? "—";
+  const geoParquetVersion =
+    extractGeoParquetVersion(layout.keyValueMetadata) ?? "—";
 
   return (
     <div className="file-structure-file-details">
-      <div className="file-structure-file-detail-fields">
+      <div className="file-structure-file-name">
         <dl>
           <FileDetail label="File name" title={layout.fileName} value={fileName} />
+        </dl>
+      </div>
+      <div className="file-structure-file-detail-fields">
+        <dl>
+          <FileDetail label="Rows" value={formatCompactCount(summary.rowCount)} />
+          <FileDetail label="Columns" value={summary.columnCount.toLocaleString()} />
           <FileDetail
             label="Size"
-            title={compressionCodecs.join(", ")}
-            value={`${formatByteSize(layout.byteLength)} · ${compressionName} · ${compressionRatio}`}
+            value={formatByteSize(layout.byteLength)}
           />
-          <FileDetail label="Rows" value={summary.rowCount.toLocaleString()} />
-          <FileDetail label="Columns" value={summary.columnCount.toLocaleString()} />
+          <FileDetail
+            label="Compression"
+            title={compressionCodecs.join(", ")}
+            value={
+              <>
+                {compressionName}
+                <small className="dataset-compression-ratio">
+                  {compressionRatio.replace("×", "x")}
+                </small>
+              </>
+            }
+          />
+          <div className="file-structure-detail-divider" aria-hidden="true" />
+          <FileDetail label="SOP" value={geodisplayVersion} />
+          <FileDetail label="GeoParquet" value={geoParquetVersion} />
         </dl>
       </div>
       <calcite-button
         ref={setMetadataButton}
         appearance="outline"
+        className="file-structure-keys-button"
+        iconStart="magnifying-glass"
         kind="neutral"
         label="Metadata"
         scale="m"
@@ -450,7 +519,7 @@ function FileDetails({
           requestAnimationFrame(() => setMetadataOpen((open) => !open));
         }}
       >
-        Metadata
+        Keys
       </calcite-button>
       {metadataButton ? (
         <calcite-popover
@@ -474,6 +543,13 @@ function formatFileName(value: string): string {
   return path.slice(path.lastIndexOf("/") + 1) || value;
 }
 
+function formatCompactCount(count: number): string {
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 1,
+    notation: "compact",
+  }).format(count);
+}
+
 function FileDetail({
   label,
   title,
@@ -481,7 +557,7 @@ function FileDetail({
 }: {
   label: string;
   title?: string;
-  value: string;
+  value: ReactNode;
 }) {
   return (
     <div>
@@ -537,6 +613,7 @@ function ColumnOverviewSegment({
 
 function RowGroupDetail({
   coverage,
+  detailColumnId,
   details,
   expandedColumnIds,
   pageIndexes,
@@ -546,6 +623,7 @@ function RowGroupDetail({
   orderBySize,
 }: {
   coverage: ParquetByteCoverage;
+  detailColumnId: string | null;
   details: ReadonlyMap<string, ColumnDetailState>;
   expandedColumnIds: ReadonlySet<string>;
   pageIndexes: readonly PageIndexLayout[];
@@ -556,6 +634,9 @@ function RowGroupDetail({
 }) {
   const selectedColumn = rowGroup.columns.find((column) =>
     expandedColumnIds.has(column.id),
+  );
+  const detailColumn = rowGroup.columns.find(
+    (column) => column.id === detailColumnId,
   );
   const filteredColumns = downloadedOnly
     ? rowGroup.columns.filter(
@@ -573,19 +654,19 @@ function RowGroupDetail({
       <div className="file-structure-selected-column">
         <div className="file-structure-column-details-heading">
           <h4>Column Details</h4>
-          <span className={selectedColumn ? "" : "empty"}>
-            {selectedColumn?.fieldName ?? "No column selected"}
+          <span className={detailColumn ? "" : "empty"}>
+            {detailColumn?.fieldName ?? "No column selected"}
           </span>
         </div>
-        {selectedColumn ? (
+        {detailColumn ? (
           <ColumnDetail
-            column={selectedColumn}
+            column={detailColumn}
             coverage={coverage}
-            detail={details.get(selectedColumn.id) ?? { type: "idle" }}
+            detail={details.get(detailColumn.id) ?? { type: "idle" }}
             pageIndexes={pageIndexes.filter(
               (index) =>
-                index.rowGroupIndex === selectedColumn.rowGroupIndex &&
-                index.fieldName === selectedColumn.fieldName,
+                index.rowGroupIndex === detailColumn.rowGroupIndex &&
+                index.fieldName === detailColumn.fieldName,
             )}
           />
         ) : (
@@ -609,7 +690,9 @@ function RowGroupDetail({
               onClick: () => onToggleColumn(column),
               label: (
                 <>
-                  <strong>{column.fieldName}</strong>
+                  <strong title={column.fieldName}>
+                    {formatColumnLeafName(column.fieldName)}
+                  </strong>
                   <span>{formatByteSize(rangeLength(column.byteRange))}</span>
                 </>
               ),
@@ -617,7 +700,30 @@ function RowGroupDetail({
           />
         </div>
       </div>
+      <div className="file-structure-footer-guidance">
+        <span>Click a column to inspect individual pages.</span>
+        <DownloadStateLegend />
+      </div>
     </section>
+  );
+}
+
+function formatColumnLeafName(fieldName: string): string {
+  return fieldName.split(".").at(-1) ?? fieldName;
+}
+
+function DownloadStateLegend() {
+  return (
+    <div className="file-structure-download-legend" aria-label="Download state">
+      <span>
+        <i className="loaded" aria-hidden="true" />
+        Loaded
+      </span>
+      <span>
+        <i aria-hidden="true" />
+        Not loaded
+      </span>
+    </div>
   );
 }
 
@@ -703,9 +809,9 @@ function ColumnDetail({
     );
   }
 
-  const blocks: VisualByteBlock[] = [
-    ...detail.pages.map((page) => ({
+  const pageBlocks: VisualByteBlock[] = detail.pages.map((page) => ({
       id: `${column.id}-page-${page.pageIndex}`,
+      elementId: `${column.id}-page-${page.pageIndex}`,
       byteRange: page.byteRange,
       className: "page",
       label: (
@@ -714,7 +820,9 @@ function ColumnDetail({
           <span>{formatByteSize(page.compressedPageSize)}</span>
         </>
       ),
-    })),
+    }));
+  const blocks: VisualByteBlock[] = [
+    ...pageBlocks,
     ...detail.gaps.map((gap, index) => ({
       id: `${column.id}-gap-${index}`,
       byteRange: gap.byteRange,
@@ -754,7 +862,7 @@ function ColumnDetail({
                   coverage={coverage}
                 />
               </div>
-              <span>Indexes</span>
+              <span>Page Index</span>
             </div>
           ) : null}
           <div className="file-structure-page-scroll">
@@ -763,6 +871,26 @@ function ColumnDetail({
               blocks={blocks}
               coverage={coverage}
             />
+            {detail.pages.map((page) => (
+              <calcite-tooltip
+                className="file-structure-tooltip"
+                key={`${column.id}-page-${page.pageIndex}-tooltip`}
+                overlayPositioning="fixed"
+                referenceElement={`${column.id}-page-${page.pageIndex}`}
+              >
+                <strong>Page {page.pageIndex}</strong>
+                <br />
+                Bytes {page.byteRange.start.toLocaleString()}–
+                {(page.byteRange.end - 1).toLocaleString()}
+                <br />
+                Rows {page.rowStart.toLocaleString()}–
+                {(page.rowEnd - 1).toLocaleString()}
+                <br />
+                Compressed size {formatByteSize(page.compressedPageSize)}
+                <br />
+                {formatPageStatistic(page.statistic)}
+              </calcite-tooltip>
+            ))}
           </div>
         </div>
       </div>
@@ -800,6 +928,19 @@ function ColumnDetail({
       </div>
     </div>
   );
+}
+
+function formatPageStatistic(
+  statistic: FileStructurePage["statistic"],
+): string {
+  switch (statistic.type) {
+    case "bounds":
+      return `Values ${statistic.min.value}–${statistic.max.value}`;
+    case "nullOnly":
+      return "Values — · Null values only";
+    case "unknown":
+      return "Values unavailable";
+  }
 }
 
 function rangeLength(range: { start: number; end: number }): number {

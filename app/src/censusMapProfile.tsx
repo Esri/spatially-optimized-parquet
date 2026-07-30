@@ -1,5 +1,11 @@
 import DotDensityRenderer from "@arcgis/core/renderers/DotDensityRenderer";
-import { useEffect, useState } from "react";
+import {
+  type Dispatch,
+  type SetStateAction,
+  useEffect,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 import type {
   DatasetMapProfile,
   DatasetMapSlotProps,
@@ -16,9 +22,38 @@ const colors = {
   popHispanic: "#e8ca0d",
 };
 
+const demographicAttributes = [
+  { field: "P005003", label: "White", color: colors.popWhite },
+  {
+    field: "P005004",
+    label: "Black or African American",
+    color: colors.popBlack,
+  },
+  {
+    field: "P005005",
+    label: "American Indian and Alaska Native",
+    color: colors.popAIAN,
+  },
+  { field: "P005006", label: "Asian", color: colors.popAsian },
+  {
+    field: "P005007",
+    label: "Native Hawaiian or Pacific Islander",
+    color: colors.popNHPI,
+  },
+  { field: "P005008", label: "Other", color: colors.popOther },
+  { field: "P005009", label: "Two or more", color: colors.popTwo },
+  {
+    field: "P005010",
+    label: "Hispanic or Latino",
+    color: colors.popHispanic,
+  },
+] as const;
+
+const defaultPopulationThreshold = 300;
+
 export const censusMapProfile = {
   layerProperties: {
-    renderer: createBoundaryRenderer(),
+    renderer: createDotDensityRenderer(10),
     popupTemplate: {
       title: "Census block {GEOID}",
       content: [
@@ -40,15 +75,28 @@ export const censusMapProfile = {
               label: "Land area (m²)",
               format: { digitSeparator: true, places: 0 },
             },
+            ...demographicAttributes.map(({ field, label }) => ({
+              fieldName: field,
+              label,
+              format: { digitSeparator: true, places: 0 },
+            })),
           ],
         },
       ],
     },
   },
-  mapSlotComponent: function CensusMapControls({ layer }: DatasetMapSlotProps) {
-    const [demographicsEnabled, setDemographicsEnabled] = useState(false);
+  mapSlotComponent: function CensusMapControls({
+    headerActionsElement,
+    layer,
+  }: DatasetMapSlotProps) {
+    const [compactControlsButton, setCompactControlsButton] =
+      useState<HTMLCalciteButtonElement | null>(null);
+    const [compactControlsOpen, setCompactControlsOpen] = useState(false);
+    const [demographicsEnabled, setDemographicsEnabled] = useState(true);
     const [dotValue, setDotValue] = useState(10);
-    const [populationThreshold, setPopulationThreshold] = useState(0);
+    const [populationThreshold, setPopulationThreshold] = useState(
+      defaultPopulationThreshold,
+    );
 
     useEffect(() => {
       if (!layer) {
@@ -71,58 +119,70 @@ export const censusMapProfile = {
     return (
       <>
         <arcgis-legend hidden={!demographicsEnabled} slot="bottom-left" />
-        <div className="map-renderer-controls" slot="bottom-right">
-          <div className="map-renderer-controls-heading">Census blocks</div>
-          <calcite-button
-            appearance="solid"
-            kind="brand"
-            label={demographicsEnabled ? "Show boundaries" : "Show demographics"}
-            onClick={() => {
-              setDemographicsEnabled((enabled) => !enabled);
-              setPopulationThreshold(0);
-            }}
-          >
-            {demographicsEnabled ? "Show boundaries" : "Show demographics"}
-          </calcite-button>
-          {demographicsEnabled ? (
-            <>
-              <calcite-label>
-                Dots per person
-                <calcite-slider
-                  label="Dots per person"
-                  labelHandles
-                  max={200}
-                  min={1}
-                  oncalciteSliderInput={(event: Event) =>
-                    setDotValue(
-                      Number(
-                        (event.currentTarget as HTMLCalciteSliderElement).value,
-                      ),
-                    )
-                  }
-                  value={dotValue}
-                />
-              </calcite-label>
-              <calcite-label>
-                Emphasize by population count
-                <calcite-slider
-                  label="Emphasize by population count"
-                  labelHandles
-                  max={400}
-                  min={0}
-                  oncalciteSliderInput={(event: Event) =>
-                    setPopulationThreshold(
-                      Number(
-                        (event.currentTarget as HTMLCalciteSliderElement).value,
-                      ),
-                    )
-                  }
-                  value={populationThreshold}
-                />
-              </calcite-label>
-            </>
-          ) : null}
-        </div>
+        {headerActionsElement
+          ? createPortal(
+              <>
+                <div className="census-map-header-controls">
+                  {renderCensusRendererControls({
+                    demographicsEnabled,
+                    dotValue,
+                    populationThreshold,
+                    setDemographicsEnabled,
+                    setDotValue,
+                    setPopulationThreshold,
+                    controlIdPrefix: "census-inline",
+                    showModeLabel: false,
+                  })}
+                  <span className="map-header-action-divider" aria-hidden="true">
+                    |
+                  </span>
+                </div>
+                <div className="census-map-compact-controls">
+                  <calcite-button
+                    ref={setCompactControlsButton}
+                    appearance="transparent"
+                    iconStart="sliders-horizontal"
+                    kind="neutral"
+                    label="Census renderer controls"
+                    onClick={() => {
+                      requestAnimationFrame(() =>
+                        setCompactControlsOpen((open) => !open),
+                      );
+                    }}
+                  />
+                  {compactControlsButton ? (
+                    <calcite-popover
+                      label="Census renderer controls"
+                      open={compactControlsOpen}
+                      overlayPositioning="fixed"
+                      placement="bottom-end"
+                      referenceElement={compactControlsButton}
+                      oncalcitePopoverClose={() =>
+                        setCompactControlsOpen(false)
+                      }
+                    >
+                      <div className="census-map-popover-controls">
+                        {renderCensusRendererControls({
+                          demographicsEnabled,
+                          dotValue,
+                          populationThreshold,
+                          setDemographicsEnabled,
+                          setDotValue,
+                          setPopulationThreshold,
+                          controlIdPrefix: "census-popover",
+                          showModeLabel: true,
+                        })}
+                      </div>
+                    </calcite-popover>
+                  ) : null}
+                  <span className="map-header-action-divider" aria-hidden="true">
+                    |
+                  </span>
+                </div>
+              </>,
+              headerActionsElement,
+            )
+          : null}
       </>
     );
   },
@@ -139,6 +199,89 @@ export const censusMapProfile = {
     };
   },
 } satisfies DatasetMapProfile;
+
+function renderCensusRendererControls({
+  demographicsEnabled,
+  dotValue,
+  populationThreshold,
+  setDemographicsEnabled,
+  setDotValue,
+  setPopulationThreshold,
+  controlIdPrefix,
+  showModeLabel,
+}: {
+  controlIdPrefix: string;
+  demographicsEnabled: boolean;
+  dotValue: number;
+  populationThreshold: number;
+  setDemographicsEnabled: Dispatch<SetStateAction<boolean>>;
+  setDotValue: Dispatch<SetStateAction<number>>;
+  setPopulationThreshold: Dispatch<SetStateAction<number>>;
+  showModeLabel: boolean;
+}) {
+  const modeButton = (
+    <calcite-button
+      appearance={showModeLabel ? "solid" : "transparent"}
+      iconStart={demographicsEnabled ? "polygon-area" : "layer-points"}
+      kind="neutral"
+      label={demographicsEnabled ? "Show boundaries" : "Show demographics"}
+      onClick={() => setDemographicsEnabled((enabled) => !enabled)}
+    >
+      {showModeLabel
+        ? demographicsEnabled
+          ? "Show boundaries"
+          : "Show dot density"
+        : null}
+    </calcite-button>
+  );
+
+  return (
+    <>
+      {showModeLabel ? modeButton : null}
+      {demographicsEnabled ? (
+        <>
+          <label id={`${controlIdPrefix}-pop`}>
+            <span>Pop</span>
+            <strong>{dotValue}</strong>
+            <calcite-slider
+              label="Dots per person"
+              max={200}
+              min={1}
+              oncalciteSliderInput={(event: Event) =>
+                setDotValue(
+                  Number((event.currentTarget as HTMLCalciteSliderElement).value),
+                )
+              }
+              value={dotValue}
+            />
+          </label>
+          <calcite-tooltip referenceElement={`${controlIdPrefix}-pop`}>
+            Number of people represented by each dot.
+          </calcite-tooltip>
+          <label id={`${controlIdPrefix}-min`}>
+            <span>Min</span>
+            <strong>{populationThreshold}</strong>
+            <calcite-slider
+              label="Emphasize by population count"
+              max={400}
+              min={0}
+              oncalciteSliderInput={(event: Event) =>
+                setPopulationThreshold(
+                  Number((event.currentTarget as HTMLCalciteSliderElement).value),
+                )
+              }
+              value={populationThreshold}
+            />
+          </label>
+          <calcite-tooltip referenceElement={`${controlIdPrefix}-min`}>
+            Emphasize census blocks above this population count.
+          </calcite-tooltip>
+        </>
+      ) : null}
+      {showModeLabel ? null : modeButton}
+    </>
+  );
+}
 
 function createBoundaryRenderer() {
   return {
@@ -160,31 +303,6 @@ function createDotDensityRenderer(dotValue: number): DotDensityRenderer {
     dotValue,
     dotBlendingEnabled: true,
     outline: undefined,
-    attributes: [
-      { field: "P005003", label: "White", color: colors.popWhite },
-      {
-        field: "P005004",
-        label: "Black or African American",
-        color: colors.popBlack,
-      },
-      {
-        field: "P005005",
-        label: "American Indian and Alaska Native",
-        color: colors.popAIAN,
-      },
-      { field: "P005006", label: "Asian", color: colors.popAsian },
-      {
-        field: "P005007",
-        label: "Native Hawaiian or Pacific Islander",
-        color: colors.popNHPI,
-      },
-      { field: "P005008", label: "Other", color: colors.popOther },
-      { field: "P005009", label: "Two or more", color: colors.popTwo },
-      {
-        field: "P005010",
-        label: "Hispanic or Latino",
-        color: colors.popHispanic,
-      },
-    ],
+    attributes: demographicAttributes.map((attribute) => ({ ...attribute })),
   });
 }
