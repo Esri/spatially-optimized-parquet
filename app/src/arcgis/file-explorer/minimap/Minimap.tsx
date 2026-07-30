@@ -12,6 +12,7 @@ import {
   type RowGroupBounds,
 } from "../../../parquet/rowGroupBounds";
 import { createRowGroupBoundsLayer } from "./rowGroupBoundsLayer";
+import styles from "./Minimap.module.css";
 
 function createDatasetBasemap(basemapId?: string): Basemap | string {
   return basemapId
@@ -151,13 +152,13 @@ export const Minimap = memo(function Minimap({
   }, [bounds, center, mainMapElementRef, scale]);
 
   return (
-    <div className="row-group-overview">
-      <div className="row-group-overview-map-frame">
+    <div className={styles.rowGroupOverview}>
+      <div className={styles.rowGroupOverviewMapFrame}>
         {bounds ? (
           <arcgis-map
             ref={mapElementRef}
             aria-label="Parquet row group overview"
-            className={overviewReady ? "ready" : ""}
+            className={overviewReady ? styles.ready : undefined}
             spatialReference={spatialReference}
             basemap={basemap}
             center={center}
@@ -165,7 +166,9 @@ export const Minimap = memo(function Minimap({
           />
         ) : null}
         {!bounds || !overviewReady ? (
-          <div className="row-group-overview-placeholder">Loading row groups…</div>
+          <div className={styles.rowGroupOverviewPlaceholder}>
+            Loading row groups…
+          </div>
         ) : null}
       </div>
     </div>

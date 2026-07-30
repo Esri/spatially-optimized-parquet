@@ -6,15 +6,15 @@ export interface IndexedByteRange<Value> {
 }
 
 export class ByteRangeIndex<Value> {
-  private readonly entries: readonly IndexedByteRange<Value>[];
-  private readonly prefixMaximumEnds: readonly number[];
+  private readonly _entries: readonly IndexedByteRange<Value>[];
+  private readonly _prefixMaximumEnds: readonly number[];
 
   constructor(entries: readonly IndexedByteRange<Value>[]) {
-    this.entries = [...entries].sort(
+    this._entries = [...entries].sort(
       (first, second) =>
         first.range.start - second.range.start || first.range.end - second.range.end,
     );
-    this.prefixMaximumEnds = this.entries.reduce<number[]>((maximumEnds, entry) => {
+    this._prefixMaximumEnds = this._entries.reduce<number[]>((maximumEnds, entry) => {
       const previousMaximum = maximumEnds.at(-1) ?? Number.NEGATIVE_INFINITY;
       maximumEnds.push(Math.max(previousMaximum, entry.range.end));
       return maximumEnds;
@@ -23,15 +23,15 @@ export class ByteRangeIndex<Value> {
 
   query(range: ByteRange): readonly IndexedByteRange<Value>[] {
     const firstCandidate = upperBound(
-      this.prefixMaximumEnds,
+      this._prefixMaximumEnds,
       range.start,
       (end) => end,
     );
-    const finalCandidate = lowerBound(this.entries, range.end, (entry) => entry.range.start);
+    const finalCandidate = lowerBound(this._entries, range.end, (entry) => entry.range.start);
     const result: IndexedByteRange<Value>[] = [];
 
     for (let index = firstCandidate; index < finalCandidate; index += 1) {
-      const entry = this.entries[index];
+      const entry = this._entries[index];
       if (rangesOverlap(entry.range, range)) {
         result.push(entry);
       }

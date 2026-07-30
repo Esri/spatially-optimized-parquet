@@ -2,7 +2,6 @@ import maplibregl from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
 
 import "maplibre-gl/dist/maplibre-gl.css";
-import "../styles/maplibre.css";
 
 import { DatasetSelectionPanel } from "../common/dataset/DatasetSelectionPanel";
 import { datasets } from "../common/dataset/datasets";
@@ -10,6 +9,7 @@ import {
   ParquetDatasetSource,
   type DatasetLayerStatus,
 } from "./ParquetDatasetSource";
+import styles from "./MaplibreViewer.module.css";
 
 const openFreeMapDarkStyleUrl = "https://tiles.openfreemap.org/styles/dark";
 const mapScaleAtZoomZero = 295_829_355.4545656;
@@ -84,7 +84,7 @@ export default function MaplibreViewer() {
   }, [activeDataset, mapInstance]);
 
   return (
-    <main className="maplibre-workspace">
+    <main className={styles.maplibreWorkspace}>
       <DatasetSelectionPanel
         activeDataset={activeDataset}
         compression={
@@ -92,22 +92,22 @@ export default function MaplibreViewer() {
         }
         onDatasetSelect={setDatasetIndex}
       />
-      <calcite-panel className="maplibre-panel">
+      <calcite-panel className={styles.maplibrePanel}>
         <calcite-label
-          className="panel-metric"
+          className={styles.panelMetric}
           layout="inline"
           slot="header-actions-start"
         >
           Features
           <strong>{formatFeatureCount(status)}</strong>
-          <span className="map-header-action-divider" aria-hidden="true">
+          <span className={styles.mapHeaderActionDivider} aria-hidden="true">
             |
           </span>
           LOD
           <strong>{status.type === "ready" ? status.lod : "…"}</strong>
         </calcite-label>
         {status.type === "loading" ? (
-          <span className="maplibre-status" slot="header-actions-end">
+          <span className={styles.maplibreStatus} slot="header-actions-end">
             <calcite-loader
               inline
               label="Loading dataset"
@@ -116,14 +116,14 @@ export default function MaplibreViewer() {
             Loading...
           </span>
         ) : status.type === "failed" ? (
-          <span className="maplibre-status" slot="header-actions-end">
+          <span className={styles.maplibreStatus} slot="header-actions-end">
             Dataset failed: {status.message}
           </span>
         ) : null}
         <div
           ref={containerRef}
           aria-label={`OpenFreeMap dark basemap with ${activeDataset.name}`}
-          className="maplibre-map"
+          className={styles.maplibreMap}
         />
       </calcite-panel>
     </main>

@@ -10,6 +10,7 @@ import type {
   DatasetMapProfile,
   DatasetMapSlotProps,
 } from "./profiles";
+import styles from "./CensusProfile.module.css";
 
 const colors = {
   popWhite: "#f23c3f",
@@ -122,7 +123,7 @@ export const CensusProfile = {
         {headerActionsElement
           ? createPortal(
               <>
-                <div className="census-map-header-controls">
+                <div className={styles.censusMapHeaderControls}>
                   {renderCensusRendererControls({
                     demographicsEnabled,
                     dotValue,
@@ -133,11 +134,14 @@ export const CensusProfile = {
                     controlIdPrefix: "census-inline",
                     showModeLabel: false,
                   })}
-                  <span className="map-header-action-divider" aria-hidden="true">
+                  <span
+                    className={styles.mapHeaderActionDivider}
+                    aria-hidden="true"
+                  >
                     |
                   </span>
                 </div>
-                <div className="census-map-compact-controls">
+                <div className={styles.censusMapCompactControls}>
                   <calcite-button
                     ref={setCompactControlsButton}
                     appearance="transparent"
@@ -161,7 +165,7 @@ export const CensusProfile = {
                         setCompactControlsOpen(false)
                       }
                     >
-                      <div className="census-map-popover-controls">
+                      <div className={styles.censusMapPopoverControls}>
                         {renderCensusRendererControls({
                           demographicsEnabled,
                           dotValue,
@@ -175,7 +179,10 @@ export const CensusProfile = {
                       </div>
                     </calcite-popover>
                   ) : null}
-                  <span className="map-header-action-divider" aria-hidden="true">
+                  <span
+                    className={styles.mapHeaderActionDivider}
+                    aria-hidden="true"
+                  >
                     |
                   </span>
                 </div>

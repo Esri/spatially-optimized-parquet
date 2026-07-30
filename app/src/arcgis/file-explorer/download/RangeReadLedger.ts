@@ -24,16 +24,16 @@ export type RangeReadChange =
     };
 
 export class RangeReadLedger {
-  private readonly activeRequests = new Map<string, ActiveRequest>();
-  private readonly handledEventKeys = new Set<string>();
-  private latestRequestKey: string | null = null;
-  private completedRequestCount = 0;
+  private readonly _activeRequests = new Map<string, ActiveRequest>();
+  private readonly _handledEventKeys = new Set<string>();
+  private _latestRequestKey: string | null = null;
+  private _completedRequestCount = 0;
 
   reset(): void {
-    this.activeRequests.clear();
-    this.handledEventKeys.clear();
-    this.latestRequestKey = null;
-    this.completedRequestCount = 0;
+    this._activeRequests.clear();
+    this._handledEventKeys.clear();
+    this._latestRequestKey = null;
+    this._completedRequestCount = 0;
   }
 
   record(
@@ -42,18 +42,18 @@ export class RangeReadLedger {
   ): RangeReadChange {
     const requestKey = createRequestKey(event);
     const eventKey = `${requestKey}:${event.phase}`;
-    if (this.handledEventKeys.has(eventKey)) {
+    if (this._handledEventKeys.has(eventKey)) {
       return { type: "duplicate" };
     }
     if (!acceptsFile(event.fileId)) {
       return { type: "unknown-file", fileId: event.fileId };
     }
 
-    this.handledEventKeys.add(eventKey);
+    this._handledEventKeys.add(eventKey);
     if (event.phase === "start") {
-      const previousLatestRequestKey = this.latestRequestKey;
-      this.latestRequestKey = requestKey;
-      this.activeRequests.set(requestKey, { range: event.range });
+      const previousLatestRequestKey = this._latestRequestKey;
+      this._latestRequestKey = requestKey;
+      this._activeRequests.set(requestKey, { range: event.range });
       return {
         type: "start",
         requestKey,
@@ -62,34 +62,34 @@ export class RangeReadLedger {
       };
     }
 
-    const replacedLatestRequest = this.latestRequestKey === requestKey;
-    this.activeRequests.delete(requestKey);
+    const replacedLatestRequest = this._latestRequestKey === requestKey;
+    this._activeRequests.delete(requestKey);
     if (replacedLatestRequest) {
-      this.latestRequestKey = this.activeRequests.keys().next().value ?? null;
+      this._latestRequestKey = this._activeRequests.keys().next().value ?? null;
     }
     if (event.phase === "complete") {
-      this.completedRequestCount += 1;
+      this._completedRequestCount += 1;
     }
     return {
       type: "finish",
       requestKey,
       range: event.range,
       phase: event.phase,
-      latestRequestKey: this.latestRequestKey,
+      latestRequestKey: this._latestRequestKey,
       replacedLatestRequest,
     };
   }
 
   activeRequestEntries(): IterableIterator<[string, ActiveRequest]> {
-    return this.activeRequests.entries();
+    return this._activeRequests.entries();
   }
 
   currentLatestRequestKey(): string | null {
-    return this.latestRequestKey;
+    return this._latestRequestKey;
   }
 
   currentCompletedRequestCount(): number {
-    return this.completedRequestCount;
+    return this._completedRequestCount;
   }
 }
 

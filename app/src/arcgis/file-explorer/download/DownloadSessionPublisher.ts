@@ -16,141 +16,141 @@ interface SnapshotProvider {
 }
 
 class ExternalStoreChannel<Snapshot> implements ReadonlyExternalStore<Snapshot> {
-  private readonly listeners = new Set<() => void>();
+  private readonly _listeners = new Set<() => void>();
 
-  constructor(private readonly readSnapshot: () => Snapshot) {}
+  constructor(private readonly _readSnapshot: () => Snapshot) {}
 
   subscribe = (listener: () => void): (() => void) => {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+    this._listeners.add(listener);
+    return () => this._listeners.delete(listener);
   };
 
   getSnapshot = (): Snapshot => {
-    return this.readSnapshot();
+    return this._readSnapshot();
   };
 
   notify(): void {
-    for (const listener of this.listeners) {
+    for (const listener of this._listeners) {
       listener();
     }
   }
 }
 
 class KeyedExternalStoreChannel<Key, Snapshot> {
-  private readonly channels = new Map<Key, ExternalStoreChannel<Snapshot>>();
+  private readonly _channels = new Map<Key, ExternalStoreChannel<Snapshot>>();
 
   constructor(
-    private readonly readSnapshot: (key: Key) => Snapshot,
+    private readonly _readSnapshot: (key: Key) => Snapshot,
   ) {}
 
   channel(key: Key): ReadonlyExternalStore<Snapshot> {
-    const existing = this.channels.get(key);
+    const existing = this._channels.get(key);
     if (existing) {
       return existing;
     }
-    const channel = new ExternalStoreChannel(() => this.readSnapshot(key));
-    this.channels.set(key, channel);
+    const channel = new ExternalStoreChannel(() => this._readSnapshot(key));
+    this._channels.set(key, channel);
     return channel;
   }
 
   notify(key: Key): void {
-    this.channels.get(key)?.notify();
+    this._channels.get(key)?.notify();
   }
 }
 
 export class DownloadSessionPublisher {
-  private topologySnapshot: DownloadTopologySnapshot;
-  private summarySnapshot: DownloadSummarySnapshot;
-  private readonly blockSnapshots = new Map<string, DownloadBlockSnapshot>();
-  private readonly trackSnapshots = new Map<string, DownloadTrackSnapshot>();
-  private readonly topologyChannel: ExternalStoreChannel<DownloadTopologySnapshot>;
-  private readonly summaryChannel: ExternalStoreChannel<DownloadSummarySnapshot>;
-  private readonly blockChannel: KeyedExternalStoreChannel<
+  private _topologySnapshot: DownloadTopologySnapshot;
+  private _summarySnapshot: DownloadSummarySnapshot;
+  private readonly _blockSnapshots = new Map<string, DownloadBlockSnapshot>();
+  private readonly _trackSnapshots = new Map<string, DownloadTrackSnapshot>();
+  private readonly _topologyChannel: ExternalStoreChannel<DownloadTopologySnapshot>;
+  private readonly _summaryChannel: ExternalStoreChannel<DownloadSummarySnapshot>;
+  private readonly _blockChannel: KeyedExternalStoreChannel<
     string,
     DownloadBlockSnapshot
   >;
-  private readonly trackChannel: KeyedExternalStoreChannel<
+  private readonly _trackChannel: KeyedExternalStoreChannel<
     string,
     DownloadTrackSnapshot
   >;
-  private readonly dirtyBlockIds = new Set<string>();
-  private readonly dirtyTrackIds = new Set<string>();
-  private summaryDirty = false;
-  private topologyDirty = false;
-  private flushTimer: ReturnType<typeof setTimeout> | null = null;
-  private lastFlushTime = Number.NEGATIVE_INFINITY;
+  private readonly _dirtyBlockIds = new Set<string>();
+  private readonly _dirtyTrackIds = new Set<string>();
+  private _summaryDirty = false;
+  private _topologyDirty = false;
+  private _flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private _lastFlushTime = Number.NEGATIVE_INFINITY;
 
   readonly topology: ReadonlyExternalStore<DownloadTopologySnapshot>;
   readonly summary: ReadonlyExternalStore<DownloadSummarySnapshot>;
 
   constructor(
-    private readonly snapshotProvider: SnapshotProvider,
-    private readonly emptyBlockSnapshot: DownloadBlockSnapshot,
-    private readonly emptyTrackSnapshot: DownloadTrackSnapshot,
+    private readonly _snapshotProvider: SnapshotProvider,
+    private readonly _emptyBlockSnapshot: DownloadBlockSnapshot,
+    private readonly _emptyTrackSnapshot: DownloadTrackSnapshot,
   ) {
-    this.topologySnapshot = snapshotProvider.createTopologySnapshot();
-    this.summarySnapshot = snapshotProvider.createSummarySnapshot();
-    this.topologyChannel = new ExternalStoreChannel(() => this.topologySnapshot);
-    this.summaryChannel = new ExternalStoreChannel(() => this.summarySnapshot);
-    this.blockChannel = new KeyedExternalStoreChannel(
-      (blockId) => this.blockSnapshots.get(blockId) ?? this.emptyBlockSnapshot,
+    this._topologySnapshot = _snapshotProvider.createTopologySnapshot();
+    this._summarySnapshot = _snapshotProvider.createSummarySnapshot();
+    this._topologyChannel = new ExternalStoreChannel(() => this._topologySnapshot);
+    this._summaryChannel = new ExternalStoreChannel(() => this._summarySnapshot);
+    this._blockChannel = new KeyedExternalStoreChannel(
+      (blockId) => this._blockSnapshots.get(blockId) ?? this._emptyBlockSnapshot,
     );
-    this.trackChannel = new KeyedExternalStoreChannel(
-      (trackId) => this.trackSnapshots.get(trackId) ?? this.emptyTrackSnapshot,
+    this._trackChannel = new KeyedExternalStoreChannel(
+      (trackId) => this._trackSnapshots.get(trackId) ?? this._emptyTrackSnapshot,
     );
-    this.topology = this.topologyChannel;
-    this.summary = this.summaryChannel;
+    this.topology = this._topologyChannel;
+    this.summary = this._summaryChannel;
   }
 
   block(blockId: string): ReadonlyExternalStore<DownloadBlockSnapshot> {
-    return this.blockChannel.channel(blockId);
+    return this._blockChannel.channel(blockId);
   }
 
   track(trackId: string): ReadonlyExternalStore<DownloadTrackSnapshot> {
-    return this.trackChannel.channel(trackId);
+    return this._trackChannel.channel(trackId);
   }
 
   resetSnapshots(): void {
-    this.cancelFlush();
-    this.blockSnapshots.clear();
-    this.trackSnapshots.clear();
-    this.dirtyBlockIds.clear();
-    this.dirtyTrackIds.clear();
-    this.summaryDirty = false;
-    this.topologyDirty = false;
+    this._cancelFlush();
+    this._blockSnapshots.clear();
+    this._trackSnapshots.clear();
+    this._dirtyBlockIds.clear();
+    this._dirtyTrackIds.clear();
+    this._summaryDirty = false;
+    this._topologyDirty = false;
   }
 
   markBlocks(blockIds: Iterable<string>): void {
     for (const blockId of blockIds) {
-      this.dirtyBlockIds.add(blockId);
+      this._dirtyBlockIds.add(blockId);
     }
   }
 
   markTracks(trackIds: Iterable<string>): void {
     for (const trackId of trackIds) {
-      this.dirtyTrackIds.add(trackId);
+      this._dirtyTrackIds.add(trackId);
     }
   }
 
   markSummaryDirty(): void {
-    this.summaryDirty = true;
+    this._summaryDirty = true;
   }
 
   markTopologyDirty(): void {
-    this.topologyDirty = true;
+    this._topologyDirty = true;
   }
 
   schedule(): void {
-    if (this.flushTimer !== null) {
+    if (this._flushTimer !== null) {
       return;
     }
-    const delay = Math.max(0, updateIntervalMs - (Date.now() - this.lastFlushTime));
+    const delay = Math.max(0, updateIntervalMs - (Date.now() - this._lastFlushTime));
     if (delay === 0) {
       this.flush();
       return;
     }
-    this.flushTimer = setTimeout(() => {
-      this.flushTimer = null;
+    this._flushTimer = setTimeout(() => {
+      this._flushTimer = null;
       this.flush();
     }, delay);
   }
@@ -158,62 +158,62 @@ export class DownloadSessionPublisher {
   flush(force = false): void {
     if (
       !force &&
-      !this.topologyDirty &&
-      !this.summaryDirty &&
-      this.dirtyBlockIds.size === 0 &&
-      this.dirtyTrackIds.size === 0
+      !this._topologyDirty &&
+      !this._summaryDirty &&
+      this._dirtyBlockIds.size === 0 &&
+      this._dirtyTrackIds.size === 0
     ) {
       return;
     }
-    this.cancelFlush();
-    this.lastFlushTime = Date.now();
+    this._cancelFlush();
+    this._lastFlushTime = Date.now();
 
-    for (const blockId of this.dirtyBlockIds) {
-      this.blockSnapshots.set(
+    for (const blockId of this._dirtyBlockIds) {
+      this._blockSnapshots.set(
         blockId,
-        this.snapshotProvider.createBlockSnapshot(blockId),
+        this._snapshotProvider.createBlockSnapshot(blockId),
       );
     }
-    for (const trackId of this.dirtyTrackIds) {
-      this.trackSnapshots.set(
+    for (const trackId of this._dirtyTrackIds) {
+      this._trackSnapshots.set(
         trackId,
-        this.snapshotProvider.createTrackSnapshot(trackId),
+        this._snapshotProvider.createTrackSnapshot(trackId),
       );
     }
-    if (this.summaryDirty) {
-      this.summarySnapshot = this.snapshotProvider.createSummarySnapshot();
+    if (this._summaryDirty) {
+      this._summarySnapshot = this._snapshotProvider.createSummarySnapshot();
     }
-    if (this.topologyDirty) {
-      this.topologySnapshot = this.snapshotProvider.createTopologySnapshot();
+    if (this._topologyDirty) {
+      this._topologySnapshot = this._snapshotProvider.createTopologySnapshot();
     }
 
-    const dirtyBlockIds = [...this.dirtyBlockIds];
-    const dirtyTrackIds = [...this.dirtyTrackIds];
-    const notifySummary = this.summaryDirty;
-    const notifyTopology = this.topologyDirty;
-    this.dirtyBlockIds.clear();
-    this.dirtyTrackIds.clear();
-    this.summaryDirty = false;
-    this.topologyDirty = false;
+    const dirtyBlockIds = [...this._dirtyBlockIds];
+    const dirtyTrackIds = [...this._dirtyTrackIds];
+    const notifySummary = this._summaryDirty;
+    const notifyTopology = this._topologyDirty;
+    this._dirtyBlockIds.clear();
+    this._dirtyTrackIds.clear();
+    this._summaryDirty = false;
+    this._topologyDirty = false;
 
     if (notifyTopology) {
-      this.topologyChannel.notify();
+      this._topologyChannel.notify();
     }
     if (notifySummary) {
-      this.summaryChannel.notify();
+      this._summaryChannel.notify();
     }
     for (const blockId of dirtyBlockIds) {
-      this.blockChannel.notify(blockId);
+      this._blockChannel.notify(blockId);
     }
     for (const trackId of dirtyTrackIds) {
-      this.trackChannel.notify(trackId);
+      this._trackChannel.notify(trackId);
     }
   }
 
-  private cancelFlush(): void {
-    if (this.flushTimer !== null) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
+  private _cancelFlush(): void {
+    if (this._flushTimer !== null) {
+      clearTimeout(this._flushTimer);
+      this._flushTimer = null;
     }
   }
 }

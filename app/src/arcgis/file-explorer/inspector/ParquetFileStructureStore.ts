@@ -50,59 +50,59 @@ export interface FileStructureState {
 }
 
 export class ParquetFileStructureStore {
-  private selectedRowGroupIndex: number | null = null;
-  private expandedColumnIds = new Set<string>();
-  private detailColumnId: string | null = null;
-  private details = new Map<string, ColumnDetailState>();
-  private listeners = new Set<() => void>();
-  private generation = 0;
-  private state = this.createState();
+  private _selectedRowGroupIndex: number | null = null;
+  private _expandedColumnIds = new Set<string>();
+  private _detailColumnId: string | null = null;
+  private _details = new Map<string, ColumnDetailState>();
+  private _listeners = new Set<() => void>();
+  private _generation = 0;
+  private _state = this._createState();
 
   constructor(
     readonly snapshot: FileStructureSnapshot,
-    private readonly source: ArcgisParquetPageIndexSource,
+    private readonly _source: ArcgisParquetPageIndexSource,
   ) {}
 
   subscribe = (listener: () => void): (() => void) => {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+    this._listeners.add(listener);
+    return () => this._listeners.delete(listener);
   };
 
-  getState = (): FileStructureState => this.state;
+  getState = (): FileStructureState => this._state;
 
   close(): void {
-    this.generation += 1;
-    this.listeners.clear();
+    this._generation += 1;
+    this._listeners.clear();
   }
 
   selectRowGroup(index: number): void {
-    const openingRowGroup = this.selectedRowGroupIndex !== index;
-    this.selectedRowGroupIndex = openingRowGroup ? index : null;
-    this.expandedColumnIds.clear();
-    this.detailColumnId = null;
+    const openingRowGroup = this._selectedRowGroupIndex !== index;
+    this._selectedRowGroupIndex = openingRowGroup ? index : null;
+    this._expandedColumnIds.clear();
+    this._detailColumnId = null;
     const defaultColumn = openingRowGroup
-      ? this.defaultColumn(this.rowGroup(index))
+      ? this._defaultColumn(this.rowGroup(index))
       : undefined;
     const shouldLoad = defaultColumn
-      ? this.selectColumn(defaultColumn)
+      ? this._selectColumn(defaultColumn)
       : false;
-    this.publish();
+    this._publish();
     if (defaultColumn && shouldLoad) {
-      void this.loadColumn(defaultColumn);
+      void this._loadColumn(defaultColumn);
     }
   }
 
   toggleColumn(column: ColumnLayout): void {
-    if (this.expandedColumnIds.has(column.id)) {
-      this.expandedColumnIds.delete(column.id);
-      this.detailColumnId = null;
-      this.publish();
+    if (this._expandedColumnIds.has(column.id)) {
+      this._expandedColumnIds.delete(column.id);
+      this._detailColumnId = null;
+      this._publish();
       return;
     }
-    const shouldLoad = this.selectColumn(column);
-    this.publish();
+    const shouldLoad = this._selectColumn(column);
+    this._publish();
     if (shouldLoad) {
-      void this.loadColumn(column);
+      void this._loadColumn(column);
     }
   }
 
@@ -110,19 +110,19 @@ export class ParquetFileStructureStore {
     return this.snapshot.layout.rowGroups.find((rowGroup) => rowGroup.index === index);
   }
 
-  private selectColumn(column: ColumnLayout): boolean {
-    this.expandedColumnIds = new Set([column.id]);
-    const existingDetail = this.details.get(column.id);
+  private _selectColumn(column: ColumnLayout): boolean {
+    this._expandedColumnIds = new Set([column.id]);
+    const existingDetail = this._details.get(column.id);
     const shouldLoad = existingDetail === undefined;
     if (shouldLoad) {
-      this.details.set(column.id, { type: "loading" });
+      this._details.set(column.id, { type: "loading" });
     } else if (existingDetail.type !== "loading") {
-      this.detailColumnId = column.id;
+      this._detailColumnId = column.id;
     }
     return shouldLoad;
   }
 
-  private defaultColumn(
+  private _defaultColumn(
     rowGroup: RowGroupLayout | undefined,
   ): ColumnLayout | undefined {
     let selectedColumn = rowGroup?.columns[0];
@@ -143,8 +143,8 @@ export class ParquetFileStructureStore {
     return selectedColumn;
   }
 
-  private async loadColumn(column: ColumnLayout): Promise<void> {
-    const generation = this.generation;
+  private async _loadColumn(column: ColumnLayout): Promise<void> {
+    const generation = this._generation;
     const target: ArcgisParquetPageIndexTarget = {
       fileId: this.snapshot.layout.fileId,
       rowGroupIndex: column.rowGroupIndex,
@@ -153,42 +153,42 @@ export class ParquetFileStructureStore {
 
     try {
       const [columnIndex, offsetIndex] = await Promise.all([
-        this.source.getColumnIndex(target),
-        this.source.getOffsetIndex(target),
+        this._source.getColumnIndex(target),
+        this._source.getOffsetIndex(target),
       ]);
-      if (generation !== this.generation) {
+      if (generation !== this._generation) {
         return;
       }
 
-      this.markIndexRangesLoaded(column);
+      this._markIndexRangesLoaded(column);
       if (!offsetIndex) {
-        this.details.set(column.id, { type: "unavailable" });
+        this._details.set(column.id, { type: "unavailable" });
       } else {
-        this.details.set(column.id, {
+        this._details.set(column.id, {
           type: "ready",
           pages: mergePages(columnIndex, offsetIndex),
           gaps: deriveGaps(column.byteRange, offsetIndex),
         });
       }
-      if (this.expandedColumnIds.has(column.id)) {
-        this.detailColumnId = column.id;
+      if (this._expandedColumnIds.has(column.id)) {
+        this._detailColumnId = column.id;
       }
     } catch (error) {
-      if (generation !== this.generation) {
+      if (generation !== this._generation) {
         return;
       }
-      this.details.set(column.id, {
+      this._details.set(column.id, {
         type: "failed",
         message: error instanceof Error ? error.message : String(error),
       });
-      if (this.expandedColumnIds.has(column.id)) {
-        this.detailColumnId = column.id;
+      if (this._expandedColumnIds.has(column.id)) {
+        this._detailColumnId = column.id;
       }
     }
-    this.publish();
+    this._publish();
   }
 
-  private markIndexRangesLoaded(column: ColumnLayout): void {
+  private _markIndexRangesLoaded(column: ColumnLayout): void {
     const rowGroup = this.rowGroup(column.rowGroupIndex);
     const chunkIndex = rowGroup?.columns.findIndex(
       (candidate) => candidate.columnIndex === column.columnIndex,
@@ -206,19 +206,19 @@ export class ParquetFileStructureStore {
     }
   }
 
-  private publish(): void {
-    this.state = this.createState();
-    for (const listener of this.listeners) {
+  private _publish(): void {
+    this._state = this._createState();
+    for (const listener of this._listeners) {
       listener();
     }
   }
 
-  private createState(): FileStructureState {
+  private _createState(): FileStructureState {
     return {
-      selectedRowGroupIndex: this.selectedRowGroupIndex,
-      expandedColumnIds: new Set(this.expandedColumnIds),
-      detailColumnId: this.detailColumnId,
-      details: new Map(this.details),
+      selectedRowGroupIndex: this._selectedRowGroupIndex,
+      expandedColumnIds: new Set(this._expandedColumnIds),
+      detailColumnId: this._detailColumnId,
+      details: new Map(this._details),
     };
   }
 }

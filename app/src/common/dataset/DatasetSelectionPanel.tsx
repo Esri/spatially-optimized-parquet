@@ -1,17 +1,20 @@
 import type { Dataset } from "./datasets";
 import { DatasetSelectionMenu } from "./DatasetSelectionMenu";
 import { formatByteSize } from "../formatByteSize";
+import styles from "./DatasetSelectionPanel.module.css";
 
 interface DatasetSelectionPanelProps {
   activeDataset: Dataset;
   byteSize?: number;
   compression?: string | null;
+  compact?: boolean;
   onDatasetSelect(index: number): void;
 }
 
 export function DatasetSelectionPanel({
   activeDataset,
   byteSize = activeDataset.byteSize,
+  compact = false,
   compression = null,
   onDatasetSelect,
 }: DatasetSelectionPanelProps) {
@@ -20,51 +23,56 @@ export function DatasetSelectionPanel({
   return (
     <section
       aria-label="Dataset selection"
-      className="dataset-selection-panel"
+      className={[
+        styles.datasetSelectionPanel,
+        compact ? styles.compact : null,
+      ].filter(Boolean).join(" ")}
     >
-      <div className="dataset-selection-main">
+      <div className={styles.datasetSelectionMain}>
         <DatasetSelectionMenu
           activeDataset={activeDataset}
           onDatasetSelect={onDatasetSelect}
         />
-        <div className="dataset-url-field">
+        <div className={styles.datasetUrlField}>
           <span>URL</span>
           <calcite-input
-            className="dataset-url-input"
+            className={styles.datasetUrlInput}
             label="Parquet URL"
             readOnly
             value={activeDataset.url}
           />
         </div>
       </div>
-      <div className="dataset-selection-metrics">
-        <div className="dataset-selection-field">
-          <span className="dataset-selection-label">Features</span>
-          <span className="dataset-selection-value">
+      <div className={styles.datasetSelectionMetrics}>
+        <div className={styles.datasetSelectionField}>
+          <span className={styles.datasetSelectionLabel}>Features</span>
+          <span className={styles.datasetSelectionValue}>
             {formatCompactCount(activeDataset.count)}
           </span>
         </div>
-        <div className="dataset-selection-field">
-          <span className="dataset-selection-label">Size</span>
-          <span className="dataset-selection-value">
+        <div className={styles.datasetSelectionField}>
+          <span className={styles.datasetSelectionLabel}>Size</span>
+          <span className={styles.datasetSelectionValue}>
             {formatByteSize(byteSize)}
           </span>
         </div>
-        <div className="dataset-selection-field">
-          <span className="dataset-selection-label">Compression</span>
-          <span className="dataset-selection-value">
+        <div className={styles.datasetSelectionField}>
+          <span className={styles.datasetSelectionLabel}>Compression</span>
+          <span className={styles.datasetSelectionValue}>
             {compressionCodec ?? "—"}
             {compressionRatio ? (
-              <small className="dataset-compression-ratio">
+              <small className={styles.datasetCompressionRatio}>
                 {compressionRatio}
               </small>
             ) : null}
           </span>
         </div>
-        <div className="dataset-selection-field dataset-source-metric">
-          <span className="dataset-selection-label">Source</span>
+        <div
+          className={`${styles.datasetSelectionField} ${styles.datasetSourceMetric}`}
+        >
+          <span className={styles.datasetSelectionLabel}>Source</span>
           <span
-            className="dataset-selection-value"
+            className={styles.datasetSelectionValue}
             title={activeDataset.source}
           >
             {activeDataset.sourceUrl ? (

@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 
 import { datasets, type Dataset } from "./datasets";
 import { formatByteSize } from "../formatByteSize";
+import styles from "./DatasetSelectionPanel.module.css";
 
 interface DatasetSelectionMenuProps {
   activeDataset: Dataset;
@@ -21,12 +22,14 @@ export function DatasetSelectionMenu({
   };
 
   return (
-    <label className="dataset-selection-field dataset-select-field">
-      <span className="dataset-selection-label">Select Dataset</span>
+    <label
+      className={`${styles.datasetSelectionField} ${styles.datasetSelectField}`}
+    >
+      <span className={styles.datasetSelectionLabel}>Select Dataset</span>
       <button
         aria-expanded={menuOpen}
         aria-haspopup="menu"
-        className="dataset-menu-trigger"
+        className={styles.datasetMenuTrigger}
         onClick={() => {
           requestAnimationFrame(() => setMenuOpen((open) => !open));
         }}
@@ -44,22 +47,22 @@ export function DatasetSelectionMenu({
           referenceElement={menuButtonRef.current}
           oncalcitePopoverClose={() => setMenuOpen(false)}
         >
-          <div className="dataset-options" role="menu">
+          <div className={styles.datasetOptions} role="menu">
             {datasets.map((dataset, index) => (
-              <div className="dataset-option" key={dataset.id} role="none">
+              <div className={styles.datasetOption} key={dataset.id} role="none">
                 <button
-                  className="dataset-option-select"
+                  className={styles.datasetOptionSelect}
                   disabled={!dataset.url}
                   onClick={() => selectDataset(index)}
                   role="menuitem"
                   type="button"
                 >
-                  <span className="dataset-option-name">{dataset.name}</span>
-                  <span className="dataset-option-metadata">
+                  <span className={styles.datasetOptionName}>{dataset.name}</span>
+                  <span className={styles.datasetOptionMetadata}>
                     {formatByteSize(dataset.byteSize)} ·{" "}
                     {dataset.count.toLocaleString()} features
                   </span>
-                  <span className="dataset-option-source">
+                  <span className={styles.datasetOptionSource}>
                     {dataset.source}
                   </span>
                 </button>

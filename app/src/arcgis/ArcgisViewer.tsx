@@ -24,6 +24,7 @@ import {
 } from "./profiles/profiles";
 import { FileExplorer } from "./file-explorer/FileExplorer";
 import { useArcgisDatasetSession } from "./useArcgisDatasetSession";
+import styles from "./ArcgisViewer.module.css";
 
 const defaultCenter: [number, number] = [-98, 39];
 const defaultScale = 25_000_000;
@@ -275,20 +276,23 @@ export function ArcgisViewer() {
 
   return (
     <main
-        ref={gridContainerRef}
-        className={`grid-container${compactDetailsLayout ? " compact" : ""}${
-          downloadDetailsEnabled ? "" : " details-disabled"
-        }`}
-      >
+      ref={gridContainerRef}
+      className={[
+        styles.gridContainer,
+        compactDetailsLayout ? styles.compact : null,
+        downloadDetailsEnabled ? null : styles.detailsDisabled,
+      ].filter(Boolean).join(" ")}
+    >
         <DatasetSelectionPanel
           activeDataset={activeDataset}
           byteSize={datasetByteSize}
+          compact={compactDetailsLayout}
           compression={compression}
           onDatasetSelect={selectDataset}
         />
-        <calcite-panel className="grid-map">
+        <calcite-panel className={styles.gridMap}>
           <calcite-label
-            className="panel-metric"
+            className={styles.panelMetric}
             id="map-view-metrics"
             layout="inline"
             slot="header-actions-start"
@@ -299,7 +303,7 @@ export function ArcgisViewer() {
                 ? `${viewCenter.longitude.toFixed(2)}, ${viewCenter.latitude.toFixed(2)}`
                 : "…"}
             </strong>
-            <span className="map-header-action-divider" aria-hidden="true">
+            <span className={styles.mapHeaderActionDivider} aria-hidden="true">
               |
             </span>
             Features
@@ -309,11 +313,11 @@ export function ArcgisViewer() {
             Current map center and feature count.
           </calcite-tooltip>
           <div
-            className="map-profile-header-actions"
+            className={styles.mapProfileHeaderActions}
             slot="header-actions-end"
           >
             <div
-              className="map-profile-header-action-target"
+              className={styles.mapProfileHeaderActionTarget}
               ref={setMapHeaderActionsElement}
             />
             {activeDataset.bookmarks?.length ? (
@@ -339,7 +343,7 @@ export function ArcgisViewer() {
                     referenceElement={bookmarksButton}
                     oncalcitePopoverClose={() => setBookmarksOpen(false)}
                   >
-                    <div className="map-bookmark-list">
+                    <div className={styles.mapBookmarkList}>
                       {activeDataset.bookmarks.map((bookmark) => (
                         <calcite-button
                           appearance="transparent"
@@ -373,7 +377,6 @@ export function ArcgisViewer() {
             <calcite-button
               appearance="transparent"
               aria-expanded={responsiveDetailsOpen}
-              className="responsive-details-button"
               kind="neutral"
               label={responsiveDetailsOpen ? "Close details" : "Open details"}
               scale="m"
@@ -384,7 +387,7 @@ export function ArcgisViewer() {
             </calcite-button>
           ) : null}
           <calcite-switch
-            className="debug-switch"
+            className={styles.debugSwitch}
             hidden
             slot="header-actions-end"
             label="Debug"

@@ -4,27 +4,27 @@ import { rangesOverlap } from "./fileLayout";
 export type ByteCoverageState = "empty" | "partial" | "loaded";
 
 export class ParquetByteCoverage {
-  private ranges: ByteRange[];
+  private _ranges: ByteRange[];
 
   constructor(ranges: readonly ByteRange[] = []) {
-    this.ranges = [];
+    this._ranges = [];
     for (const range of ranges) {
       this.add(range);
     }
   }
 
   clone(): ParquetByteCoverage {
-    return new ParquetByteCoverage(this.ranges);
+    return new ParquetByteCoverage(this._ranges);
   }
 
   values(): readonly ByteRange[] {
-    return this.ranges;
+    return this._ranges;
   }
 
   add(range: ByteRange): { addedByteLength: number; newRanges: ByteRange[] } {
     const newRanges = this.uncovered(range);
-    let index = lowerBound(this.ranges, range.start);
-    if (index > 0 && this.ranges[index - 1].end >= range.start) {
+    let index = lowerBound(this._ranges, range.start);
+    if (index > 0 && this._ranges[index - 1].end >= range.start) {
       index -= 1;
     }
 
@@ -32,10 +32,10 @@ export class ParquetByteCoverage {
     let removedByteLength = 0;
     let count = 0;
     while (
-      index + count < this.ranges.length &&
-      this.ranges[index + count].start <= merged.end
+      index + count < this._ranges.length &&
+      this._ranges[index + count].start <= merged.end
     ) {
-      const existing = this.ranges[index + count];
+      const existing = this._ranges[index + count];
       merged = {
         start: Math.min(merged.start, existing.start),
         end: Math.max(merged.end, existing.end),
@@ -43,7 +43,7 @@ export class ParquetByteCoverage {
       removedByteLength += existing.end - existing.start;
       count += 1;
     }
-    this.ranges.splice(index, count, merged);
+    this._ranges.splice(index, count, merged);
 
     return {
       addedByteLength: merged.end - merged.start - removedByteLength,
@@ -55,7 +55,7 @@ export class ParquetByteCoverage {
     const uncovered: ByteRange[] = [];
     let start = range.start;
 
-    for (const covered of this.ranges) {
+    for (const covered of this._ranges) {
       if (covered.end <= start) {
         continue;
       }
@@ -78,7 +78,7 @@ export class ParquetByteCoverage {
   }
 
   coveredByteLength(range: ByteRange): number {
-    return this.ranges.reduce((total, covered) => {
+    return this._ranges.reduce((total, covered) => {
       if (!rangesOverlap(range, covered)) {
         return total;
       }
@@ -97,11 +97,11 @@ export class ParquetByteCoverage {
   }
 
   overlaps(range: ByteRange): boolean {
-    const index = lowerBound(this.ranges, range.start);
-    if (index > 0 && this.ranges[index - 1].end > range.start) {
+    const index = lowerBound(this._ranges, range.start);
+    if (index > 0 && this._ranges[index - 1].end > range.start) {
       return true;
     }
-    return index < this.ranges.length && rangesOverlap(range, this.ranges[index]);
+    return index < this._ranges.length && rangesOverlap(range, this._ranges[index]);
   }
 }
 

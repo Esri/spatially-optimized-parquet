@@ -64,86 +64,86 @@ const emptyFeatureCollection: GeoJSON.FeatureCollection = {
 };
 
 export class ParquetDatasetSource {
-  private readonly rangeReader: ParquetRangeReader;
-  private readonly onStatusChange: ParquetDatasetSourceOptions["onStatusChange"];
-  private metadata: DatasetParquetMetadata | null = null;
-  private leafReader: HyparquetLeafReader | null = null;
-  private activeQuery: AbortController | null = null;
-  private queryVersion = 0;
-  private initialized = false;
-  private styleReady = false;
-  private disposed = false;
+  private readonly _rangeReader: ParquetRangeReader;
+  private readonly _onStatusChange: ParquetDatasetSourceOptions["onStatusChange"];
+  private _metadata: DatasetParquetMetadata | null = null;
+  private _leafReader: HyparquetLeafReader | null = null;
+  private _activeQuery: AbortController | null = null;
+  private _queryVersion = 0;
+  private _initialized = false;
+  private _styleReady = false;
+  private _disposed = false;
 
   constructor(
-    private readonly map: MaplibreMap,
-    private readonly dataset: Dataset,
+    private readonly _map: MaplibreMap,
+    private readonly _dataset: Dataset,
     options: ParquetDatasetSourceOptions,
   ) {
-    this.rangeReader =
+    this._rangeReader =
       options.rangeReader ??
-      new HttpParquetRangeReader(dataset.url, dataset.byteSize);
-    this.onStatusChange = options.onStatusChange;
+      new HttpParquetRangeReader(_dataset.url, _dataset.byteSize);
+    this._onStatusChange = options.onStatusChange;
   }
 
   initialize(): void {
-    if (this.initialized || this.disposed) {
+    if (this._initialized || this._disposed) {
       return;
     }
-    this.initialized = true;
-    this.onStatusChange({ type: "idle" });
-    this.map.on("moveend", this.handleMoveEnd);
+    this._initialized = true;
+    this._onStatusChange({ type: "idle" });
+    this._map.on("moveend", this._handleMoveEnd);
 
-    if (this.map.isStyleLoaded()) {
-      this.styleReady = true;
+    if (this._map.isStyleLoaded()) {
+      this._styleReady = true;
     } else {
-      this.map.on("load", this.handleMapLoad);
+      this._map.on("load", this._handleMapLoad);
     }
   }
 
   refresh(): void {
-    if (!this.initialized || !this.styleReady || this.disposed) {
+    if (!this._initialized || !this._styleReady || this._disposed) {
       return;
     }
 
-    void this.queryCurrentView();
+    void this._queryCurrentView();
   }
 
   dispose(): void {
-    if (this.disposed) {
+    if (this._disposed) {
       return;
     }
-    this.disposed = true;
-    this.queryVersion += 1;
-    this.activeQuery?.abort();
-    this.activeQuery = null;
-    this.map.off("load", this.handleMapLoad);
-    this.map.off("moveend", this.handleMoveEnd);
-    this.removeMapLayers();
-    this.rangeReader.clear();
+    this._disposed = true;
+    this._queryVersion += 1;
+    this._activeQuery?.abort();
+    this._activeQuery = null;
+    this._map.off("load", this._handleMapLoad);
+    this._map.off("moveend", this._handleMoveEnd);
+    this._removeMapLayers();
+    this._rangeReader.clear();
   }
 
-  private readonly handleMapLoad = (): void => {
-    this.map.off("load", this.handleMapLoad);
-    this.styleReady = true;
+  private readonly _handleMapLoad = (): void => {
+    this._map.off("load", this._handleMapLoad);
+    this._styleReady = true;
     this.refresh();
   };
 
-  private readonly handleMoveEnd = (): void => {
+  private readonly _handleMoveEnd = (): void => {
     this.refresh();
   };
 
-  private async queryCurrentView(): Promise<void> {
-    const queryVersion = ++this.queryVersion;
-    this.activeQuery?.abort();
+  private async _queryCurrentView(): Promise<void> {
+    const queryVersion = ++this._queryVersion;
+    this._activeQuery?.abort();
     const controller = new AbortController();
-    this.activeQuery = controller;
-    this.onStatusChange({ type: "loading" });
+    this._activeQuery = controller;
+    this._onStatusChange({ type: "loading" });
 
     try {
-      const metadata = await this.getMetadata(controller.signal);
-      this.ensureMapLayers();
+      const metadata = await this._getMetadata(controller.signal);
+      this._ensureMapLayers();
       const queryExtents = getMapQueryExtents(
-        this.map,
+        this._map,
         metadata.display.fullExtent,
       );
       const xzRanges = mergeXZRanges(
@@ -157,22 +157,22 @@ export class ParquetDatasetSource {
       );
       const lodLevel = selectLODLevel(
         metadata.display.levels,
-        getMapSourceResolution(this.map),
+        getMapSourceResolution(this._map),
       );
-      const matchingRows = await this.queryMatchingRowIds(
+      const matchingRows = await this._queryMatchingRowIds(
         metadata,
         xzRanges,
         controller.signal,
       );
 
-      const featureCollection = await this.buildFeatureCollection(
+      const featureCollection = await this._buildFeatureCollection(
         metadata,
         lodLevel,
         matchingRows,
         queryExtents,
         controller.signal,
       );
-      this.publish(
+      this._publish(
         queryVersion,
         controller.signal,
         featureCollection,
@@ -182,38 +182,38 @@ export class ParquetDatasetSource {
       );
     } catch (error) {
       if (!isAbortError(error)) {
-        this.publishFailure(queryVersion, error);
+        this._publishFailure(queryVersion, error);
       }
     } finally {
-      if (queryVersion === this.queryVersion) {
-        this.activeQuery = null;
+      if (queryVersion === this._queryVersion) {
+        this._activeQuery = null;
       }
     }
   }
 
-  private async getMetadata(signal: AbortSignal): Promise<DatasetParquetMetadata> {
-    if (this.metadata) {
-      return this.metadata;
+  private async _getMetadata(signal: AbortSignal): Promise<DatasetParquetMetadata> {
+    if (this._metadata) {
+      return this._metadata;
     }
 
     const metadata = await loadDatasetParquetMetadata(
-      this.rangeReader.asAsyncBuffer(signal),
+      this._rangeReader.asAsyncBuffer(signal),
     );
     signal.throwIfAborted();
-    this.metadata = metadata;
-    this.leafReader = new HyparquetLeafReader(
-      this.rangeReader,
+    this._metadata = metadata;
+    this._leafReader = new HyparquetLeafReader(
+      this._rangeReader,
       metadata.file,
     );
     return metadata;
   }
 
-  private async queryMatchingRowIds(
+  private async _queryMatchingRowIds(
     metadata: DatasetParquetMetadata,
     xzRanges: XZRange[],
     signal: AbortSignal,
   ): Promise<MatchingRowStore> {
-    const leafReader = this.requireLeafReader();
+    const leafReader = this._requireLeafReader();
     const rowsByGroup = new Map<number, number[]>();
     let count = 0;
     const columns = leafReader.getColumnsMatchingXZ(
@@ -259,7 +259,7 @@ export class ParquetDatasetSource {
     return { count, featureLimitReached: false, rowsByGroup };
   }
 
-  private async buildFeatureCollection(
+  private async _buildFeatureCollection(
     metadata: DatasetParquetMetadata,
     lodLevel: LODLevel,
     matchingRows: MatchingRowStore,
@@ -267,7 +267,7 @@ export class ParquetDatasetSource {
     signal: AbortSignal,
   ): Promise<GeoJSON.FeatureCollection> {
     const features: GeoJSON.Feature[] = [];
-    const leafReader = this.requireLeafReader();
+    const leafReader = this._requireLeafReader();
 
     for (const [rowGroupIndex, rowIds] of matchingRows.rowsByGroup) {
       signal.throwIfAborted();
@@ -275,7 +275,7 @@ export class ParquetDatasetSource {
         rowGroupIndex,
         lodLevel.columnPath,
       );
-      const geometryByRow = await this.readSelectedRows<Uint8Array | null>(
+      const geometryByRow = await this._readSelectedRows<Uint8Array | null>(
         geometryColumn,
         rowIds,
         true,
@@ -312,13 +312,13 @@ export class ParquetDatasetSource {
     };
   }
 
-  private async readSelectedRows<T>(
+  private async _readSelectedRows<T>(
     column: PhysicalColumn,
     rowIds: number[],
     binary: boolean,
     signal: AbortSignal,
   ): Promise<Map<number, T>> {
-    const leafReader = this.requireLeafReader();
+    const leafReader = this._requireLeafReader();
     const pages = await leafReader.selectPagesByRowId(column, rowIds, signal);
     const leafPages = await leafReader.readLeafPages<T>(column, pages, {
       signal,
@@ -339,7 +339,7 @@ export class ParquetDatasetSource {
     return valuesByRow;
   }
 
-  private publish(
+  private _publish(
     queryVersion: number,
     signal: AbortSignal,
     featureCollection: GeoJSON.FeatureCollection,
@@ -347,12 +347,12 @@ export class ParquetDatasetSource {
     featureLimitReached: boolean,
     compression: string | null,
   ): void {
-    if (!this.isCurrentQuery(queryVersion, signal)) {
+    if (!this._isCurrentQuery(queryVersion, signal)) {
       return;
     }
 
-    this.getMapSource().setData(featureCollection);
-    this.onStatusChange({
+    this._getMapSource().setData(featureCollection);
+    this._onStatusChange({
       type: "ready",
       featureCount: featureCollection.features.length,
       lod,
@@ -361,41 +361,41 @@ export class ParquetDatasetSource {
     });
   }
 
-  private publishFailure(queryVersion: number, error: unknown): void {
-    if (queryVersion !== this.queryVersion) {
+  private _publishFailure(queryVersion: number, error: unknown): void {
+    if (queryVersion !== this._queryVersion) {
       return;
     }
 
-    this.onStatusChange({
+    this._onStatusChange({
       type: "failed",
       message: error instanceof Error ? error.message : String(error),
     });
   }
 
-  private isCurrentQuery(
+  private _isCurrentQuery(
     queryVersion: number,
     signal: AbortSignal,
   ): boolean {
-    return queryVersion === this.queryVersion && !signal.aborted;
+    return queryVersion === this._queryVersion && !signal.aborted;
   }
 
-  private ensureMapLayers(): void {
-    if (!this.map.getSource(parquetSourceId)) {
-      this.map.addSource(parquetSourceId, {
+  private _ensureMapLayers(): void {
+    if (!this._map.getSource(parquetSourceId)) {
+      this._map.addSource(parquetSourceId, {
         type: "geojson",
         data: emptyFeatureCollection,
       });
     }
-    const geometryType = this.metadata?.display.geometryType;
+    const geometryType = this._metadata?.display.geometryType;
     if (geometryType === "polyline") {
-      this.addPolylineLayers();
+      this._addPolylineLayers();
     } else {
-      this.addPolygonLayers();
+      this._addPolygonLayers();
     }
   }
 
-  private getMapSource(): GeoJSONSource {
-    const source = this.map.getSource(parquetSourceId);
+  private _getMapSource(): GeoJSONSource {
+    const source = this._map.getSource(parquetSourceId);
     if (!source || !isGeoJSONSource(source)) {
       throw new Error("MapLibre Parquet GeoJSON source is unavailable.");
     }
@@ -403,17 +403,17 @@ export class ParquetDatasetSource {
     return source;
   }
 
-  private requireLeafReader(): HyparquetLeafReader {
-    if (!this.leafReader) {
+  private _requireLeafReader(): HyparquetLeafReader {
+    if (!this._leafReader) {
       throw new Error("Dataset Parquet metadata has not been initialized.");
     }
 
-    return this.leafReader;
+    return this._leafReader;
   }
 
-  private addPolygonLayers(): void {
-    if (!this.map.getLayer(parquetFillLayerId)) {
-      this.map.addLayer({
+  private _addPolygonLayers(): void {
+    if (!this._map.getLayer(parquetFillLayerId)) {
+      this._map.addLayer({
         id: parquetFillLayerId,
         type: "fill",
         source: parquetSourceId,
@@ -423,8 +423,8 @@ export class ParquetDatasetSource {
         },
       });
     }
-    if (!this.map.getLayer(parquetOutlineLayerId)) {
-      this.map.addLayer({
+    if (!this._map.getLayer(parquetOutlineLayerId)) {
+      this._map.addLayer({
         id: parquetOutlineLayerId,
         type: "line",
         source: parquetSourceId,
@@ -437,9 +437,9 @@ export class ParquetDatasetSource {
     }
   }
 
-  private addPolylineLayers(): void {
-    if (!this.map.getLayer(parquetLineCasingLayerId)) {
-      this.map.addLayer({
+  private _addPolylineLayers(): void {
+    if (!this._map.getLayer(parquetLineCasingLayerId)) {
+      this._map.addLayer({
         id: parquetLineCasingLayerId,
         type: "line",
         source: parquetSourceId,
@@ -450,8 +450,8 @@ export class ParquetDatasetSource {
         },
       });
     }
-    if (!this.map.getLayer(parquetLineLayerId)) {
-      this.map.addLayer({
+    if (!this._map.getLayer(parquetLineLayerId)) {
+      this._map.addLayer({
         id: parquetLineLayerId,
         type: "line",
         source: parquetSourceId,
@@ -464,8 +464,8 @@ export class ParquetDatasetSource {
     }
   }
 
-  private removeMapLayers(): void {
-    if (!this.map.getStyle()) {
+  private _removeMapLayers(): void {
+    if (!this._map.getStyle()) {
       return;
     }
 
@@ -475,12 +475,12 @@ export class ParquetDatasetSource {
       parquetLineLayerId,
       parquetLineCasingLayerId,
     ]) {
-      if (this.map.getLayer(layerId)) {
-        this.map.removeLayer(layerId);
+      if (this._map.getLayer(layerId)) {
+        this._map.removeLayer(layerId);
       }
     }
-    if (this.map.getSource(parquetSourceId)) {
-      this.map.removeSource(parquetSourceId);
+    if (this._map.getSource(parquetSourceId)) {
+      this._map.removeSource(parquetSourceId);
     }
   }
 }

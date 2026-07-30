@@ -43,6 +43,7 @@ import {
   ProportionalByteBlockMap,
   type VisualByteBlock,
 } from "./ProportionalByteBlockMap";
+import styles from "./InspectorDialog.module.css";
 
 export function InspectorDialog({
   snapshot,
@@ -67,7 +68,7 @@ export function InspectorDialog({
 
   return (
     <calcite-dialog
-      className="calcite-mode-dark"
+      className={`${styles.dialog} calcite-mode-dark`}
       fullscreenDisabled
       modal
       open
@@ -78,7 +79,7 @@ export function InspectorDialog({
         onClose();
       }}
     >
-      <div className="file-structure-breadcrumb" slot="heading">
+      <div className={styles.fileStructureBreadcrumb} slot="heading">
         {selectedRowGroup ? (
           <>
             <button
@@ -93,8 +94,11 @@ export function InspectorDialog({
           <span>File</span>
         )}
       </div>
-      <div className="file-structure-header-switches" slot="header-actions-end">
-        <div className="file-structure-view-control">
+      <div
+        className={styles.fileStructureHeaderSwitches}
+        slot="header-actions-end"
+      >
+        <div className={styles.fileStructureViewControl}>
           <span>Filter</span>
           <calcite-segmented-control
             aria-label="Data to show"
@@ -122,7 +126,7 @@ export function InspectorDialog({
             </calcite-segmented-control-item>
           </calcite-segmented-control>
         </div>
-        <div className="file-structure-view-control">
+        <div className={styles.fileStructureViewControl}>
           <span>Sort</span>
           <calcite-segmented-control
             aria-label="Block order"
@@ -151,7 +155,7 @@ export function InspectorDialog({
           </calcite-segmented-control>
         </div>
       </div>
-      <div className="file-structure-dialog-content">
+      <div className={styles.fileStructureDialogContent}>
         {selectedRowGroup ? (
           <RowGroupDetail
             coverage={snapshot.coverage}
@@ -343,9 +347,10 @@ function FileOverview({
   const rowGroupBlocks: VisualByteBlock[] = visibleRowGroups.map((rowGroup) => ({
       id: `row-group-${rowGroup.index}`,
       byteRange: rowGroup.byteRange,
-      className: `row-group${
-        selectedRowGroupIndex === rowGroup.index ? " selected" : ""
-      }`,
+      className: [
+        styles.rowGroup,
+        selectedRowGroupIndex === rowGroup.index ? styles.selected : null,
+      ].filter(Boolean).join(" "),
       onClick: () => onSelectRowGroup(rowGroup.index),
       label: (
         <>
@@ -356,11 +361,11 @@ function FileOverview({
     }));
 
   return (
-    <section className="file-structure-overview">
+    <section className={styles.fileStructureOverview}>
       <FileDetails layout={layout} summary={detailSummary} />
-      <div className="file-structure-file-columns">
-        <div className="file-structure-column-chart">
-          <div className="file-structure-column-share-bar">
+      <div className={styles.fileStructureFileColumns}>
+        <div className={styles.fileStructureColumnChart}>
+          <div className={styles.fileStructureColumnShareBar}>
             {columnOverview.map((column) => {
             const filePercent =
               totalColumnByteLength === 0
@@ -387,7 +392,7 @@ function FileOverview({
           </div>
           <svg
             aria-hidden="true"
-            className="file-structure-column-leaders"
+            className={styles.fileStructureColumnLeaders}
             preserveAspectRatio="none"
             ref={leaderSvgRef}
             viewBox="0 0 100 20"
@@ -400,7 +405,7 @@ function FileOverview({
               />
             ))}
           </svg>
-          <div className="file-structure-column-leader-labels">
+          <div className={styles.fileStructureColumnLeaderLabels}>
             {largestColumns.map((column) => (
               <span
                 key={column.fieldName}
@@ -419,9 +424,9 @@ function FileOverview({
           </div>
         </div>
       </div>
-      <div className="file-structure-row-groups">
+      <div className={styles.fileStructureRowGroups}>
         <h4>Row Groups</h4>
-        <div className="file-structure-row-group-picker">
+        <div className={styles.fileStructureRowGroupPicker}>
           <ProportionalByteBlockMap
             ariaLabel="Parquet row groups"
             blocks={rowGroupBlocks}
@@ -429,20 +434,20 @@ function FileOverview({
           />
         </div>
       </div>
-      <div className="file-structure-footer">
+      <div className={styles.fileStructureFooter}>
         <h4>Footer</h4>
         <ProportionalByteBlockMap
           ariaLabel="Parquet footer"
           blocks={[{
             id: "footer",
             byteRange: footer,
-            className: "metadata footer",
+            className: `${styles.metadata} ${styles.footer}`,
             label: <span>{formatByteSize(rangeLength(footer))}</span>,
           }]}
           coverage={coverage}
         />
       </div>
-      <div className="file-structure-footer-guidance">
+      <div className={styles.fileStructureFooterGuidance}>
         <span>Click a row group to inspect its columns.</span>
         <DownloadStateLegend />
       </div>
@@ -477,13 +482,13 @@ function FileDetails({
     extractGeoParquetVersion(layout.keyValueMetadata) ?? "—";
 
   return (
-    <div className="file-structure-file-details">
-      <div className="file-structure-file-name">
+    <div className={styles.fileStructureFileDetails}>
+      <div className={styles.fileStructureFileName}>
         <dl>
           <FileDetail label="File name" title={layout.fileName} value={fileName} />
         </dl>
       </div>
-      <div className="file-structure-file-detail-fields">
+      <div className={styles.fileStructureFileDetailFields}>
         <dl>
           <FileDetail label="Rows" value={formatCompactCount(summary.rowCount)} />
           <FileDetail label="Columns" value={summary.columnCount.toLocaleString()} />
@@ -497,13 +502,16 @@ function FileDetails({
             value={
               <>
                 {compressionName}
-                <small className="dataset-compression-ratio">
+                <small className={styles.compressionRatio}>
                   {compressionRatio.replace("×", "x")}
                 </small>
               </>
             }
           />
-          <div className="file-structure-detail-divider" aria-hidden="true" />
+          <div
+            className={styles.fileStructureDetailDivider}
+            aria-hidden="true"
+          />
           <FileDetail label="SOP" value={geodisplayVersion} />
           <FileDetail label="GeoParquet" value={geoParquetVersion} />
         </dl>
@@ -511,7 +519,7 @@ function FileDetails({
       <calcite-button
         ref={setMetadataButton}
         appearance="outline"
-        className="file-structure-keys-button"
+        className={styles.fileStructureKeysButton}
         iconStart="magnifying-glass"
         kind="neutral"
         label="Metadata"
@@ -524,7 +532,7 @@ function FileDetails({
       </calcite-button>
       {metadataButton ? (
         <calcite-popover
-          className="file-structure-metadata-popover"
+          className={styles.fileStructureMetadataPopover}
           label="Parquet key-value metadata"
           open={metadataOpen}
           overlayPositioning="fixed"
@@ -588,7 +596,7 @@ function ColumnOverviewSegment({
   return (
     <>
       <span
-        className={`file-structure-column-share palette-${paletteIndex}`}
+        className={`${styles.fileStructureColumnShare} ${styles[`palette${paletteIndex}`]}`}
         id={targetId}
         onMouseEnter={() => setTooltipOpen(true)}
         onMouseLeave={() => setTooltipOpen(false)}
@@ -598,7 +606,7 @@ function ColumnOverviewSegment({
         } as CSSProperties}
       />
       <calcite-tooltip
-        className="file-structure-tooltip"
+        className={styles.fileStructureTooltip}
         open={tooltipOpen}
         overlayPositioning="fixed"
         referenceElement={targetId}
@@ -648,11 +656,11 @@ function RowGroupDetail({
   );
 
   return (
-    <section className="file-structure-row-group">
-      <div className="file-structure-selected-column">
-        <div className="file-structure-column-details-heading">
+    <section className={styles.fileStructureRowGroup}>
+      <div className={styles.fileStructureSelectedColumn}>
+        <div className={styles.fileStructureColumnDetailsHeading}>
           <h4>Column Details</h4>
-          <span className={detailColumn ? "" : "empty"}>
+          <span className={detailColumn ? undefined : styles.empty}>
             {detailColumn?.fieldName ?? "No column selected"}
           </span>
         </div>
@@ -668,23 +676,24 @@ function RowGroupDetail({
             )}
           />
         ) : (
-          <div className="file-structure-empty-detail">
+          <div className={styles.fileStructureEmptyDetail}>
             Select a column for more details.
           </div>
         )}
       </div>
-      <div className="file-structure-columns">
+      <div className={styles.fileStructureColumns}>
         <h4>Columns</h4>
-        <div className="file-structure-column-picker">
+        <div className={styles.fileStructureColumnPicker}>
           <ProportionalByteBlockMap
             ariaLabel={`Row group ${rowGroup.index} columns`}
             coverage={coverage}
             blocks={visibleColumns.map((column) => ({
               id: column.id,
               byteRange: column.byteRange,
-              className: `column${
-                expandedColumnIds.has(column.id) ? " selected" : ""
-              }`,
+              className: [
+                styles.column,
+                expandedColumnIds.has(column.id) ? styles.selected : null,
+              ].filter(Boolean).join(" "),
               onClick: () => onToggleColumn(column),
               label: (
                 <>
@@ -698,7 +707,7 @@ function RowGroupDetail({
           />
         </div>
       </div>
-      <div className="file-structure-footer-guidance">
+      <div className={styles.fileStructureFooterGuidance}>
         <span>Click a column to inspect individual pages.</span>
         <DownloadStateLegend />
       </div>
@@ -712,9 +721,12 @@ function formatColumnLeafName(fieldName: string): string {
 
 function DownloadStateLegend() {
   return (
-    <div className="file-structure-download-legend" aria-label="Download state">
+    <div
+      className={styles.fileStructureDownloadLegend}
+      aria-label="Download state"
+    >
       <span>
-        <i className="loaded" aria-hidden="true" />
+        <i className={styles.loaded} aria-hidden="true" />
         Loaded
       </span>
       <span>
@@ -756,7 +768,7 @@ function ColumnDetail({
         <span>{label}:</span>
         <strong>{value}</strong>
         <calcite-tooltip
-          className="file-structure-tooltip"
+          className={styles.fileStructureTooltip}
           overlayPositioning="fixed"
           referenceElement={tooltipTargetId}
         >
@@ -786,10 +798,10 @@ function ColumnDetail({
     }, []);
 
     return (
-      <div className="file-structure-empty-detail">
+      <div className={styles.fileStructureEmptyDetail}>
         {visible ? (
           <>
-            <span className="file-structure-spinner" aria-hidden="true" />
+            <span className={styles.fileStructureSpinner} aria-hidden="true" />
             <span>Loading column details…</span>
           </>
         ) : null}
@@ -797,11 +809,15 @@ function ColumnDetail({
     );
   }
   if (detail.type === "failed") {
-    return <div className="file-structure-status error">{detail.message}</div>;
+    return (
+      <div className={`${styles.fileStructureStatus} ${styles.error}`}>
+        {detail.message}
+      </div>
+    );
   }
   if (detail.type === "unavailable") {
     return (
-      <div className="file-structure-status">
+      <div className={styles.fileStructureStatus}>
         Offset index unavailable. Page boundaries cannot be expanded.
       </div>
     );
@@ -811,7 +827,7 @@ function ColumnDetail({
       id: `${column.id}-page-${page.pageIndex}`,
       elementId: `${column.id}-page-${page.pageIndex}`,
       byteRange: page.byteRange,
-      className: "page",
+      className: styles.page,
       label: (
         <>
           <strong>Page {page.pageIndex}</strong>
@@ -824,7 +840,7 @@ function ColumnDetail({
     ...detail.gaps.map((gap, index) => ({
       id: `${column.id}-gap-${index}`,
       byteRange: gap.byteRange,
-      className: "gap",
+      className: styles.gap,
       label: (
         <>
           <strong>Dict</strong>
@@ -835,21 +851,21 @@ function ColumnDetail({
   ].sort((first, second) => first.byteRange.start - second.byteRange.start);
 
   return (
-    <div className="file-structure-column-detail">
-      <div className="file-structure-column-visual-area">
-        <span className="file-structure-column-size">
+    <div className={styles.fileStructureColumnDetail}>
+      <div className={styles.fileStructureColumnVisualArea}>
+        <span className={styles.fileStructureColumnSize}>
           <span>{formatByteSize(rangeLength(column.byteRange))}</span>
         </span>
-        <div className="file-structure-column-visuals">
+        <div className={styles.fileStructureColumnVisuals}>
           {pageIndexes.length > 0 ? (
-            <div className="file-structure-metadata-group">
-              <div className="file-structure-index-blocks">
+            <div className={styles.fileStructureMetadataGroup}>
+              <div className={styles.fileStructureIndexBlocks}>
                 <ProportionalByteBlockMap
                   ariaLabel={`${column.fieldName} index byte ranges`}
                   blocks={pageIndexes.map((index) => ({
                     id: index.id,
                     byteRange: index.byteRange,
-                    className: "metadata",
+                    className: styles.metadata,
                     label: (
                       <>
                         <strong>{index.kind === "column" ? "Column" : "Offset"}</strong>
@@ -863,7 +879,7 @@ function ColumnDetail({
               <span>Page Index</span>
             </div>
           ) : null}
-          <div className="file-structure-page-scroll">
+          <div className={styles.fileStructurePageScroll}>
             <ProportionalByteBlockMap
               ariaLabel={`${column.fieldName} pages`}
               blocks={blocks}
@@ -871,7 +887,7 @@ function ColumnDetail({
             />
             {detail.pages.map((page) => (
               <calcite-tooltip
-                className="file-structure-tooltip"
+                className={styles.fileStructureTooltip}
                 key={`${column.id}-page-${page.pageIndex}-tooltip`}
                 overlayPositioning="fixed"
                 referenceElement={`${column.id}-page-${page.pageIndex}`}
@@ -892,7 +908,7 @@ function ColumnDetail({
           </div>
         </div>
       </div>
-      <div className="file-structure-column-facts">
+      <div className={styles.fileStructureColumnFacts}>
         <ColumnFact label="Type" value={column.logicalType ?? column.physicalType} />
         <ColumnFact label="Physical" value={column.physicalType} />
         <ColumnFact

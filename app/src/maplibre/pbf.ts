@@ -175,21 +175,21 @@ function signedRingArea(ring: Ring): number {
 }
 
 class ProtobufReader {
-  private offset = 0;
+  private _offset = 0;
 
-  constructor(private readonly bytes: Uint8Array) {}
+  constructor(private readonly _bytes: Uint8Array) {}
 
   get done(): boolean {
-    return this.offset === this.bytes.length;
+    return this._offset === this._bytes.length;
   }
 
   readUnsignedVarint(): bigint {
     let value = 0n;
     let shift = 0n;
 
-    while (this.offset < this.bytes.length && shift <= 63n) {
-      const byte = this.bytes[this.offset];
-      this.offset += 1;
+    while (this._offset < this._bytes.length && shift <= 63n) {
+      const byte = this._bytes[this._offset];
+      this._offset += 1;
       value |= BigInt(byte & 0x7f) << shift;
       if ((byte & 0x80) === 0) {
         return value;
@@ -201,51 +201,51 @@ class ProtobufReader {
   }
 
   readPackedUnsigned(): number[] {
-    return this.readPacked((value) => Number(value));
+    return this._readPacked((value) => Number(value));
   }
 
   readPackedSigned(): number[] {
-    return this.readPacked(decodeZigzag);
+    return this._readPacked(decodeZigzag);
   }
 
   skipField(wireType: number): void {
     if (wireType === 0) {
       this.readUnsignedVarint();
     } else if (wireType === 1) {
-      this.advance(8);
+      this._advance(8);
     } else if (wireType === 2) {
-      this.advance(Number(this.readUnsignedVarint()));
+      this._advance(Number(this.readUnsignedVarint()));
     } else if (wireType === 5) {
-      this.advance(4);
+      this._advance(4);
     } else {
       throw new Error(`PBF geometry uses unsupported wire type ${wireType}.`);
     }
   }
 
-  private readPacked(convert: (value: bigint) => number): number[] {
+  private _readPacked(convert: (value: bigint) => number): number[] {
     const byteLength = Number(this.readUnsignedVarint());
-    const end = this.offset + byteLength;
-    if (!Number.isSafeInteger(byteLength) || end > this.bytes.length) {
+    const end = this._offset + byteLength;
+    if (!Number.isSafeInteger(byteLength) || end > this._bytes.length) {
       throw new Error("PBF geometry contains a truncated packed field.");
     }
 
     const values: number[] = [];
-    while (this.offset < end) {
+    while (this._offset < end) {
       values.push(convert(this.readUnsignedVarint()));
     }
-    if (this.offset !== end) {
+    if (this._offset !== end) {
       throw new Error("PBF geometry packed field ended at an invalid offset.");
     }
 
     return values;
   }
 
-  private advance(byteLength: number): void {
-    const nextOffset = this.offset + byteLength;
-    if (!Number.isSafeInteger(byteLength) || nextOffset > this.bytes.length) {
+  private _advance(byteLength: number): void {
+    const nextOffset = this._offset + byteLength;
+    if (!Number.isSafeInteger(byteLength) || nextOffset > this._bytes.length) {
       throw new Error("PBF geometry contains a truncated field.");
     }
-    this.offset = nextOffset;
+    this._offset = nextOffset;
   }
 }
 

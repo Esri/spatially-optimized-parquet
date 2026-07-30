@@ -10,10 +10,10 @@ export interface ParquetRangeReader {
 export class HttpParquetRangeReader implements ParquetRangeReader {
   readonly byteLength: number;
 
-  private readonly completedRangeCache = new Map<string, ArrayBuffer>();
+  private readonly _completedRangeCache = new Map<string, ArrayBuffer>();
 
   constructor(
-    private readonly url: string,
+    private readonly _url: string,
     byteLength: number,
   ) {
     this.byteLength = byteLength;
@@ -26,12 +26,12 @@ export class HttpParquetRangeReader implements ParquetRangeReader {
   ): Promise<ArrayBuffer> {
     validateRange(start, end, this.byteLength);
     const cacheKey = `${start}:${end}`;
-    const cached = this.completedRangeCache.get(cacheKey);
+    const cached = this._completedRangeCache.get(cacheKey);
     if (cached) {
       return cached;
     }
 
-    const response = await fetch(this.url, {
+    const response = await fetch(this._url, {
       headers: {
         Range: `bytes=${start}-${end - 1}`,
       },
@@ -50,7 +50,7 @@ export class HttpParquetRangeReader implements ParquetRangeReader {
       );
     }
 
-    this.completedRangeCache.set(cacheKey, buffer);
+    this._completedRangeCache.set(cacheKey, buffer);
     return buffer;
   }
 
@@ -62,7 +62,7 @@ export class HttpParquetRangeReader implements ParquetRangeReader {
   }
 
   clear(): void {
-    this.completedRangeCache.clear();
+    this._completedRangeCache.clear();
   }
 }
 

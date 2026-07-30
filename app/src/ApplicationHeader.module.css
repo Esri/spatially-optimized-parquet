@@ -1,0 +1,19 @@
+.applicationSdkLabel {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  gap: 1rem;
+  color: var(--calcite-color-text-2);
+  font-size: var(--calcite-font-size--1);
+  font-weight: var(--calcite-font-weight-medium);
+}
+
+.applicationLogo {
+  --calcite-font-size-relative-2xl: var(--calcite-font-size-1);
+}
+
+@media (max-width: 800px) {
+  .viewerSwitchMenuItem {
+    display: none;
+  }
+}

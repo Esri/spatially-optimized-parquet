@@ -4,6 +4,7 @@ import type {
   DatasetMapProfile,
   DatasetMapSlotProps,
 } from "./profiles";
+import styles from "./FranceProfile.module.css";
 
 const minimumConstructionYear = 1800;
 const maximumConstructionYear = 2024;
@@ -104,7 +105,7 @@ export const FranceProfile = {
         <arcgis-legend slot="bottom-left" />
         {headerActionsElement
           ? createPortal(
-              <div className="france-map-header-controls">
+              <div className={styles.franceMapHeaderControls}>
                 <calcite-label layout="inline">
                   Year
                   <strong aria-live="polite">{constructionYear}</strong>

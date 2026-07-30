@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 
 import type { ParquetByteCoverage } from "../../../parquet/ParquetByteCoverage";
 import type { ByteRange } from "../../../parquet/fileLayout";
+import styles from "./InspectorDialog.module.css";
 
 export interface VisualByteBlock {
   id: string;
@@ -22,7 +23,11 @@ export function ProportionalByteBlockMap({
   ariaLabel: string;
 }) {
   return (
-    <div className="file-structure-block-map" role="group" aria-label={ariaLabel}>
+    <div
+      className={styles.fileStructureBlockMap}
+      role="group"
+      aria-label={ariaLabel}
+    >
       {blocks.map((block) => {
         const byteLength = block.byteRange.end - block.byteRange.start;
         const fraction = coverage.coverageFraction(block.byteRange);
@@ -30,9 +35,11 @@ export function ProportionalByteBlockMap({
           "--file-block-weight": Math.max(byteLength, 1),
           "--file-block-loaded": `${fraction * 100}%`,
         } as CSSProperties;
-        const className = `file-structure-block ${coverage.state(block.byteRange)}${
-          block.className ? ` ${block.className}` : ""
-        }`;
+        const className = [
+          styles.fileStructureBlock,
+          styles[coverage.state(block.byteRange)],
+          block.className,
+        ].filter(Boolean).join(" ");
 
         return block.onClick ? (
           <button

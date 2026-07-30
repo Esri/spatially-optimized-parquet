@@ -59,26 +59,26 @@ export interface ProjectionTopologyInput {
 }
 
 export class ParquetDownloadProjection {
-  private displayLayout: DownloadDisplayLayout | null = null;
-  private physicalIndex = new ByteRangeIndex<DownloadPhysicalSegment>([]);
-  private readonly blockById = new Map<string, DownloadBlockLayout>();
-  private readonly blockOrderById = new Map<string, number>();
-  private readonly trackById = new Map<string, DownloadTrackLayout>();
-  private readonly blockState = new Map<string, MutableBlockState>();
-  private readonly trackState = new Map<string, MutableTrackState>();
-  private readonly segmentCoveredByteLength = new Map<string, number>();
-  private readonly requestImpacts = new Map<string, Map<string, number>>();
+  private _displayLayout: DownloadDisplayLayout | null = null;
+  private _physicalIndex = new ByteRangeIndex<DownloadPhysicalSegment>([]);
+  private readonly _blockById = new Map<string, DownloadBlockLayout>();
+  private readonly _blockOrderById = new Map<string, number>();
+  private readonly _trackById = new Map<string, DownloadTrackLayout>();
+  private readonly _blockState = new Map<string, MutableBlockState>();
+  private readonly _trackState = new Map<string, MutableTrackState>();
+  private readonly _segmentCoveredByteLength = new Map<string, number>();
+  private readonly _requestImpacts = new Map<string, Map<string, number>>();
 
   reset(): void {
-    this.displayLayout = null;
-    this.requestImpacts.clear();
-    this.clearDisplayState();
+    this._displayLayout = null;
+    this._requestImpacts.clear();
+    this._clearDisplayState();
   }
 
   initialize(displayLayout: DownloadDisplayLayout): ProjectionChange {
-    this.displayLayout = displayLayout;
-    this.clearDisplayState();
-    this.physicalIndex = new ByteRangeIndex(
+    this._displayLayout = displayLayout;
+    this._clearDisplayState();
+    this._physicalIndex = new ByteRangeIndex(
       displayLayout.segments.map((segment) => ({
         range: segment.physicalRange,
         value: segment,
@@ -87,8 +87,8 @@ export class ParquetDownloadProjection {
 
     const trackIds: string[] = [];
     for (const track of displayLayout.tracks) {
-      this.trackById.set(track.id, track);
-      this.trackState.set(track.id, {
+      this._trackById.set(track.id, track);
+      this._trackState.set(track.id, {
         downloadedByteLength: 0,
         cachedSubpartCount: 0,
         visibleBlockCount: 0,
@@ -96,15 +96,15 @@ export class ParquetDownloadProjection {
       });
       trackIds.push(track.id);
       for (const [blockIndex, block] of track.blocks.entries()) {
-        this.blockById.set(block.id, block);
-        this.blockOrderById.set(block.id, blockIndex);
-        this.blockState.set(block.id, {
+        this._blockById.set(block.id, block);
+        this._blockOrderById.set(block.id, blockIndex);
+        this._blockState.set(block.id, {
           cachedMask: 0,
           loadingCount: Array<number>(displaySubpartCount).fill(0),
         });
       }
       for (const segment of track.segments) {
-        this.segmentCoveredByteLength.set(segment.segmentId, 0);
+        this._segmentCoveredByteLength.set(segment.segmentId, 0);
       }
     }
     return { blockIds: [], trackIds };
@@ -112,8 +112,8 @@ export class ParquetDownloadProjection {
 
   applyCachedRange(range: ByteRange): ProjectionChange {
     const change = createProjectionChange();
-    for (const [blockId, mask] of this.resolveRangeImpact(range)) {
-      this.updateBlockState(blockId, change, (state) => {
+    for (const [blockId, mask] of this._resolveRangeImpact(range)) {
+      this._updateBlockState(blockId, change, (state) => {
         state.cachedMask |= mask;
       });
     }
@@ -125,8 +125,8 @@ export class ParquetDownloadProjection {
     range: ByteRange,
   ): ProjectionChange {
     const change = createProjectionChange();
-    for (const [blockId, mask] of this.getRequestImpact(requestKey, range)) {
-      this.updateBlockState(blockId, change, (state) => {
+    for (const [blockId, mask] of this._getRequestImpact(requestKey, range)) {
+      this._updateBlockState(blockId, change, (state) => {
         state.cachedMask |= mask;
       });
     }
@@ -139,8 +139,8 @@ export class ParquetDownloadProjection {
     direction: 1 | -1,
   ): ProjectionChange {
     const change = createProjectionChange();
-    for (const [blockId, mask] of this.getRequestImpact(requestKey, range)) {
-      this.updateBlockState(blockId, change, (state) => {
+    for (const [blockId, mask] of this._getRequestImpact(requestKey, range)) {
+      this._updateBlockState(blockId, change, (state) => {
         for (let index = 0; index < displaySubpartCount; index += 1) {
           if ((mask & (1 << index)) !== 0) {
             state.loadingCount[index] = Math.max(
@@ -157,17 +157,17 @@ export class ParquetDownloadProjection {
   addCoveredRanges(ranges: readonly ByteRange[]): ProjectionChange {
     const change = createProjectionChange();
     for (const range of ranges) {
-      for (const { range: segmentRange, value: segment } of this.physicalIndex.query(range)) {
-        const trackState = this.trackState.get(segment.trackId);
+      for (const { range: segmentRange, value: segment } of this._physicalIndex.query(range)) {
+        const trackState = this._trackState.get(segment.trackId);
         if (!trackState) {
           continue;
         }
         const overlapByteLength = Math.min(range.end, segmentRange.end) -
           Math.max(range.start, segmentRange.start);
         trackState.downloadedByteLength += overlapByteLength;
-        this.segmentCoveredByteLength.set(
+        this._segmentCoveredByteLength.set(
           segment.segmentId,
-          (this.segmentCoveredByteLength.get(segment.segmentId) ?? 0) +
+          (this._segmentCoveredByteLength.get(segment.segmentId) ?? 0) +
             overlapByteLength,
         );
         change.trackIds.add(segment.trackId);
@@ -177,14 +177,14 @@ export class ParquetDownloadProjection {
   }
 
   requestImpactBlockIds(requestKey: string | null): readonly string[] {
-    return requestKey ? [...this.getRequestImpact(requestKey).keys()] : [];
+    return requestKey ? [...this._getRequestImpact(requestKey).keys()] : [];
   }
 
   createBlockSnapshot(
     blockId: string,
     activeRequestKey: string | null,
   ): DownloadBlockSnapshot {
-    const state = this.blockState.get(blockId);
+    const state = this._blockState.get(blockId);
     if (!state) {
       return emptyBlockSnapshot;
     }
@@ -196,14 +196,14 @@ export class ParquetDownloadProjection {
       cachedMask: state.cachedMask,
       loadingMask,
       activeMask: activeRequestKey
-        ? this.getRequestImpact(activeRequestKey).get(blockId) ?? 0
+        ? this._getRequestImpact(activeRequestKey).get(blockId) ?? 0
         : 0,
     };
   }
 
   createTrackSnapshot(trackId: string): DownloadTrackSnapshot {
-    const track = this.trackById.get(trackId);
-    const state = this.trackState.get(trackId);
+    const track = this._trackById.get(trackId);
+    const state = this._trackState.get(trackId);
     if (!track || !state) {
       return emptyTrackSnapshot;
     }
@@ -220,13 +220,13 @@ export class ParquetDownloadProjection {
     downloadedByteLength: number,
     completedRequestCount: number,
   ): DownloadSummarySnapshot {
-    const tracks = this.displayLayout?.tracks ?? [];
+    const tracks = this._displayLayout?.tracks ?? [];
     const columns = tracks.filter((track) => track.kind === "column");
     return {
       downloadedByteLength,
       completedRequestCount,
       cachedSubpartCount: tracks.reduce(
-        (total, track) => total + (this.trackState.get(track.id)?.cachedSubpartCount ?? 0),
+        (total, track) => total + (this._trackState.get(track.id)?.cachedSubpartCount ?? 0),
         0,
       ),
       subpartCount: tracks.reduce(
@@ -234,7 +234,7 @@ export class ParquetDownloadProjection {
         0,
       ),
       visibleColumnCount: columns.filter(
-        (track) => (this.trackState.get(track.id)?.visibleBlockCount ?? 0) > 0,
+        (track) => (this._trackState.get(track.id)?.visibleBlockCount ?? 0) > 0,
       ).length,
       columnCount: columns.length,
     };
@@ -247,14 +247,14 @@ export class ParquetDownloadProjection {
   }: ProjectionTopologyInput): DownloadTopologySnapshot {
     return {
       layout,
-      tracks: this.displayLayout?.tracks ?? [],
+      tracks: this._displayLayout?.tracks ?? [],
       rowGroupBounds,
       error,
     };
   }
 
   rowGroupCoverage(trackId: string): readonly DownloadRowGroupCoverage[] {
-    const track = this.trackById.get(trackId);
+    const track = this._trackById.get(trackId);
     if (!track) {
       return [];
     }
@@ -271,7 +271,7 @@ export class ParquetDownloadProjection {
         continue;
       }
       const byteLength = segment.physicalRange.end - segment.physicalRange.start;
-      const coveredByteLength = this.segmentCoveredByteLength.get(segment.segmentId) ?? 0;
+      const coveredByteLength = this._segmentCoveredByteLength.get(segment.segmentId) ?? 0;
       const rowGroupCoverage = coverageByRowGroup.get(segment.rowGroupIndex) ?? {
         rowGroupIndex: segment.rowGroupIndex,
         downloadedByteLength: 0,
@@ -330,7 +330,7 @@ export class ParquetDownloadProjection {
     rowGroupIndex: number,
     overlaps: (range: ByteRange) => boolean,
   ): ReadonlyMap<string, number> {
-    const track = this.trackById.get(trackId);
+    const track = this._trackById.get(trackId);
     if (!track) {
       return new Map();
     }
@@ -361,24 +361,24 @@ export class ParquetDownloadProjection {
     return blockMasks;
   }
 
-  private clearDisplayState(): void {
-    this.physicalIndex = new ByteRangeIndex([]);
-    this.blockById.clear();
-    this.blockOrderById.clear();
-    this.trackById.clear();
-    this.blockState.clear();
-    this.trackState.clear();
-    this.segmentCoveredByteLength.clear();
+  private _clearDisplayState(): void {
+    this._physicalIndex = new ByteRangeIndex([]);
+    this._blockById.clear();
+    this._blockOrderById.clear();
+    this._trackById.clear();
+    this._blockState.clear();
+    this._trackState.clear();
+    this._segmentCoveredByteLength.clear();
   }
 
-  private updateBlockState(
+  private _updateBlockState(
     blockId: string,
     change: MutableProjectionChange,
     update: (state: MutableBlockState) => void,
   ): void {
-    const state = this.blockState.get(blockId);
+    const state = this._blockState.get(blockId);
     const trackId = findTrackId(blockId);
-    const trackState = trackId ? this.trackState.get(trackId) : undefined;
+    const trackState = trackId ? this._trackState.get(trackId) : undefined;
     if (!state || !trackId || !trackState) {
       return;
     }
@@ -394,11 +394,11 @@ export class ParquetDownloadProjection {
           trackState.visibleBlockIds.splice(index, 1);
         }
       } else {
-        const blockOrder = this.blockOrderById.get(blockId) ?? 0;
+        const blockOrder = this._blockOrderById.get(blockId) ?? 0;
         const index = lowerBoundBlockId(
           trackState.visibleBlockIds,
           blockOrder,
-          this.blockOrderById,
+          this._blockOrderById,
         );
         trackState.visibleBlockIds.splice(index, 0, blockId);
       }
@@ -408,25 +408,25 @@ export class ParquetDownloadProjection {
     change.trackIds.add(trackId);
   }
 
-  private getRequestImpact(
+  private _getRequestImpact(
     requestKey: string,
     range?: ByteRange,
   ): Map<string, number> {
-    const existing = this.requestImpacts.get(requestKey);
+    const existing = this._requestImpacts.get(requestKey);
     if (existing) {
       return existing;
     }
     if (!range) {
       return new Map();
     }
-    const impact = this.resolveRangeImpact(range);
-    this.requestImpacts.set(requestKey, impact);
+    const impact = this._resolveRangeImpact(range);
+    this._requestImpacts.set(requestKey, impact);
     return impact;
   }
 
-  private resolveRangeImpact(range: ByteRange): Map<string, number> {
+  private _resolveRangeImpact(range: ByteRange): Map<string, number> {
     const impacts = new Map<string, number>();
-    for (const { value: segment } of this.physicalIndex.query(range)) {
+    for (const { value: segment } of this._physicalIndex.query(range)) {
       const physicalRange = {
         start: Math.max(range.start, segment.physicalRange.start),
         end: Math.min(range.end, segment.physicalRange.end),
@@ -435,7 +435,7 @@ export class ParquetDownloadProjection {
         start: segment.logicalRange.start + physicalRange.start - segment.physicalRange.start,
         end: segment.logicalRange.start + physicalRange.end - segment.physicalRange.start,
       };
-      const track = this.trackById.get(segment.trackId);
+      const track = this._trackById.get(segment.trackId);
       if (!track) {
         continue;
       }

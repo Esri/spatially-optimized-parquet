@@ -1,0 +1,16 @@
+.franceMapHeaderControls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 100%;
+}
+
+.franceMapHeaderControls calcite-label {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  --calcite-label-margin-bottom: 0;
+}
+
+.franceMapHeaderControls calcite-slider {
+  width: 12rem;
+}

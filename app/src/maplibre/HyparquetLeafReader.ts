@@ -41,14 +41,14 @@ export interface LeafPage<T> {
 }
 
 export class HyparquetLeafReader {
-  private readonly rowGroupStarts: number[];
+  private readonly _rowGroupStarts: number[];
 
   constructor(
-    private readonly reader: ParquetRangeReader,
-    private readonly metadata: FileMetaData,
+    private readonly _reader: ParquetRangeReader,
+    private readonly _metadata: FileMetaData,
   ) {
     let rowStart = 0;
-    this.rowGroupStarts = metadata.row_groups.map((rowGroup) => {
+    this._rowGroupStarts = _metadata.row_groups.map((rowGroup) => {
       const currentStart = rowStart;
       rowStart += Number(rowGroup.num_rows);
       return currentStart;
@@ -59,7 +59,7 @@ export class HyparquetLeafReader {
     path: readonly string[],
     ranges: XZRange[],
   ): PhysicalColumn[] {
-    return this.metadata.row_groups.flatMap((_, rowGroupIndex) => {
+    return this._metadata.row_groups.flatMap((_, rowGroupIndex) => {
       const column = this.getPhysicalColumn(rowGroupIndex, path);
       const statistics = column.metadata.statistics;
       const minimum = statistics?.min_value ?? statistics?.min;
@@ -77,7 +77,7 @@ export class HyparquetLeafReader {
     rowGroupIndex: number,
     path: readonly string[],
   ): PhysicalColumn {
-    const rowGroup = this.metadata.row_groups[rowGroupIndex];
+    const rowGroup = this._metadata.row_groups[rowGroupIndex];
     if (!rowGroup) {
       throw new Error(`Parquet row group ${rowGroupIndex} was not found.`);
     }
@@ -96,11 +96,11 @@ export class HyparquetLeafReader {
     return {
       path: [...path],
       rowGroupIndex,
-      rowGroupStart: this.rowGroupStarts[rowGroupIndex],
+      rowGroupStart: this._rowGroupStarts[rowGroupIndex],
       rowGroupRows: Number(rowGroup.num_rows),
       chunk,
       metadata: chunk.meta_data,
-      schemaPath: getSchemaPath(this.metadata.schema, [...path]),
+      schemaPath: getSchemaPath(this._metadata.schema, [...path]),
     };
   }
 
@@ -109,7 +109,7 @@ export class HyparquetLeafReader {
     ranges: XZRange[],
     signal?: AbortSignal,
   ): Promise<IndexedPage[]> {
-    const pages = await this.readPageIndex(column, signal);
+    const pages = await this._readPageIndex(column, signal);
     return pages.filter(
       ({ minimum, maximum }) =>
         minimum === undefined ||
@@ -127,7 +127,7 @@ export class HyparquetLeafReader {
       return [];
     }
 
-    const pages = await this.readPageIndex(column, signal);
+    const pages = await this._readPageIndex(column, signal);
     const selectedPages: IndexedPage[] = [];
     let rowIndex = 0;
 
@@ -157,12 +157,12 @@ export class HyparquetLeafReader {
       binary?: boolean;
     } = {},
   ): Promise<LeafPage<T>[]> {
-    const dictionary = await this.readDictionary(column, signal);
+    const dictionary = await this._readDictionary(column, signal);
     const output: LeafPage<T>[] = [];
 
     for (const page of pages) {
       signal?.throwIfAborted();
-      const pageBuffer = await this.reader.read(
+      const pageBuffer = await this._reader.read(
         page.byteStart,
         page.byteEnd,
         signal,
@@ -199,7 +199,7 @@ export class HyparquetLeafReader {
     return output;
   }
 
-  private async readPageIndex(
+  private async _readPageIndex(
     column: PhysicalColumn,
     signal?: AbortSignal,
   ): Promise<IndexedPage[]> {
@@ -221,12 +221,12 @@ export class HyparquetLeafReader {
     }
 
     const [columnIndexBuffer, offsetIndexBuffer] = await Promise.all([
-      this.reader.read(
+      this._reader.read(
         Number(columnIndexOffset),
         Number(columnIndexOffset) + columnIndexLength,
         signal,
       ),
-      this.reader.read(
+      this._reader.read(
         Number(offsetIndexOffset),
         Number(offsetIndexOffset) + offsetIndexLength,
         signal,
@@ -261,7 +261,7 @@ export class HyparquetLeafReader {
     });
   }
 
-  private async readDictionary(
+  private async _readDictionary(
     column: PhysicalColumn,
     signal?: AbortSignal,
   ): Promise<ArrayBuffer | null> {
@@ -270,7 +270,7 @@ export class HyparquetLeafReader {
       return null;
     }
 
-    return this.reader.read(
+    return this._reader.read(
       Number(dictionaryOffset),
       Number(column.metadata.data_page_offset),
       signal,

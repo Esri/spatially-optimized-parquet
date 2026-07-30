@@ -1,4 +1,5 @@
 import type { ViewerType } from "./Viewer";
+import styles from "./ApplicationHeader.module.css";
 
 interface ApplicationHeaderProps {
   viewer: ViewerType;
@@ -19,16 +20,16 @@ export function ApplicationHeader({
   return (
     <calcite-navigation slot="header">
       <calcite-navigation-logo
-        className="application-logo"
+        className={styles.applicationLogo}
         heading="Spatially Optimized Parquet"
         slot="logo"
       />
-      <div className="application-sdk-label" slot="content-start">
+      <div className={styles.applicationSdkLabel} slot="content-start">
         <span>{viewer === "arcgis" ? "ArcGIS Maps SDK" : "MapLibre GL JS"}</span>
       </div>
       <calcite-menu slot="content-end" label="Application links">
         <calcite-menu-item
-          className="viewer-switch-menu-item"
+          className={styles.viewerSwitchMenuItem}
           text={toggleLabel}
           label={toggleLabel}
           iconStart="code"

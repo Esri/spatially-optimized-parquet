@@ -58,73 +58,73 @@ const emptyTrackSnapshot: DownloadTrackSnapshot = {
 };
 
 export class ParquetDownloadSession implements DownloadSessionView {
-  private diagnostics: ArcgisParquetDiagnosticsSnapshotV1 | null = null;
-  private layout: FileLayout | null = null;
-  private displayLayout: DownloadDisplayLayout | null = null;
-  private rowGroupBounds: RowGroupBounds[] | null = null;
-  private error: Error | null = null;
-  private readonly coverage = new ParquetDownloadCoverage();
-  private readonly ledger = new RangeReadLedger();
-  private readonly projection = new ParquetDownloadProjection();
-  private readonly publisher: DownloadSessionPublisher;
+  private _diagnostics: ArcgisParquetDiagnosticsSnapshotV1 | null = null;
+  private _layout: FileLayout | null = null;
+  private _displayLayout: DownloadDisplayLayout | null = null;
+  private _rowGroupBounds: RowGroupBounds[] | null = null;
+  private _error: Error | null = null;
+  private readonly _coverage = new ParquetDownloadCoverage();
+  private readonly _ledger = new RangeReadLedger();
+  private readonly _projection = new ParquetDownloadProjection();
+  private readonly _publisher: DownloadSessionPublisher;
 
   readonly topology: ReadonlyExternalStore<DownloadTopologySnapshot>;
   readonly summary: ReadonlyExternalStore<DownloadSummarySnapshot>;
 
   constructor() {
-    this.publisher = new DownloadSessionPublisher(
+    this._publisher = new DownloadSessionPublisher(
       {
-        createTopologySnapshot: () => this.projection.createTopologySnapshot({
-          layout: this.layout,
-          rowGroupBounds: this.rowGroupBounds,
-          error: this.error,
+        createTopologySnapshot: () => this._projection.createTopologySnapshot({
+          layout: this._layout,
+          rowGroupBounds: this._rowGroupBounds,
+          error: this._error,
         }),
-        createSummarySnapshot: () => this.projection.createSummarySnapshot(
-          this.coverage.currentDownloadedByteLength(),
-          this.ledger.currentCompletedRequestCount(),
+        createSummarySnapshot: () => this._projection.createSummarySnapshot(
+          this._coverage.currentDownloadedByteLength(),
+          this._ledger.currentCompletedRequestCount(),
         ),
-        createBlockSnapshot: (blockId) => this.projection.createBlockSnapshot(
+        createBlockSnapshot: (blockId) => this._projection.createBlockSnapshot(
           blockId,
-          this.ledger.currentLatestRequestKey(),
+          this._ledger.currentLatestRequestKey(),
         ),
-        createTrackSnapshot: (trackId) => this.projection.createTrackSnapshot(trackId),
+        createTrackSnapshot: (trackId) => this._projection.createTrackSnapshot(trackId),
       },
       emptyBlockSnapshot,
       emptyTrackSnapshot,
     );
-    this.topology = this.publisher.topology;
-    this.summary = this.publisher.summary;
+    this.topology = this._publisher.topology;
+    this.summary = this._publisher.summary;
   }
 
   reset(): void {
-    this.publisher.resetSnapshots();
-    this.diagnostics = null;
-    this.layout = null;
-    this.displayLayout = null;
-    this.rowGroupBounds = null;
-    this.error = null;
-    this.coverage.reset();
-    this.ledger.reset();
-    this.projection.reset();
-    this.publisher.markSummaryDirty();
-    this.publisher.markTopologyDirty();
-    this.publisher.flush(true);
+    this._publisher.resetSnapshots();
+    this._diagnostics = null;
+    this._layout = null;
+    this._displayLayout = null;
+    this._rowGroupBounds = null;
+    this._error = null;
+    this._coverage.reset();
+    this._ledger.reset();
+    this._projection.reset();
+    this._publisher.markSummaryDirty();
+    this._publisher.markTopologyDirty();
+    this._publisher.flush(true);
   }
 
   loadDiagnostics(diagnostics: ArcgisParquetDiagnosticsSnapshotV1): void {
     try {
       const layout = deriveFileLayout(diagnostics);
       const displayLayout = createDownloadDisplayLayout(layout);
-      this.diagnostics = diagnostics;
-      this.layout = layout;
-      this.displayLayout = displayLayout;
-      this.rowGroupBounds = deriveRowGroupBounds(diagnostics);
-      this.error = null;
-      this.publishChange(this.projection.initialize(displayLayout));
-      this.replayCoverage();
-      this.publisher.markTopologyDirty();
-      this.publisher.markSummaryDirty();
-      this.publisher.flush(true);
+      this._diagnostics = diagnostics;
+      this._layout = layout;
+      this._displayLayout = displayLayout;
+      this._rowGroupBounds = deriveRowGroupBounds(diagnostics);
+      this._error = null;
+      this._publishChange(this._projection.initialize(displayLayout));
+      this._replayCoverage();
+      this._publisher.markTopologyDirty();
+      this._publisher.markSummaryDirty();
+      this._publisher.flush(true);
     } catch (cause) {
       const error = cause instanceof Error
         ? cause
@@ -135,11 +135,11 @@ export class ParquetDownloadSession implements DownloadSessionView {
   }
 
   recordRangeRead(event: ArcgisParquetRangeReadEvent): void {
-    const change = this.ledger.record(
+    const change = this._ledger.record(
       event,
       (fileId) =>
-        !this.diagnostics ||
-        this.diagnostics.files.some((file) => file.fileName === fileId),
+        !this._diagnostics ||
+        this._diagnostics.files.some((file) => file.fileName === fileId),
     );
     if (change.type === "duplicate") {
       return;
@@ -152,68 +152,68 @@ export class ParquetDownloadSession implements DownloadSessionView {
     }
 
     if (change.type === "start") {
-      this.publisher.markBlocks(
-        this.projection.requestImpactBlockIds(change.previousLatestRequestKey),
+      this._publisher.markBlocks(
+        this._projection.requestImpactBlockIds(change.previousLatestRequestKey),
       );
-      this.publishChange(
-        this.projection.applyLoadingRequestImpact(
+      this._publishChange(
+        this._projection.applyLoadingRequestImpact(
           change.requestKey,
           change.range,
           1,
         ),
       );
-      this.publisher.markBlocks(
-        this.projection.requestImpactBlockIds(change.requestKey),
+      this._publisher.markBlocks(
+        this._projection.requestImpactBlockIds(change.requestKey),
       );
-      this.publisher.schedule();
+      this._publisher.schedule();
       return;
     }
 
-    this.publishChange(
-      this.projection.applyLoadingRequestImpact(change.requestKey, undefined, -1),
+    this._publishChange(
+      this._projection.applyLoadingRequestImpact(change.requestKey, undefined, -1),
     );
     if (change.replacedLatestRequest) {
-      this.publisher.markBlocks(
-        this.projection.requestImpactBlockIds(change.latestRequestKey),
+      this._publisher.markBlocks(
+        this._projection.requestImpactBlockIds(change.latestRequestKey),
       );
     }
     if (change.phase === "complete") {
-      const { newRanges } = this.coverage.add(change.range);
-      this.publishChange(this.projection.addCoveredRanges(newRanges));
-      this.publishChange(
-        this.projection.applyCachedRequestImpact(change.requestKey, change.range),
+      const { newRanges } = this._coverage.add(change.range);
+      this._publishChange(this._projection.addCoveredRanges(newRanges));
+      this._publishChange(
+        this._projection.applyCachedRequestImpact(change.requestKey, change.range),
       );
-      this.publisher.markSummaryDirty();
+      this._publisher.markSummaryDirty();
     }
-    this.publisher.schedule();
+    this._publisher.schedule();
   }
 
   reportError(error: Error): void {
-    this.error = error;
-    this.publisher.markTopologyDirty();
-    this.publisher.schedule();
+    this._error = error;
+    this._publisher.markTopologyDirty();
+    this._publisher.schedule();
   }
 
   block(blockId: string): ReadonlyExternalStore<DownloadBlockSnapshot> {
-    return this.publisher.block(blockId);
+    return this._publisher.block(blockId);
   }
 
   track(trackId: string): ReadonlyExternalStore<DownloadTrackSnapshot> {
-    return this.publisher.track(trackId);
+    return this._publisher.track(trackId);
   }
 
   rowGroupCoverage(trackId: string): readonly DownloadRowGroupCoverage[] {
-    return this.projection.rowGroupCoverage(trackId);
+    return this._projection.rowGroupCoverage(trackId);
   }
 
   rowGroupBlockMasks(
     trackId: string,
     rowGroupIndex: number,
   ): ReadonlyMap<string, number> {
-    return this.projection.rowGroupBlockMasks(
+    return this._projection.rowGroupBlockMasks(
       trackId,
       rowGroupIndex,
-      (range) => this.coverage.overlaps(range),
+      (range) => this._coverage.overlaps(range),
     );
   }
 
@@ -221,23 +221,23 @@ export class ParquetDownloadSession implements DownloadSessionView {
     layout: FileLayout;
     coverage: ParquetByteCoverage;
   } | null {
-    return this.coverage.createFileStructureSnapshot(this.layout);
+    return this._coverage.createFileStructureSnapshot(this._layout);
   }
 
-  private replayCoverage(): void {
-    for (const range of this.coverage.values()) {
-      this.publishChange(this.projection.applyCachedRange(range));
+  private _replayCoverage(): void {
+    for (const range of this._coverage.values()) {
+      this._publishChange(this._projection.applyCachedRange(range));
     }
-    this.publishChange(this.projection.addCoveredRanges(this.coverage.values()));
-    for (const [requestKey, request] of this.ledger.activeRequestEntries()) {
-      this.publishChange(
-        this.projection.applyLoadingRequestImpact(requestKey, request.range, 1),
+    this._publishChange(this._projection.addCoveredRanges(this._coverage.values()));
+    for (const [requestKey, request] of this._ledger.activeRequestEntries()) {
+      this._publishChange(
+        this._projection.applyLoadingRequestImpact(requestKey, request.range, 1),
       );
     }
   }
 
-  private publishChange(change: ProjectionChange): void {
-    this.publisher.markBlocks(change.blockIds);
-    this.publisher.markTracks(change.trackIds);
+  private _publishChange(change: ProjectionChange): void {
+    this._publisher.markBlocks(change.blockIds);
+    this._publisher.markTracks(change.trackIds);
   }
 }

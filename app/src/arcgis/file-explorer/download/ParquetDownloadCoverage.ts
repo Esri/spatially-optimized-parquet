@@ -5,30 +5,30 @@ import type {
 } from "../../../parquet/fileLayout";
 
 export class ParquetDownloadCoverage {
-  private coverage = new ParquetByteCoverage();
-  private downloadedByteLength = 0;
+  private _coverage = new ParquetByteCoverage();
+  private _downloadedByteLength = 0;
 
   reset(): void {
-    this.coverage = new ParquetByteCoverage();
-    this.downloadedByteLength = 0;
+    this._coverage = new ParquetByteCoverage();
+    this._downloadedByteLength = 0;
   }
 
   add(range: ByteRange): { addedByteLength: number; newRanges: ByteRange[] } {
-    const result = this.coverage.add(range);
-    this.downloadedByteLength += result.addedByteLength;
+    const result = this._coverage.add(range);
+    this._downloadedByteLength += result.addedByteLength;
     return result;
   }
 
   values(): readonly ByteRange[] {
-    return this.coverage.values();
+    return this._coverage.values();
   }
 
   overlaps(range: ByteRange): boolean {
-    return this.coverage.overlaps(range);
+    return this._coverage.overlaps(range);
   }
 
   currentDownloadedByteLength(): number {
-    return this.downloadedByteLength;
+    return this._downloadedByteLength;
   }
 
   createFileStructureSnapshot(layout: FileLayout | null): {
@@ -36,7 +36,7 @@ export class ParquetDownloadCoverage {
     coverage: ParquetByteCoverage;
   } | null {
     return layout
-      ? { layout, coverage: this.coverage.clone() }
+      ? { layout, coverage: this._coverage.clone() }
       : null;
   }
 }

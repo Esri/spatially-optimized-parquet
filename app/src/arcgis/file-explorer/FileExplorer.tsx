@@ -30,6 +30,7 @@ import {
   type DownloadRowGroupCoverage,
   type DownloadSessionView,
 } from "./download/ParquetDownloadSession";
+import styles from "./FileExplorer.module.css";
 
 const columnThresholdSliderMaximum = 1000;
 const minimumPositiveColumnThreshold = 1024;
@@ -58,7 +59,16 @@ const DownloadSubpart = memo(function DownloadSubpart({
       : (cachedMask & mask) !== 0
         ? "cached"
         : "empty";
-  return <span className={`chunk-subpart ${state}${highlighted ? " selected" : ""}`} />;
+  const stateClassName = state === "empty" ? null : styles[state];
+  return (
+    <span
+      className={[
+        styles.chunkSubpart,
+        stateClassName,
+        highlighted ? styles.selected : null,
+      ].filter(Boolean).join(" ")}
+    />
+  );
 });
 
 const DownloadChunk = memo(function DownloadChunk({
@@ -89,7 +99,7 @@ const DownloadChunk = memo(function DownloadChunk({
   return (
     <span
       aria-label={`Download block with ${block.subparts.length} byte subparts`}
-      className="chunk"
+      className={styles.chunk}
       onMouseEnter={onHover ? (event) => onHover(event.currentTarget) : undefined}
       onMouseLeave={onHoverEnd}
     >
@@ -115,7 +125,7 @@ const DownloadTrackProgress = memo(function DownloadTrackProgress({
   downloadedByteLength: number;
 }) {
   return (
-    <span className="column-progress">
+    <span className={styles.columnProgress}>
       ({formatByteSize(downloadedByteLength)}/{formatByteSize(track.byteLength)})
     </span>
   );
@@ -199,7 +209,9 @@ const DownloadTrack = memo(function DownloadTrack({
       onTooltipOpen();
       setHoveredRowGroupIndex(null);
       const firstAggregateBlock =
-        element.parentElement?.querySelector<HTMLSpanElement>(".chunk") ?? element;
+        element.parentElement?.querySelector<HTMLSpanElement>(
+          `.${styles.chunk}`,
+        ) ?? element;
       setHoveredBlock(firstAggregateBlock);
     }, tooltipOpenDelayMs);
   };
@@ -216,14 +228,15 @@ const DownloadTrack = memo(function DownloadTrack({
 
   return (
     <span
-      className={`column-range${
-        hoveredBlock && tooltipActive ? " column-range-selected" : ""
-      }`}
+      className={[
+        styles.columnRange,
+        hoveredBlock && tooltipActive ? styles.columnRangeSelected : null,
+      ].filter(Boolean).join(" ")}
       onMouseLeave={scheduleTooltipClose}
     >
-      <span className="column-range-content">
-        <span className="column-label">
-          <span className="column-download-share">
+      <span className={styles.columnRangeContent}>
+        <span className={styles.columnLabel}>
+          <span className={styles.columnDownloadShare}>
             {formatDownloadPercent(
               totalDownloadedByteLength === 0
                 ? 0
@@ -237,7 +250,7 @@ const DownloadTrack = memo(function DownloadTrack({
             track={track}
           />
         </span>
-        <span className="column-blocks">
+        <span className={styles.columnBlocks}>
           {snapshot.visibleBlockIds.map((blockId) => {
             const block = blockById.get(blockId);
             return block ? (
@@ -344,7 +357,7 @@ const TrackRowGroupTooltip = memo(function TrackRowGroupTooltip({
 
   return (
     <span
-      className="column-row-group-tooltip calcite-mode-dark"
+      className={`${styles.columnRowGroupTooltip} calcite-mode-dark`}
       onMouseEnter={keepTooltipHierarchyOpen}
       onMouseLeave={() => {
         scheduleRowGroupTooltipClose();
@@ -354,15 +367,16 @@ const TrackRowGroupTooltip = memo(function TrackRowGroupTooltip({
       role="tooltip"
       style={tooltipStyle}
     >
-      <span className="column-row-group-tooltip-title">{title}</span>
-      <span className="column-row-group-tooltip-grid">
+      <span className={styles.columnRowGroupTooltipTitle}>{title}</span>
+      <span className={styles.columnRowGroupTooltipGrid}>
         {coverage.map((rowGroup) => (
           <span
-            className={`column-row-group-tooltip-cell${
+            className={[
+              styles.columnRowGroupTooltipCell,
               hoveredRowGroup?.rowGroupIndex === rowGroup.rowGroupIndex
-                ? " selected"
-                : ""
-            }`}
+                ? styles.selected
+                : null,
+            ].filter(Boolean).join(" ")}
             key={rowGroup.rowGroupIndex}
             onMouseEnter={(event) => {
               keepTooltipHierarchyOpen();
@@ -463,7 +477,7 @@ const RowGroupDetailTooltip = memo(function RowGroupDetailTooltip({
 
   return (
     <span
-      className="row-group-detail-tooltip calcite-mode-dark"
+      className={`${styles.rowGroupDetailTooltip} calcite-mode-dark`}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       ref={tooltipRef}
@@ -482,16 +496,17 @@ const RowGroupDetailTooltip = memo(function RowGroupDetailTooltip({
       ) : null}
       {coverage.itemCoverage.length > 0 ? (
         <>
-          <span className="page-index-column-title">Columns</span>
-          <span className="page-index-column-grid">
+          <span className={styles.pageIndexColumnTitle}>Columns</span>
+          <span className={styles.pageIndexColumnGrid}>
             {coverage.itemCoverage.map((itemCoverage) => {
               const status = itemCoverage.downloaded ? "downloaded" : "not downloaded";
               return (
                 <span
                   aria-label={`${itemCoverage.label}: ${status}`}
-                  className={`page-index-column-cell${
-                    itemCoverage.downloaded ? " downloaded" : ""
-                  }`}
+                  className={[
+                    styles.pageIndexColumnCell,
+                    itemCoverage.downloaded ? styles.downloaded : null,
+                  ].filter(Boolean).join(" ")}
                   key={itemCoverage.label}
                   onMouseEnter={(event) => {
                     cancelItemTooltipClose();
@@ -569,7 +584,7 @@ const PageIndexColumnDetailTooltip = memo(function PageIndexColumnDetailTooltip(
 
   return (
     <span
-      className="page-index-column-detail-tooltip calcite-mode-dark"
+      className={`${styles.pageIndexColumnDetailTooltip} calcite-mode-dark`}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       ref={tooltipRef}
@@ -593,7 +608,7 @@ const ColumnStatistics = memo(function ColumnStatistics({
   statistics: DownloadColumnStatistics;
 }) {
   return (
-    <span className="page-index-column-statistics">
+    <span className={styles.pageIndexColumnStatistics}>
       <span>Min</span>
       <strong>{formatColumnStatisticValue(statistics.minimumValue)}</strong>
       <span>Max</span>
@@ -714,11 +729,11 @@ const BytesLoaded = memo(function BytesLoaded({
     downloadSession.summary.getSnapshot,
   );
   return (
-    <div className="bytes-loaded">
-      <div className="file-stat-label">Bytes Loaded</div>
-      <div className="file-stat-value">
+    <div className={styles.bytesLoaded}>
+      <div className={styles.fileStatLabel}>Bytes Loaded</div>
+      <div className={styles.fileStatValue}>
         {formatByteSize(summary.downloadedByteLength)}
-        <span className="file-stat-unit">
+        <span className={styles.fileStatUnit}>
           / {byteLength === null ? "…" : formatByteSize(byteLength)}
         </span>
       </div>
@@ -751,13 +766,13 @@ const DownloadCoverageFooter = memo(function DownloadCoverageFooter({
   }).length;
 
   return (
-    <div className="occupancy-footer">
-      <span className="occupancy-summary">
+    <div className={styles.occupancyFooter}>
+      <span className={styles.occupancySummary}>
         {visibleColumnCount}/{summary.columnCount} columns
       </span>
-      <span className="occupancy-legend" aria-label="Download state">
+      <span className={styles.occupancyLegend} aria-label="Download state">
         <span>
-          <i className="loaded" aria-hidden="true" />
+          <i className={styles.loaded} aria-hidden="true" />
           Loaded
         </span>
         <span>
@@ -784,7 +799,7 @@ const ColumnDownloadThreshold = memo(function ColumnDownloadThreshold({
   );
 
   return (
-    <label className="column-threshold-control">
+    <label className={styles.columnThresholdControl}>
       <span>
         Show with at least
         <strong>{formatByteSize(minimumDownloadedByteLength)}</strong>
@@ -867,7 +882,7 @@ const FileDownload = memo(function FileDownload({
   return (
     <>
       {topology.layout ? (
-        <div className="column-threshold-frame">
+        <div className={styles.columnThresholdFrame}>
           <BytesLoaded
             byteLength={topology.layout.byteLength}
             downloadSession={downloadSession}
@@ -879,8 +894,12 @@ const FileDownload = memo(function FileDownload({
           />
         </div>
       ) : null}
-      <div className="occupancy-grid-frame">
-        <div className="occupancy-flow" role="img" aria-label="Parquet download coverage by track">
+      <div className={styles.occupancyGridFrame}>
+        <div
+          className={styles.occupancyFlow}
+          role="img"
+          aria-label="Parquet download coverage by track"
+        >
           {topology.layout ? (
             <DownloadTrackList
               downloadSession={downloadSession}
@@ -888,7 +907,7 @@ const FileDownload = memo(function FileDownload({
               tracks={topology.tracks}
             />
           ) : (
-            <span className="occupancy-status">
+            <span className={styles.occupancyStatus}>
               {topology.error
                 ? "Unable to load Parquet diagnostics."
                 : null}
@@ -988,7 +1007,7 @@ export const FileExplorer = memo(function FileExplorer({
   };
   const content = (
     <>
-      <div className="file-explorer-overview">
+      <div className={styles.fileExplorerOverview}>
         <Minimap
           basemapId={basemap}
           bounds={rowGroupBounds}
@@ -998,10 +1017,10 @@ export const FileExplorer = memo(function FileExplorer({
           scale={scale}
           spatialReferenceWkid={spatialReferenceWkid}
         />
-        <div className="file-structure-action">
+        <div className={styles.fileStructureAction}>
           <calcite-button
             appearance="solid"
-            className="file-structure-button"
+            className={styles.fileStructureButton}
             iconStart="magnifying-glass"
             onClick={openFileStructure}
             width="full"
@@ -1017,9 +1036,9 @@ export const FileExplorer = memo(function FileExplorer({
   return (
     <>
       {layout === "desktop" ? (
-        <div className="grid-details-column">{content}</div>
+        <div className={styles.gridDetailsColumn}>{content}</div>
       ) : visible ? (
-        <aside aria-label="Details" className="responsive-details-overlay">
+        <aside aria-label="Details" className={styles.responsiveDetailsOverlay}>
           {content}
         </aside>
       ) : null}

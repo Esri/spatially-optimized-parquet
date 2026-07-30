@@ -24,7 +24,7 @@ import "@arcgis/map-components/main.css";
 import "@esri/calcite-components/main.css";
 
 import { App } from "./App";
-import "./styles/app.css";
+import "./styles/global.css";
 
 const rootElement = document.getElementById("root");
 
