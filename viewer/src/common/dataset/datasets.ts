@@ -227,6 +227,11 @@ export function createPortalItemDataset(
   if (!validatedItemId) {
     throw new Error("Portal item ID is required.");
   }
+  const itemPageUrl = new URL(validatedPortalUrl);
+  itemPageUrl.pathname = `${itemPageUrl.pathname.replace(/\/?$/, "/")}home/item.html`;
+  itemPageUrl.search = "";
+  itemPageUrl.hash = "";
+  itemPageUrl.searchParams.set("id", validatedItemId);
 
   return {
     id: `portal-item:${validatedPortalUrl}:${validatedItemId}`,
@@ -237,7 +242,8 @@ export function createPortalItemDataset(
       itemId: validatedItemId,
     },
     name: "Portal Item",
-    source: "--",
+    source: "ArcGIS Portal item",
+    sourceUrl: itemPageUrl.href,
     center: customDatasetCenter,
     scale: customDatasetScale,
   };

@@ -1,10 +1,12 @@
 import type {
   ArcgisParquetDiagnosticsSnapshotV1,
+  ArcgisParquetFileDiagnosticsV1,
   ArcgisParquetRangeReadEvent,
 } from "../../diagnostics";
 import type { ParquetByteCoverage } from "../../../parquet/ParquetByteCoverage";
 import {
   createDownloadDisplayLayout,
+  createDatasetDownloadDisplayLayout,
   type DownloadDisplayLayout,
 } from "../../../parquet/displayLayout";
 import {
@@ -64,11 +66,11 @@ const emptyTrackSnapshot: DownloadTrackSnapshot = {
  * It owns the session lifecycle so file-explorer views consume one consistent model instead of synchronizing those concerns themselves.
  */
 export class ParquetDownloadSession implements DownloadSessionView {
-  private _diagnostics: ArcgisParquetDiagnosticsSnapshotV1 | null = null;
   private _layout: FileLayout | null = null;
-  private _displayLayout: DownloadDisplayLayout | null = null;
   private _rowGroupBounds: RowGroupBounds[] | null = null;
   private _error: Error | null = null;
+  private _acceptedFileNames = new Set<string>();
+  private _fileOffsets = new Map<string, number>();
   private readonly _coverage = new ParquetDownloadCoverage();
   private readonly _ledger = new RangeReadLedger();
   private readonly _projection = new ParquetDownloadProjection();
@@ -104,11 +106,11 @@ export class ParquetDownloadSession implements DownloadSessionView {
 
   reset(): void {
     this._publisher.resetSnapshots();
-    this._diagnostics = null;
     this._layout = null;
-    this._displayLayout = null;
     this._rowGroupBounds = null;
     this._error = null;
+    this._acceptedFileNames.clear();
+    this._fileOffsets.clear();
     this._coverage.reset();
     this._ledger.reset();
     this._projection.reset();
@@ -117,20 +119,20 @@ export class ParquetDownloadSession implements DownloadSessionView {
     this._publisher.flush(true);
   }
 
-  loadDiagnostics(diagnostics: ArcgisParquetDiagnosticsSnapshotV1): void {
+  loadDiagnostics(
+    diagnostics: ArcgisParquetDiagnosticsSnapshotV1,
+    file: ArcgisParquetFileDiagnosticsV1,
+  ): void {
     try {
-      const layout = deriveFileLayout(diagnostics);
+      const layout = deriveFileLayout(diagnostics, file);
       const displayLayout = createDownloadDisplayLayout(layout);
-      this._diagnostics = diagnostics;
-      this._layout = layout;
-      this._displayLayout = displayLayout;
-      this._rowGroupBounds = deriveRowGroupBounds(diagnostics);
-      this._error = null;
-      this._publishChange(this._projection.initialize(displayLayout));
-      this._replayCoverage();
-      this._publisher.markTopologyDirty();
-      this._publisher.markSummaryDirty();
-      this._publisher.flush(true);
+      this._initializeLayout({
+        acceptedFileNames: [file.fileName],
+        displayLayout,
+        fileOffsets: new Map([[file.fileName, 0]]),
+        layout,
+        rowGroupBounds: deriveRowGroupBounds(diagnostics, file),
+      });
     } catch (cause) {
       const error = cause instanceof Error
         ? cause
@@ -140,12 +142,46 @@ export class ParquetDownloadSession implements DownloadSessionView {
     }
   }
 
+  loadDatasetLayouts(
+    layouts: readonly FileLayout[],
+    rowGroupBounds: readonly RowGroupBounds[],
+  ): void {
+    const datasetLayout = createDatasetDownloadDisplayLayout(layouts);
+    const layout: FileLayout = {
+      fileId: -1,
+      fileName: "All files",
+      byteLength: datasetLayout.byteLength,
+      footer: {
+        start: datasetLayout.byteLength,
+        end: datasetLayout.byteLength,
+      },
+      keyValueMetadata: [],
+      rowGroups: [],
+      pageIndexes: [],
+    };
+    this._initializeLayout({
+      acceptedFileNames: layouts.map(({ fileName }) => fileName),
+      displayLayout: datasetLayout.displayLayout,
+      fileOffsets: datasetLayout.fileOffsets,
+      layout,
+      rowGroupBounds,
+    });
+  }
+
   recordRangeRead(event: ArcgisParquetRangeReadEvent): void {
+    const fileOffset = this._fileOffsets.get(event.fileId);
+    const normalizedEvent = fileOffset === undefined
+      ? event
+      : {
+          ...event,
+          range: {
+            start: event.range.start + fileOffset,
+            end: event.range.end + fileOffset,
+          },
+        };
     const change = this._ledger.record(
-      event,
-      (fileId) =>
-        !this._diagnostics ||
-        this._diagnostics.files.some((file) => file.fileName === fileId),
+      normalizedEvent,
+      (fileId) => this._acceptedFileNames.has(fileId),
     );
     if (change.type === "duplicate") {
       return;
@@ -198,6 +234,35 @@ export class ParquetDownloadSession implements DownloadSessionView {
     this._error = error;
     this._publisher.markTopologyDirty();
     this._publisher.schedule();
+  }
+
+  dispose(): void {
+    this.reset();
+  }
+
+  private _initializeLayout({
+    acceptedFileNames,
+    displayLayout,
+    fileOffsets,
+    layout,
+    rowGroupBounds,
+  }: {
+    acceptedFileNames: readonly string[];
+    displayLayout: DownloadDisplayLayout;
+    fileOffsets: ReadonlyMap<string, number>;
+    layout: FileLayout;
+    rowGroupBounds: readonly RowGroupBounds[];
+  }): void {
+    this._acceptedFileNames = new Set(acceptedFileNames);
+    this._fileOffsets = new Map(fileOffsets);
+    this._layout = layout;
+    this._rowGroupBounds = [...rowGroupBounds];
+    this._error = null;
+    this._publishChange(this._projection.initialize(displayLayout));
+    this._replayCoverage();
+    this._publisher.markTopologyDirty();
+    this._publisher.markSummaryDirty();
+    this._publisher.flush(true);
   }
 
   block(blockId: string): ReadonlyExternalStore<DownloadBlockSnapshot> {

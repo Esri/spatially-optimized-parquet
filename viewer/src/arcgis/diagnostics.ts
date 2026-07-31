@@ -83,11 +83,16 @@ export function parseParquetDiagnosticsSnapshot(
     (file, fileIndex) => parseFileDiagnostics(file, `diagnostics snapshot.files[${fileIndex}]`),
   );
   const fileIds = new Set<number>();
+  const fileNames = new Set<string>();
   for (const file of files) {
     if (fileIds.has(file.fileId)) {
       throw new TypeError(`Duplicate diagnostics fileId "${file.fileId}".`);
     }
+    if (fileNames.has(file.fileName)) {
+      throw new TypeError(`Duplicate diagnostics fileName "${file.fileName}".`);
+    }
     fileIds.add(file.fileId);
+    fileNames.add(file.fileName);
   }
 
   return { files };

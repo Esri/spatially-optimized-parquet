@@ -45,3 +45,49 @@
   color: var(--calcite-color-text-3);
   font-size: var(--calcite-font-size--1);
 }
+
+.rowGroupBoundsUnavailable {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inset-block-start: 0.5rem;
+  inset-inline: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--calcite-color-border-2);
+  border-radius: var(--calcite-corner-radius-sm);
+  background: color-mix(
+    in srgb,
+    var(--calcite-color-foreground-1) 88%,
+    transparent
+  );
+  color: var(--calcite-color-text-2);
+  font-size: var(--calcite-font-size--1);
+  font-weight: var(--calcite-font-weight-medium);
+  gap: 0.375rem;
+  text-align: center;
+  user-select: none;
+}
+
+.rowGroupBoundsUnavailable:focus-visible {
+  outline: 2px solid var(--calcite-color-focus);
+  outline-offset: 2px;
+}
+
+.rowGroupBoundsInfo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--calcite-color-text-3);
+  line-height: 0;
+}
+
+.rowGroupBoundsInfo calcite-icon {
+  display: block;
+}
+
+.rowGroupBoundsUnavailable,
+.rowGroupBoundsUnavailable * {
+  cursor: help !important;
+}

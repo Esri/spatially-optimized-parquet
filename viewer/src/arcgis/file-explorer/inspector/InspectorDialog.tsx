@@ -28,6 +28,7 @@ import type {
   PageIndexLayout,
   RowGroupLayout,
 } from "../../../parquet/fileLayout";
+import { formatParquetFileName } from "../../../parquet/formatFileName";
 import {
   extractGeoParquetVersion,
   extractGeodisplayVersion,
@@ -68,10 +69,18 @@ interface FileColumnDistributionProps {
  * It owns the inspector store lifecycle so closing or replacing the dialog also retires pending detail loads.
  */
 export function InspectorDialog({
+  fileCount,
+  fileIndex,
+  onNextFile,
+  onPreviousFile,
   snapshot,
   source,
   onClose,
 }: {
+  fileCount: number;
+  fileIndex: number;
+  onNextFile(): void;
+  onPreviousFile(): void;
   snapshot: FileStructureSnapshot;
   source: ArcgisParquetPageIndexSource;
   onClose(): void;
@@ -120,6 +129,32 @@ export function InspectorDialog({
         className={styles.fileStructureHeaderSwitches}
         slot="header-actions-end"
       >
+        <div
+          aria-label="Parquet file navigation"
+          className={styles.fileStructureFileNavigation}
+        >
+          <calcite-button
+            appearance="transparent"
+            disabled={fileIndex === 0}
+            iconStart="chevron-left"
+            kind="neutral"
+            label="Previous file"
+            onClick={onPreviousFile}
+            scale="s"
+          />
+          <span title={snapshot.layout.fileName}>
+            File {fileIndex + 1} of {fileCount}
+          </span>
+          <calcite-button
+            appearance="transparent"
+            disabled={fileIndex === fileCount - 1}
+            iconStart="chevron-right"
+            kind="neutral"
+            label="Next file"
+            onClick={onNextFile}
+            scale="s"
+          />
+        </div>
         <div className={styles.fileStructureViewControl}>
           <span>Filter</span>
           <calcite-segmented-control
@@ -528,7 +563,7 @@ function FileDetails({
     1,
     "×",
   ) ?? "Unavailable";
-  const fileName = formatFileName(layout.fileName);
+  const fileName = formatParquetFileName(layout.fileName);
   const geodisplayVersion =
     extractGeodisplayVersion(layout.keyValueMetadata) ?? "—";
   const geoParquetVersion =
@@ -598,11 +633,6 @@ function FileDetails({
       ) : null}
     </div>
   );
-}
-
-function formatFileName(value: string): string {
-  const path = value.split(/[?#]/, 1)[0].replaceAll("\\", "/");
-  return path.slice(path.lastIndexOf("/") + 1) || value;
 }
 
 function FileDetail({

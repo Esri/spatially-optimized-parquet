@@ -47,7 +47,7 @@ describe("ParquetFileStructureStore", () => {
     const store = new ParquetFileStructureStore({
       coverage,
       layout: {
-        fileId: 0,
+        fileId: 42,
         fileName: "file.parquet",
         byteLength: 300,
         footer: { start: 280, end: 300 },
@@ -92,6 +92,16 @@ describe("ParquetFileStructureStore", () => {
 
     expect(source.getColumnIndex).toHaveBeenCalledOnce();
     expect(source.getOffsetIndex).toHaveBeenCalledOnce();
+    expect(source.getColumnIndex).toHaveBeenCalledWith({
+      fileId: 42,
+      rowGroupIndex: 0,
+      columnIndex: 0,
+    });
+    expect(source.getOffsetIndex).toHaveBeenCalledWith({
+      fileId: 42,
+      rowGroupIndex: 0,
+      columnIndex: 0,
+    });
     expect(coverage.state({ start: 200, end: 240 })).toBe("loaded");
   });
 

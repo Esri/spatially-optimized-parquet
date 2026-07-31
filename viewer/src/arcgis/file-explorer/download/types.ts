@@ -38,6 +38,9 @@ export interface DownloadSummarySnapshot {
 
 export interface DownloadRowGroupCoverage {
   rowGroupIndex: number;
+  fileId?: number;
+  fileName?: string;
+  sourceRowGroupIndex?: number;
   downloadedByteLength: number;
   byteLength: number;
   downloadedPercent: number;

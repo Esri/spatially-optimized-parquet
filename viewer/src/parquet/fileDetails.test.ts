@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { deriveFileDetailSummary } from "./fileDetails";
+import {
+  deriveDatasetDetailSummary,
+  deriveFileDetailSummary,
+} from "./fileDetails";
 import type { ColumnLayout, FileLayout } from "./fileLayout";
 
 function createColumn(
@@ -67,3 +70,60 @@ describe("deriveFileDetailSummary", () => {
     expect(layout.byteLength).toBe(900);
   });
 });
+
+describe("deriveDatasetDetailSummary", () => {
+  it("aggregates rows, physical bytes, columns, and compression across files", () => {
+    const firstLayout = createLayout(
+      0,
+      "first.parquet",
+      900,
+      [createColumn(0, 2, "gzip", 50, 100)],
+    );
+    const secondLayout = createLayout(
+      1,
+      "second.parquet",
+      1_100,
+      [
+        createColumn(0, 3, "SNAPPY", 75, 225),
+        {
+          ...createColumn(0, 3, "GZIP", 25, 75),
+          columnIndex: 1,
+          fieldName: "category",
+          id: "rg0-c1",
+        },
+      ],
+    );
+
+    expect(deriveDatasetDetailSummary([firstLayout, secondLayout])).toEqual({
+      byteLength: 2_000,
+      fileCount: 2,
+      rowCount: 5,
+      columnCount: 2,
+      rowGroupCount: 2,
+      compressionCodecs: ["GZIP", "SNAPPY"],
+      compressedSize: 150,
+      uncompressedSize: 400,
+    });
+  });
+});
+
+function createLayout(
+  fileId: number,
+  fileName: string,
+  byteLength: number,
+  columns: ColumnLayout[],
+): FileLayout {
+  return {
+    fileId,
+    fileName,
+    byteLength,
+    footer: { start: byteLength - 100, end: byteLength },
+    keyValueMetadata: [],
+    rowGroups: [{
+      index: 0,
+      byteRange: { start: 0, end: 100 },
+      columns,
+    }],
+    pageIndexes: [],
+  };
+}

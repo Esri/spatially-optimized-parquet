@@ -142,7 +142,7 @@ export interface FileLayout {
 
 export function deriveFileLayout(
   snapshot: ArcgisParquetDiagnosticsSnapshotV1,
-  file: ArcgisParquetFileDiagnosticsV1 = resolveSingleDiagnosticsFile(snapshot),
+  file: ArcgisParquetFileDiagnosticsV1,
 ): FileLayout {
   assertSnapshotFile(snapshot, file);
   const pageIndexes: PageIndexLayout[] = [];
@@ -206,17 +206,6 @@ export function deriveFileLayout(
     rowGroups,
     pageIndexes,
   };
-}
-
-export function resolveSingleDiagnosticsFile(
-  snapshot: ArcgisParquetDiagnosticsSnapshotV1,
-): ArcgisParquetFileDiagnosticsV1 {
-  if (snapshot.files.length !== 1) {
-    throw new Error(
-      `The Parquet download UI currently requires exactly one diagnostics file, received ${snapshot.files.length}.`,
-    );
-  }
-  return snapshot.files[0];
 }
 
 export function rangesOverlap(first: ByteRange, second: ByteRange): boolean {

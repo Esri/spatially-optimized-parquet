@@ -271,6 +271,9 @@ export class ParquetDownloadProjection {
 
     const coverageByRowGroup = new Map<number, {
       rowGroupIndex: number;
+      fileId?: number;
+      fileName?: string;
+      sourceRowGroupIndex?: number;
       downloadedByteLength: number;
       byteLength: number;
       statistics: DownloadColumnStatistics | null;
@@ -284,6 +287,9 @@ export class ParquetDownloadProjection {
       const coveredByteLength = this._segmentCoveredByteLength.get(segment.segmentId) ?? 0;
       const rowGroupCoverage = coverageByRowGroup.get(segment.rowGroupIndex) ?? {
         rowGroupIndex: segment.rowGroupIndex,
+        fileId: segment.fileId,
+        fileName: segment.fileName,
+        sourceRowGroupIndex: segment.sourceRowGroupIndex,
         downloadedByteLength: 0,
         byteLength: 0,
         statistics: track.kind === "column"

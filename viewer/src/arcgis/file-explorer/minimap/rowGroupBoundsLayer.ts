@@ -15,16 +15,20 @@ export function createRowGroupBoundsLayer(
     legendEnabled: false,
     fields: [
       { name: "OBJECTID", type: "oid" },
+      { name: "FILE_ID", type: "integer" },
+      { name: "FILE_NAME", type: "string" },
       { name: "ROW_GROUP", type: "integer" },
       { name: "COLOR_CLASS", type: "integer" },
     ],
     source: bounds.map(
-      ({ rowGroupIndex, xmin, ymin, xmax, ymax }) =>
+      ({ fileId, fileName, rowGroupIndex, xmin, ymin, xmax, ymax }, objectIndex) =>
         new Graphic({
           attributes: {
-            OBJECTID: rowGroupIndex + 1,
+            OBJECTID: objectIndex + 1,
+            FILE_ID: fileId,
+            FILE_NAME: fileName,
             ROW_GROUP: rowGroupIndex,
-            COLOR_CLASS: rowGroupIndex % 3,
+            COLOR_CLASS: objectIndex % 3,
           },
           geometry: {
             type: "polygon",
@@ -69,7 +73,9 @@ function createDebugBoundsSymbol(outlineColor: string) {
 function createDebugLabelClass(colorClass: number, textColor: string) {
   return {
     where: `COLOR_CLASS = ${colorClass}`,
-    labelExpressionInfo: { expression: "'RG ' + Text($feature.ROW_GROUP)" },
+    labelExpressionInfo: {
+      expression: "$feature.FILE_NAME + ' / RG ' + Text($feature.ROW_GROUP)",
+    },
     labelPlacement: "always-horizontal" as const,
     symbol: {
       type: "text" as const,

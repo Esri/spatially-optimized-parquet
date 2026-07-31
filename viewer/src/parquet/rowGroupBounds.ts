@@ -2,9 +2,10 @@ import type {
   ArcgisParquetDiagnosticsSnapshotV1,
   ArcgisParquetFileDiagnosticsV1,
 } from "./fileLayout";
-import { resolveSingleDiagnosticsFile } from "./fileLayout";
 
 export interface RowGroupBounds {
+  fileId: number;
+  fileName: string;
   rowGroupIndex: number;
   rowCount: number;
   xmin: number;
@@ -26,27 +27,27 @@ const minimumRetainedRatio = 0.25;
 
 export function deriveRowGroupBounds(
   snapshot: ArcgisParquetDiagnosticsSnapshotV1,
-  file: ArcgisParquetFileDiagnosticsV1 = resolveSingleDiagnosticsFile(snapshot),
+  file: ArcgisParquetFileDiagnosticsV1,
 ): RowGroupBounds[] {
   if (!snapshot.files.includes(file)) {
     throw new Error("The selected diagnostics file does not belong to the snapshot.");
   }
 
-  return file.rowGroups.map((rowGroup) => {
+  return file.rowGroups.flatMap((rowGroup) => {
     if (!rowGroup.bounds) {
-      throw new Error(
-        `Geometry geospatial bounds not found for row group ${rowGroup.index} in "${file.fileName}".`,
-      );
+      return [];
     }
 
-    return {
+    return [{
+      fileId: file.fileId,
+      fileName: file.fileName,
       rowGroupIndex: rowGroup.index,
       rowCount: rowGroup.rowCount,
       xmin: rowGroup.bounds.xmin,
       ymin: rowGroup.bounds.ymin,
       xmax: rowGroup.bounds.xmax,
       ymax: rowGroup.bounds.ymax,
-    };
+    }];
   });
 }
 
@@ -129,7 +130,7 @@ function combineLongitudes(
     }
   }
 
-  let largestGapStart = mergedIntervals[0][1];
+  let largestGapStart = mergedIntervals.at(-1)?.[1] ?? mergedIntervals[0][1];
   let largestGapEnd = mergedIntervals[0][0] + 360;
   for (let index = 0; index < mergedIntervals.length; index += 1) {
     const currentEnd = mergedIntervals[index][1];

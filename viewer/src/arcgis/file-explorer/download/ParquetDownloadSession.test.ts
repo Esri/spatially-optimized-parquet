@@ -74,7 +74,7 @@ describe("ParquetDownloadSession", () => {
   it("fills only the affected subpart and batches request updates for 64 ms", () => {
     vi.useFakeTimers();
     const session = new ParquetDownloadSession();
-    session.loadDiagnostics(diagnostics);
+    session.loadDiagnostics(diagnostics, diagnostics.files[0]);
     const blockId = "column:value:block:0";
     const listener = vi.fn();
     session.block(blockId).subscribe(listener);
@@ -114,7 +114,7 @@ describe("ParquetDownloadSession", () => {
 
   it("aggregates all page-index bytes for each row group", () => {
     const session = new ParquetDownloadSession();
-    session.loadDiagnostics(diagnostics);
+    session.loadDiagnostics(diagnostics, diagnostics.files[0]);
     const complete: ArcgisParquetRangeReadCompleteEvent = {
       phase: "complete",
       fileId: "file.parquet",
@@ -157,5 +157,24 @@ describe("ParquetDownloadSession", () => {
       nullCount: 2,
       recordCount: 1,
     }]);
+  });
+
+  it("rejects range events for a different diagnostics file", () => {
+    vi.useFakeTimers();
+    const session = new ParquetDownloadSession();
+    session.loadDiagnostics(diagnostics, diagnostics.files[0]);
+
+    session.recordRangeRead({
+      phase: "complete",
+      fileId: "other.parquet",
+      requestId: 1,
+      range: { start: 0, end: 10 },
+    });
+    vi.advanceTimersByTime(64);
+
+    expect(session.summary.getSnapshot().downloadedByteLength).toBe(0);
+    expect(session.topology.getSnapshot().error?.message).toContain(
+      'unknown diagnostics file "other.parquet"',
+    );
   });
 });

@@ -22,10 +22,14 @@ import styles from "./Minimap.module.css";
 export const Minimap = memo(function Minimap({
   bounds,
   dataset,
+  diagnosticsReady,
+  fullExtent,
   mainMapElementRef,
 }: {
   bounds: readonly RowGroupBounds[] | null;
   dataset: Dataset;
+  diagnosticsReady: boolean;
+  fullExtent: Extent | null;
   mainMapElementRef: RefObject<HTMLArcgisMapElement | null>;
 }) {
   const mapElementRef = useRef<HTMLArcgisMapElement>(null);
@@ -41,7 +45,7 @@ export const Minimap = memo(function Minimap({
 
   useEffect(() => {
     const mapElement = mapElementRef.current;
-    if (!mapElement || !bounds) {
+    if (!mapElement) {
       return;
     }
 
@@ -61,15 +65,23 @@ export const Minimap = memo(function Minimap({
         if (!map) {
           throw new Error("Row group overview map is unavailable.");
         }
-        boundsLayer = createRowGroupBoundsLayer(bounds, false);
-        map.add(boundsLayer);
-        await boundsLayer.when();
-        const focusExtent = calculateRowGroupFocusExtent(bounds);
-        if (!disposed && focusExtent) {
-          await mapElement.view.goTo(
-            new Extent({ ...focusExtent, spatialReference: { wkid: 4326 } }),
-            { animate: false },
-          );
+        if (bounds) {
+          boundsLayer = createRowGroupBoundsLayer(bounds, false);
+          map.add(boundsLayer);
+          await boundsLayer.when();
+        }
+        const focusExtent = bounds
+          ? calculateRowGroupFocusExtent(bounds)
+          : undefined;
+        const overviewExtent = fullExtent ??
+          (focusExtent
+            ? new Extent({
+                ...focusExtent,
+                spatialReference: { wkid: 4326 },
+              })
+            : null);
+        if (!disposed && overviewExtent) {
+          await mapElement.view.goTo(overviewExtent, { animate: false });
         }
         if (!disposed) {
           setOverviewReady(true);
@@ -139,25 +151,49 @@ export const Minimap = memo(function Minimap({
         mapElement.map?.remove(boundsLayer);
       }
     };
-  }, [bounds, dataset.center, dataset.scale, mainMapElementRef]);
+  }, [
+    bounds,
+    dataset.center,
+    dataset.scale,
+    fullExtent,
+    mainMapElementRef,
+  ]);
 
   return (
     <div className={styles.rowGroupOverview}>
       <div className={styles.rowGroupOverviewMapFrame}>
-        {bounds ? (
-          <arcgis-map
-            ref={mapElementRef}
-            aria-label="Parquet row group overview"
-            className={overviewReady ? styles.ready : undefined}
-            spatialReference={spatialReference}
-            basemap={basemap}
-            center={dataset.center}
-            scale={dataset.scale}
-          />
-        ) : null}
-        {!bounds || !overviewReady ? (
+        <arcgis-map
+          ref={mapElementRef}
+          aria-label="Parquet row group overview"
+          className={overviewReady ? styles.ready : undefined}
+          spatialReference={spatialReference}
+          basemap={basemap}
+          center={dataset.center}
+          scale={dataset.scale}
+        />
+        {!overviewReady || !diagnosticsReady ? (
           <div className={styles.rowGroupOverviewPlaceholder}>
             Loading row groups…
+          </div>
+        ) : null}
+        {overviewReady && diagnosticsReady && !bounds ? (
+          <div
+            aria-label="Why row group bounds are unavailable"
+            className={styles.rowGroupBoundsUnavailable}
+            id="row-group-bounds-info"
+            tabIndex={0}
+          >
+            <span>Row group bounds not supported</span>
+            <span className={styles.rowGroupBoundsInfo} aria-hidden="true">
+              <calcite-icon icon="information" scale="s" />
+            </span>
+            <calcite-tooltip
+              overlayPositioning="fixed"
+              referenceElement="row-group-bounds-info"
+            >
+              Row group bounds require the newly added native spatial types
+              with geospatial statistics.
+            </calcite-tooltip>
           </div>
         ) : null}
       </div>

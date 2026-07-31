@@ -75,7 +75,25 @@
 .fileStructureHeaderSwitches {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 1rem;
+}
+
+.fileStructureFileNavigation {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 0.25rem;
+}
+
+.fileStructureFileNavigation > span {
+  min-width: 5.5rem;
+  color: var(--calcite-color-text-1);
+  font-size: var(--calcite-font-size--1);
+  font-weight: var(--calcite-font-weight-medium);
+  text-align: center;
+  white-space: nowrap;
 }
 
 .fileStructureViewControl {

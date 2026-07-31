@@ -8,7 +8,6 @@ import {
 } from "react";
 
 import type { Dataset } from "../common/dataset/datasets";
-import type { RowGroupBounds } from "../parquet/rowGroupBounds";
 import { createParquetLayerData } from "./createParquetLayerData";
 import {
   reduceDatasetSessionState,
@@ -20,7 +19,7 @@ import {
   resolveParquetDiagnosticsSource,
   type ArcgisEventHandle,
 } from "./diagnostics";
-import { ParquetDownloadSession } from "./file-explorer/download/ParquetDownloadSession";
+import { ParquetDatasetDownloadSession } from "./file-explorer/download/ParquetDatasetDownloadSession";
 import type {
   DatasetEffectLayer,
   DatasetMapProfile,
@@ -29,13 +28,12 @@ import type {
 
 export interface ArcgisDatasetSessionResult {
   readonly dataset: Dataset;
-  readonly download: ParquetDownloadSession;
+  readonly download: ParquetDatasetDownloadSession;
   readonly featureCount: number | null;
   readonly layer: ParquetLayer | null;
   readonly loadError: Error | null;
   readonly loading: boolean;
   readonly parquetSource: unknown | null;
-  readonly rowGroupBounds: readonly RowGroupBounds[] | null;
 }
 
 export interface ArcgisDatasetSessionOptions {
@@ -48,7 +46,7 @@ export interface ArcgisDatasetSessionOptions {
 interface LoadedDatasetSession {
   dataset: Dataset;
   disposed: boolean;
-  download: ParquetDownloadSession;
+  download: ParquetDatasetDownloadSession;
   featureCount: number | null;
   layer: ParquetLayer | null;
   layerViewWatcher?: { remove(): void };
@@ -57,7 +55,6 @@ interface LoadedDatasetSession {
   profileComponentCleanup?: DatasetProfileCleanup;
   profileLayerCleanup?: DatasetProfileCleanup;
   rangeReadHandle?: ArcgisEventHandle;
-  rowGroupBounds: readonly RowGroupBounds[] | null;
 }
 
 const defaultCenter: [number, number] = [-98, 39];
@@ -176,7 +173,6 @@ export function useArcgisDatasetSession({
     loadError: state.loadError,
     loading: state.loading,
     parquetSource: state.committed.parquetSource,
-    rowGroupBounds: state.committed.rowGroupBounds,
   };
 }
 
@@ -187,12 +183,11 @@ function createEmptyDatasetSession(
   return {
     dataset,
     disposed: false,
-    download: new ParquetDownloadSession(),
+    download: new ParquetDatasetDownloadSession(),
     featureCount: null,
     layer: null,
     parquetSource: null,
     profile,
-    rowGroupBounds: null,
   };
 }
 
@@ -248,8 +243,6 @@ function attachDatasetDiagnostics(
       }
       const snapshot = parseParquetDiagnosticsSnapshot(snapshotValue);
       session.download.loadDiagnostics(snapshot);
-      session.rowGroupBounds =
-        session.download.topology.getSnapshot().rowGroupBounds;
       publish();
     }).catch((error: unknown) => {
       reportDiagnosticsError(
@@ -354,6 +347,7 @@ function disposeDatasetSession(session: LoadedDatasetSession): void {
   session.layerViewWatcher?.remove();
   session.profileComponentCleanup?.();
   session.profileLayerCleanup?.();
+  session.download.dispose();
   session.layer?.destroy();
 }
 

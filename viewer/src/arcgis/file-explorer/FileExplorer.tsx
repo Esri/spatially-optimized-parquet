@@ -23,8 +23,8 @@ import type {
   DownloadBlockLayout,
   DownloadTrackLayout,
 } from "../../parquet/displayLayout";
+import { formatParquetFileName } from "../../parquet/formatFileName";
 import { InspectorDialog } from "./inspector/InspectorDialog";
-import type { FileStructureSnapshot } from "./inspector/ParquetFileStructureStore";
 import { Minimap } from "./minimap/Minimap";
 import {
   type DownloadColumnStatistics,
@@ -60,33 +60,59 @@ export const FileExplorer = memo(function FileExplorer({
   session,
 }: FileExplorerProps) {
   const {
-    download: downloadSession,
+    download: datasetDownload,
     parquetSource,
-    rowGroupBounds,
   } = session;
   const datasetId = dataset.id;
+  const [fileSelection, setFileSelection] = useState({
+    datasetId,
+    index: 0,
+  });
+  const selectedFileIndex = fileSelection.datasetId === datasetId
+    ? Math.min(fileSelection.index, Math.max(0, datasetDownload.files.length - 1))
+    : 0;
+  const selectedFile = datasetDownload.files[selectedFileIndex] ?? null;
+  const downloadSession = datasetDownload.aggregateDownload;
+  const fileStructureSnapshot = useMemo(
+    () => selectedFile?.download.createFileStructureSnapshot() ?? null,
+    [selectedFile],
+  );
   const [fileStructureDialog, setFileStructureDialog] = useState<{
     datasetId: string;
-    snapshot: FileStructureSnapshot;
     source: ArcgisParquetPageIndexSource;
   } | null>(null);
   const openFileStructure = () => {
-    const snapshot = downloadSession.createFileStructureSnapshot();
-    if (!snapshot || !parquetSource) {
+    if (!fileStructureSnapshot || !parquetSource) {
       return;
     }
     setFileStructureDialog({
       datasetId,
-      snapshot,
       source: resolveParquetPageIndexSource(parquetSource),
     });
+  };
+  const selectFile = (index: number) => {
+    setFileSelection({ datasetId, index });
+  };
+  const selectPreviousFile = () => {
+    selectFile(Math.max(0, selectedFileIndex - 1));
+  };
+  const selectNextFile = () => {
+    selectFile(
+      Math.min(datasetDownload.files.length - 1, selectedFileIndex + 1),
+    );
   };
   const content = (
     <>
       <div className={styles.fileExplorerOverview}>
         <Minimap
-          bounds={rowGroupBounds}
+          bounds={datasetDownload.rowGroupBounds}
           dataset={dataset}
+          diagnosticsReady={datasetDownload.files.length > 0}
+          fullExtent={
+            dataset.kind === "portal-item"
+              ? session.layer?.fullExtent ?? null
+              : null
+          }
           key={datasetId}
           mainMapElementRef={mapElementRef}
         />
@@ -115,11 +141,17 @@ export const FileExplorer = memo(function FileExplorer({
           {content}
         </aside>
       ) : null}
-      {fileStructureDialog?.datasetId === datasetId ? (
+      {fileStructureDialog?.datasetId === datasetId &&
+      fileStructureSnapshot &&
+      selectedFile ? (
         createPortal(
           <InspectorDialog
+            fileCount={datasetDownload.files.length}
+            fileIndex={selectedFileIndex}
+            onNextFile={selectNextFile}
             onClose={() => setFileStructureDialog(null)}
-            snapshot={fileStructureDialog.snapshot}
+            onPreviousFile={selectPreviousFile}
+            snapshot={fileStructureSnapshot}
             source={fileStructureDialog.source}
           />,
           document.body,
@@ -618,6 +650,7 @@ const TrackRowGroupTooltip = memo(function TrackRowGroupTooltip({
       window.removeEventListener("resize", updatePosition);
     };
   }, [anchor, coverage, title]);
+  const coverageByFile = groupRowGroupCoverageByFile(coverage);
 
   return (
     <span
@@ -632,44 +665,56 @@ const TrackRowGroupTooltip = memo(function TrackRowGroupTooltip({
       style={tooltipStyle}
     >
       <span className={styles.columnRowGroupTooltipTitle}>{title}</span>
-      <span className={styles.columnRowGroupTooltipGrid}>
-        {coverage.map((rowGroup) => (
-          <span
-            className={[
-              styles.columnRowGroupTooltipCell,
-              hoveredRowGroup?.rowGroupIndex === rowGroup.rowGroupIndex
-                ? styles.selected
-                : null,
-            ].filter(Boolean).join(" ")}
-            key={rowGroup.rowGroupIndex}
-            onMouseEnter={(event) => {
-              keepTooltipHierarchyOpen();
-              setHoveredRowGroup({
-                element: event.currentTarget,
-                rowGroupIndex: rowGroup.rowGroupIndex,
-              });
-              onRowGroupHover(rowGroup.rowGroupIndex);
-            }}
-            onMouseLeave={scheduleRowGroupTooltipClose}
-            style={{
-              "--row-group-download-percent": `${rowGroup.downloadedPercent}%`,
-            } as CSSProperties}
-          >
-            {formatDownloadPercent(rowGroup.downloadedPercent)}
-            {hoveredRowGroup?.rowGroupIndex === rowGroup.rowGroupIndex ? (
-              createPortal(
-                <RowGroupDetailTooltip
-                  anchor={hoveredRowGroup.element}
-                  coverage={rowGroup}
-                  onMouseEnter={keepTooltipHierarchyOpen}
-                  onMouseLeave={() => {
-                    scheduleRowGroupTooltipClose();
-                    onMouseLeave();
+      <span className={styles.columnRowGroupTooltipFiles}>
+        {coverageByFile.map(({ fileName, rowGroups }) => (
+          <span className={styles.columnRowGroupTooltipFile} key={fileName}>
+            <span
+              className={styles.columnRowGroupTooltipFileName}
+              title={formatParquetFileName(fileName)}
+            >
+              {formatParquetFileName(fileName)}
+            </span>
+            <span className={styles.columnRowGroupTooltipGrid}>
+              {rowGroups.map((rowGroup) => (
+                <span
+                  className={[
+                    styles.columnRowGroupTooltipCell,
+                    hoveredRowGroup?.rowGroupIndex === rowGroup.rowGroupIndex
+                      ? styles.selected
+                      : null,
+                  ].filter(Boolean).join(" ")}
+                  key={rowGroup.rowGroupIndex}
+                  onMouseEnter={(event) => {
+                    keepTooltipHierarchyOpen();
+                    setHoveredRowGroup({
+                      element: event.currentTarget,
+                      rowGroupIndex: rowGroup.rowGroupIndex,
+                    });
+                    onRowGroupHover(rowGroup.rowGroupIndex);
                   }}
-                />,
-                document.body,
-              )
-            ) : null}
+                  onMouseLeave={scheduleRowGroupTooltipClose}
+                  style={{
+                    "--row-group-download-percent": `${rowGroup.downloadedPercent}%`,
+                  } as CSSProperties}
+                >
+                  {formatDownloadPercent(rowGroup.downloadedPercent)}
+                  {hoveredRowGroup?.rowGroupIndex === rowGroup.rowGroupIndex ? (
+                    createPortal(
+                      <RowGroupDetailTooltip
+                        anchor={hoveredRowGroup.element}
+                        coverage={rowGroup}
+                        onMouseEnter={keepTooltipHierarchyOpen}
+                        onMouseLeave={() => {
+                          scheduleRowGroupTooltipClose();
+                          onMouseLeave();
+                        }}
+                      />,
+                      document.body,
+                    )
+                  ) : null}
+                </span>
+              ))}
+            </span>
           </span>
         ))}
       </span>
@@ -748,7 +793,9 @@ const RowGroupDetailTooltip = memo(function RowGroupDetailTooltip({
       role="tooltip"
       style={tooltipStyle}
     >
-      <span>Row group {coverage.rowGroupIndex}</span>
+      <span>
+        Row group {coverage.sourceRowGroupIndex ?? coverage.rowGroupIndex}
+      </span>
       <span>
         {formatByteSize(coverage.downloadedByteLength)}
         {" / "}
@@ -808,6 +855,25 @@ const RowGroupDetailTooltip = memo(function RowGroupDetailTooltip({
     </span>
   );
 });
+
+function groupRowGroupCoverageByFile(
+  coverage: readonly DownloadRowGroupCoverage[],
+): Array<{
+  fileName: string;
+  rowGroups: DownloadRowGroupCoverage[];
+}> {
+  const groups = new Map<string, DownloadRowGroupCoverage[]>();
+  for (const rowGroup of coverage) {
+    const fileName = rowGroup.fileName ?? "File";
+    const rowGroups = groups.get(fileName) ?? [];
+    rowGroups.push(rowGroup);
+    groups.set(fileName, rowGroups);
+  }
+  return Array.from(groups, ([fileName, rowGroups]) => ({
+    fileName,
+    rowGroups,
+  }));
+}
 
 const PageIndexColumnDetailTooltip = memo(function PageIndexColumnDetailTooltip({
   anchor,

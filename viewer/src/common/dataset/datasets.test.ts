@@ -49,6 +49,31 @@ describe("dataset factories", () => {
       portalUrl: "https://example.maps.arcgis.com",
       itemId: "item-id",
     });
-    expect(dataset.source).toBe("--");
+    expect(dataset.source).toBe("ArcGIS Portal item");
+    expect(dataset.sourceUrl).toBe(
+      "https://example.maps.arcgis.com/home/item.html?id=item-id",
+    );
+  });
+
+  it("creates the default portal item page source URL", () => {
+    const dataset = createPortalItemDataset(
+      "https://jsapi.maps.arcgis.com/",
+      "5efaf71a6e064e9ea4e67821166c61cd",
+    );
+
+    expect(dataset.sourceUrl).toBe(
+      "https://jsapi.maps.arcgis.com/home/item.html?id=5efaf71a6e064e9ea4e67821166c61cd",
+    );
+  });
+
+  it("preserves hosted portal paths in the item page source URL", () => {
+    const dataset = createPortalItemDataset(
+      "https://example.com/portal/",
+      "item-id",
+    );
+
+    expect(dataset.sourceUrl).toBe(
+      "https://example.com/portal/home/item.html?id=item-id",
+    );
   });
 });

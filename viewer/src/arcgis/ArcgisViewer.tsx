@@ -13,7 +13,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
 
 import { DatasetSelectionPanel } from "../common/dataset/DatasetSelectionPanel";
@@ -25,7 +24,7 @@ import {
 } from "../common/dataset/datasets";
 import { formatCompactCount } from "../common/formatCompactCount";
 import { formatRatio } from "../common/formatNumber";
-import { deriveFileDetailSummary } from "../parquet/fileDetails";
+import type { DatasetDetailSummary } from "../parquet/fileDetails";
 import styles from "./ArcgisViewer.module.css";
 import { FileExplorer } from "./file-explorer/FileExplorer";
 import {
@@ -150,12 +149,7 @@ export function ArcgisViewer() {
   const activeProfile = resolveDatasetMapProfile(
     activeDataset.kind === "preset" ? activeDataset.id : undefined,
   );
-  const downloadTopology = useSyncExternalStore(
-    datasetSession.download.topology.subscribe,
-    datasetSession.download.topology.getSnapshot,
-  );
-  const fileLayout = downloadTopology.layout;
-  const fileSummary = fileLayout ? deriveFileDetailSummary(fileLayout) : null;
+  const detailSummary = datasetSession.download.detailSummary;
   const requestDataset = (dataset: Dataset) => {
     detailsLayout.setOpen(false);
     setRequestedDataset(dataset);
@@ -183,11 +177,11 @@ export function ArcgisViewer() {
           },
         }}
         metrics={{
-          byteSize: fileLayout?.byteLength ?? null,
-          compression: fileSummary
-            ? formatCompressionSummary(fileSummary)
+          byteSize: detailSummary?.byteLength ?? null,
+          compression: detailSummary
+            ? formatCompressionSummary(detailSummary)
             : null,
-          featureCount: fileSummary?.rowCount ?? null,
+          featureCount: detailSummary?.rowCount ?? null,
         }}
         onDatasetSelect={requestDataset}
         showPresetMetadata={false}
@@ -521,10 +515,13 @@ function createDatasetSpatialReference(wkid?: number): SpatialReference {
 }
 
 function formatCompressionSummary(
-  summary: ReturnType<typeof deriveFileDetailSummary>,
+  summary: DatasetDetailSummary,
 ): string {
+  if (summary.compressionCodecs.length === 0) {
+    return "Unavailable";
+  }
   const codec = summary.compressionCodecs.length === 1
-    ? summary.compressionCodecs[0].toUpperCase()
+    ? summary.compressionCodecs[0]
     : "Mixed";
   const ratio = formatRatio(
     summary.uncompressedSize,
