@@ -1,6 +1,6 @@
 import type { AsyncBuffer } from "hyparquet";
 
-export interface ParquetRangeReader {
+export interface RangeReadable {
   readonly byteLength: number;
   read(start: number, end: number, signal?: AbortSignal): Promise<ArrayBuffer>;
   asAsyncBuffer(signal?: AbortSignal): AsyncBuffer;
@@ -8,10 +8,10 @@ export interface ParquetRangeReader {
 }
 
 /**
- * Provides validated HTTP range reads for a single Parquet file and caches completed requests.
- * It owns transport and `AsyncBuffer` adaptation so Parquet consumers can work with byte ranges instead of HTTP responses.
+ * Provides validated HTTP range reads for one SOP Parquet file and caches completed requests.
+ * It adapts HTTP responses to byte ranges and `AsyncBuffer` slices for metadata and page readers.
  */
-export class HttpParquetRangeReader implements ParquetRangeReader {
+export class RangeReader implements RangeReadable {
   readonly byteLength: number;
 
   private readonly _completedRangeCache = new Map<string, ArrayBuffer>();

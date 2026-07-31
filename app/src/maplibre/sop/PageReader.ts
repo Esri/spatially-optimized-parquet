@@ -12,7 +12,7 @@ import { DEFAULT_PARSERS } from "hyparquet/src/convert.js";
 import { getSchemaPath } from "hyparquet/src/schema.js";
 
 import type { XZRange } from "./xz";
-import type { ParquetRangeReader } from "./HttpParquetRangeReader";
+import type { RangeReadable } from "./RangeReader";
 
 export interface PhysicalColumn {
   path: string[];
@@ -42,13 +42,13 @@ export interface LeafPage<T> {
 
 /**
  * Resolves Parquet metadata and page indexes into decoded leaf-column pages.
- * It owns page selection and range-read details so dataset queries fetch only the rows and columns they need.
+ * It owns physical-column lookup, page selection, and decoding so SOP queries fetch only required ranges.
  */
-export class HyparquetLeafReader {
+export class PageReader {
   private readonly _rowGroupStarts: number[];
 
   constructor(
-    private readonly _reader: ParquetRangeReader,
+    private readonly _reader: RangeReadable,
     private readonly _metadata: FileMetaData,
   ) {
     let rowStart = 0;

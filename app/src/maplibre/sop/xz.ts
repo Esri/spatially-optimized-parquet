@@ -1,4 +1,4 @@
-import type { Bounds } from "./datasetParquetMetadata";
+import type { Bounds } from "./metadata";
 
 export interface XZRange {
   start: number;

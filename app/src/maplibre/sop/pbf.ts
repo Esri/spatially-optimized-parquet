@@ -1,15 +1,8 @@
 import type {
-  LineString,
-  MultiLineString,
-  MultiPolygon,
-  Polygon,
-  Position,
-} from "geojson";
-
-import type {
   QuantizationTransform,
   XZDisplayMetadata,
-} from "./datasetParquetMetadata";
+} from "./metadata";
+import type { Position, SupportedGeometry } from "./geojson";
 
 interface PbfGeometry {
   lengths: number[];
@@ -17,12 +10,6 @@ interface PbfGeometry {
 }
 
 type Ring = Position[];
-
-export type SupportedGeometry =
-  | Polygon
-  | MultiPolygon
-  | LineString
-  | MultiLineString;
 
 export function decodeGeometry(
   bytes: Uint8Array,
@@ -139,10 +126,10 @@ function closeValidRing(ring: Ring): Ring | null {
 
   const first = ring[0];
   const last = ring.at(-1)!;
-  const closedRing =
+  const closedRing: Ring =
     first[0] === last[0] && first[1] === last[1]
       ? ring
-      : [...ring, [...first]];
+      : [...ring, [first[0], first[1]]];
 
   return closedRing.length >= 4 && signedRingArea(closedRing) !== 0
     ? closedRing

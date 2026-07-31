@@ -4,7 +4,7 @@ import {
   type FileMetaData,
 } from "hyparquet";
 
-import { formatRatio } from "../common/formatNumber";
+import { formatRatio } from "../../common/formatNumber";
 
 export interface Bounds {
   xmin: number;
@@ -19,14 +19,14 @@ export interface QuantizationTransform {
 }
 
 export interface LODLevel {
-  columnPath: [string, string];
+  columnPath: string[];
   level: number;
   resolution: number;
   transform: QuantizationTransform;
 }
 
 export interface XZDisplayMetadata {
-  codePath: [string];
+  codePath: string[];
   fullExtent: Bounds;
   geometryType: "polygon" | "polyline";
   maxLevel: number;
@@ -60,8 +60,11 @@ export async function loadDatasetParquetMetadata(
     validatePhysicalColumn(metadata, level.columnPath);
   }
 
-  return {   compression: formatCompression(metadata),
-  file: metadata, display };
+  return {
+    compression: formatCompression(metadata),
+    file: metadata,
+    display,
+  };
 }
 
 function formatCompression(metadata: FileMetaData): string | null {
@@ -110,7 +113,7 @@ export function selectLODLevel(
   return level ?? levels.at(-1)!;
 }
 
-function parseXZDisplayMetadata(value: unknown): XZDisplayMetadata {
+export function parseXZDisplayMetadata(value: unknown): XZDisplayMetadata {
   if (!isRecord(value)) {
     throw new Error("Geodisplay metadata must contain an object.");
   }
@@ -134,7 +137,7 @@ function parseXZDisplayMetadata(value: unknown): XZDisplayMetadata {
     throw new Error("The MapLibre Parquet POC supports XY display geometry only.");
   }
 
-  const code = requireString(value.code, "geodisplay.code");
+  const codePath = normalizeColumnPath(value.code, "geodisplay.code");
   const maxLevel = requireInteger(value.maxLevel, "geodisplay.maxLevel");
   const fullExtent = parseBounds(value.fullExtent);
   if (!Array.isArray(value.levels) || value.levels.length === 0) {
@@ -146,7 +149,7 @@ function parseXZDisplayMetadata(value: unknown): XZDisplayMetadata {
     .sort((left, right) => left.level - right.level);
 
   return {
-    codePath: [code],
+    codePath,
     fullExtent,
     geometryType: value.geometryType,
     maxLevel,
@@ -159,16 +162,11 @@ function parseLODLevel(value: unknown): LODLevel {
   if (!isRecord(value)) {
     throw new Error("Each geodisplay LOD level must contain an object.");
   }
-  if (
-    !Array.isArray(value.column) ||
-    value.column.length !== 2 ||
-    !value.column.every((part) => typeof part === "string")
-  ) {
-    throw new Error("Each geodisplay LOD column must contain a two-part path.");
-  }
-
   return {
-    columnPath: [value.column[0], value.column[1]],
+    columnPath: normalizeColumnPath(
+      value.column,
+      "geodisplay.levels[].column",
+    ),
     level: requireInteger(value.level, "geodisplay.levels[].level"),
     resolution: requirePositiveNumber(
       value.resolution,
@@ -262,12 +260,27 @@ function requireNumber(value: unknown, name: string): number {
   return value;
 }
 
-function requireString(value: unknown, name: string): string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(`${name} must contain a non-empty string.`);
+function normalizeColumnPath(value: unknown, name: string): string[] {
+  if (typeof value === "string") {
+    if (value.length === 0) {
+      throw new TypeError(`${name} must contain a non-empty column path.`);
+    }
+    return [value];
   }
 
-  return value;
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    !value.every(
+      (part) => typeof part === "string" && part.length > 0,
+    )
+  ) {
+    throw new TypeError(
+      `${name} must contain a non-empty string or an array of non-empty strings.`,
+    );
+  }
+
+  return [...value];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

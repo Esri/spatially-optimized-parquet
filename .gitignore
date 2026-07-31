@@ -1,5 +1,6 @@
 /target
 /data
+/data_sop
 /test-data
 /app/dist
 /app/node_modules

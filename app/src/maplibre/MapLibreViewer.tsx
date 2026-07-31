@@ -7,22 +7,22 @@ import { DatasetSelectionPanel } from "../common/dataset/DatasetSelectionPanel";
 import { datasets } from "../common/dataset/datasets";
 import { formatCompactCount } from "../common/formatCompactCount";
 import {
-  ParquetDatasetSource,
+  MapLibreParquetLayer,
   type DatasetLayerStatus,
-} from "./ParquetDatasetSource";
-import styles from "./MaplibreViewer.module.css";
+} from "./MapLibreParquetLayer";
+import styles from "./MapLibreViewer.module.css";
 
 const openFreeMapDarkStyleUrl = "https://tiles.openfreemap.org/styles/dark";
 const mapScaleAtZoomZero = 295_829_355.4545656;
 
 /**
- * Renders the MapLibre dataset workspace and connects the selected dataset to its Parquet-backed map source.
- * It owns map and source lifecycles so dataset changes cancel and replace the previous query pipeline cleanly.
+ * Renders the MapLibre dataset workspace and connects the selected dataset to its SOP-backed layer.
+ * It owns the React map and layer lifecycles so dataset changes replace the previous viewport pipeline cleanly.
  */
 export default function MaplibreViewer() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const datasetSourceRef = useRef<ParquetDatasetSource | null>(null);
+  const datasetLayerRef = useRef<MapLibreParquetLayer | null>(null);
   const [datasetIndex, setDatasetIndex] = useState(0);
   const [mapInstance, setMapInstance] = useState<maplibregl.Map | null>(null);
   const [status, setStatus] = useState<DatasetLayerStatus>({ type: "idle" });
@@ -48,8 +48,8 @@ export default function MaplibreViewer() {
     setMapInstance(map);
 
     return () => {
-      datasetSourceRef.current?.dispose();
-      datasetSourceRef.current = null;
+      datasetLayerRef.current?.dispose();
+      datasetLayerRef.current = null;
       resizeObserver.disconnect();
       if (mapRef.current === map) {
         mapRef.current = null;
@@ -69,21 +69,21 @@ export default function MaplibreViewer() {
       center: activeDataset.center,
       zoom: scaleToZoom(activeDataset.scale),
     });
-    const datasetSource = new ParquetDatasetSource(
+    const datasetLayer = new MapLibreParquetLayer(
       mapInstance,
       activeDataset,
       {
         onStatusChange: setStatus,
       },
     );
-    datasetSourceRef.current = datasetSource;
-    datasetSource.initialize();
-    datasetSource.refresh();
+    datasetLayerRef.current = datasetLayer;
+    datasetLayer.initialize();
+    datasetLayer.refresh();
 
     return () => {
-      datasetSource.dispose();
-      if (datasetSourceRef.current === datasetSource) {
-        datasetSourceRef.current = null;
+      datasetLayer.dispose();
+      if (datasetLayerRef.current === datasetLayer) {
+        datasetLayerRef.current = null;
       }
     };
   }, [activeDataset, mapInstance]);

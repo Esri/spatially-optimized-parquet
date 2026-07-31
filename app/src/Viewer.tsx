@@ -3,7 +3,7 @@ import { lazy, Suspense } from "react";
 import { ArcgisViewer } from "./arcgis/ArcgisViewer";
 
 const MaplibreViewer = lazy(
-  () => import("./maplibre/MaplibreViewer"),
+  () => import("./maplibre/MapLibreViewer"),
 );
 
 export type ViewerType = "arcgis" | "maplibre";
