@@ -1,3 +1,9 @@
+/**
+ * The metadata reader reads the root Parquet `geodisplay` entry.
+ * The reader validates XZ metadata, LOD columns, transforms, and physical column paths.
+ * The MapLibre example accepts only WGS84 XY polygon or polyline Esri PBF.
+ * The reader does not use Spark field metadata.
+ */
 import {
   parquetMetadataAsync,
   type AsyncBuffer,
@@ -42,6 +48,10 @@ export interface DatasetParquetMetadata {
 
 const maximumResolutionDrift = 2 ** 0.001;
 
+/**
+ * Parse the root SOP `geodisplay` entry from the Parquet footer.
+ * Before any viewport query, validate every referenced physical column.
+ */
 export async function loadDatasetParquetMetadata(
   file: AsyncBuffer,
 ): Promise<DatasetParquetMetadata> {
@@ -67,6 +77,9 @@ export async function loadDatasetParquetMetadata(
   };
 }
 
+/**
+ * Report the physical codec and the ratio of total raw bytes to compressed bytes.
+ */
 function formatCompression(metadata: FileMetaData): string | null {
   const codecs = new Set<string>();
   let compressedSize = 0n;
@@ -97,6 +110,10 @@ function formatCompression(metadata: FileMetaData): string | null {
   return ratio ? `${codec.toUpperCase()} ${ratio}` : codec;
 }
 
+/**
+ * Use `spec/display-optimization.md#select-multiscale-levels` to choose the closest stored level with enough detail.
+ * If numeric drift prevents a match, use the most detailed level.
+ */
 export function selectLODLevel(
   levels: LODLevel[],
   sourceResolution: number,
@@ -113,6 +130,10 @@ export function selectLODLevel(
   return level ?? levels.at(-1)!;
 }
 
+/**
+ * Require root metadata and WGS84 coordinates.
+ * Accept only XY polygon or polyline Esri PBF.
+ */
 export function parseXZDisplayMetadata(value: unknown): XZDisplayMetadata {
   if (!isRecord(value)) {
     throw new Error("Geodisplay metadata must contain an object.");
@@ -146,6 +167,7 @@ export function parseXZDisplayMetadata(value: unknown): XZDisplayMetadata {
 
   const levels = value.levels
     .map(parseLODLevel)
+    // Sort levels from coarse to detailed so LOD choice follows specification order.
     .sort((left, right) => left.level - right.level);
 
   return {
@@ -158,6 +180,9 @@ export function parseXZDisplayMetadata(value: unknown): XZDisplayMetadata {
   };
 }
 
+/**
+ * Convert one SOP `MultiscaleLevel` entry to its physical column path and quantization transform.
+ */
 function parseLODLevel(value: unknown): LODLevel {
   if (!isRecord(value)) {
     throw new Error("Each geodisplay LOD level must contain an object.");
@@ -176,6 +201,10 @@ function parseLODLevel(value: unknown): LODLevel {
   };
 }
 
+/**
+ * Require `fullExtent` to have finite values and positive area.
+ * The query uses the validated extent for XZ codes and viewport limits.
+ */
 function parseBounds(value: unknown): Bounds {
   if (!isRecord(value)) {
     throw new Error("Geodisplay fullExtent must contain an object.");
@@ -194,6 +223,10 @@ function parseBounds(value: unknown): Bounds {
   return bounds;
 }
 
+/**
+ * Read all four scale and translation values from `spec/display-optimization.md#multiscale-transform`.
+ * Reject Z and M data before this step.
+ */
 function parseTransform(value: unknown): QuantizationTransform {
   if (!isRecord(value)) {
     throw new Error("Each geodisplay LOD transform must contain an object.");
@@ -220,6 +253,9 @@ function parseNumberTuple(
   return [value[0], value[1], value[2], value[3]];
 }
 
+/**
+ * Verify that the metadata path names a physical leaf column in the first row group.
+ */
 function validatePhysicalColumn(
   metadata: FileMetaData,
   path: readonly string[],
@@ -260,6 +296,12 @@ function requireNumber(value: unknown, name: string): number {
   return value;
 }
 
+/**
+ * The SOP root path uses text or a two-part tuple.
+ * The MapLibre reader also accepts a nonempty text array.
+ * The reader resolves each accepted path against physical Parquet columns.
+ * The reader does not use Spark field metadata.
+ */
 function normalizeColumnPath(value: unknown, name: string): string[] {
   if (typeof value === "string") {
     if (value.length === 0) {

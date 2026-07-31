@@ -1,3 +1,8 @@
+/**
+ * The GeoJSON model defines the data that `MapLibreParquetLayer` sends to MapLibre.
+ * The model supports only XY line and polygon geometry from `spec/display-optimization.md#encoding`.
+ * MapLibre applies visual styles after it receives the collection.
+ */
 export type Position = [number, number];
 
 export interface LineString {
@@ -28,7 +33,9 @@ export type SupportedGeometry =
 
 export interface GeoJSONFeature {
   type: "Feature";
+  /** The global Parquet row number provides stable identity within one file. */
   id: number;
+  /** The MapLibre display does not read attribute columns. */
   properties: Record<string, never>;
   geometry: SupportedGeometry;
 }

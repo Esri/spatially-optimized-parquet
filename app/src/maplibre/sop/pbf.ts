@@ -1,3 +1,9 @@
+/**
+ * The decoder converts SOP multiscale Esri PBF into GeoJSON line or polygon geometry.
+ * The field layout matches `spec/display-optimization.md#encoding` and `crates/spatial/src/geometry/pbf.rs`.
+ * The decoder reverses XY deltas and the quantization transform.
+ * The decoder rejects invalid or degenerate parts before `Query` applies exact extent tests.
+ */
 import type {
   QuantizationTransform,
   XZDisplayMetadata,
@@ -11,6 +17,10 @@ interface PbfGeometry {
 
 type Ring = Position[];
 
+/**
+ * Decode one XY SOP payload into supported GeoJSON geometry.
+ * Treat clockwise input rings as exteriors and later counterclockwise rings as their holes.
+ */
 export function decodeGeometry(
   bytes: Uint8Array,
   transform: QuantizationTransform,
@@ -49,6 +59,10 @@ export function decodeGeometry(
   };
 }
 
+/**
+ * Decode the `lengths` and `coords` fields from `spec/display-optimization.md#encoding`.
+ * Accept packed and unpacked repeated values.
+ */
 function parsePbfGeometry(bytes: Uint8Array): PbfGeometry {
   const reader = new ProtobufReader(bytes);
   const lengths: number[] = [];
@@ -91,6 +105,9 @@ function parsePbfGeometry(bytes: Uint8Array): PbfGeometry {
   return { lengths, coordinates };
 }
 
+/**
+ * Reconstruct each coordinate from zero-based XY delta sums and the level transform.
+ */
 function unquantizeRings(
   geometry: PbfGeometry,
   transform: QuantizationTransform,
@@ -119,6 +136,11 @@ function unquantizeRings(
   return rings;
 }
 
+/**
+ * The decoder closes polygon rings and rejects zero-area parts.
+ * `spec/display-optimization.md#multiscale-requirements` permits one coordinate for a degenerate payload.
+ * The MapLibre example omits that polygon part because no point symbol path exists.
+ */
 function closeValidRing(ring: Ring): Ring | null {
   if (ring.length < 3) {
     return null;
@@ -136,6 +158,10 @@ function closeValidRing(ring: Ring): Ring | null {
     : null;
 }
 
+/**
+ * The decoder treats clockwise rings as exteriors and later counterclockwise rings as holes.
+ * The decoder does not test containment or repair an unexpected ring direction.
+ */
 function groupPolygonRings(rings: Ring[]): Ring[][] {
   const polygons: Ring[][] = [];
 
@@ -154,11 +180,15 @@ function groupPolygonRings(rings: Ring[]): Ring[][] {
   return polygons;
 }
 
+/**
+ * Output the RFC 7946 ring direction: counterclockwise exteriors and clockwise holes.
+ */
 function normalizeRingWinding(ring: Ring, clockwise: boolean): Ring {
   const isClockwise = signedRingArea(ring) < 0;
   return isClockwise === clockwise ? ring : [...ring].reverse();
 }
 
+/** Return a negative area for a clockwise input ring. */
 function signedRingArea(ring: Ring): number {
   let area = 0;
   for (let index = 0; index < ring.length - 1; index += 1) {
@@ -171,8 +201,9 @@ function signedRingArea(ring: Ring): number {
 }
 
 /**
- * Owns the cursor used to decode the small Protobuf subset required by Esri PBF geometry.
- * This boundary keeps wire-format validation separate from geometry reconstruction.
+ * `ProtobufReader` owns the byte cursor and validates the Esri PBF wire subset.
+ * Each operation advances one cursor for one payload.
+ * Geometry reconstruction stays outside `ProtobufReader`, so wire checks cannot change geometry parts.
  */
 class ProtobufReader {
   private _offset = 0;
@@ -183,6 +214,10 @@ class ProtobufReader {
     return this._offset === this._bytes.length;
   }
 
+  /**
+   * Read one unsigned base-128 varint.
+   * Reject truncated values and values longer than 64 bits.
+   */
   readUnsignedVarint(): bigint {
     let value = 0n;
     let shift = 0n;
@@ -204,10 +239,16 @@ class ProtobufReader {
     return this._readPacked((value) => Number(value));
   }
 
+  /**
+   * Decode packed `sint64` values with Protobuf zigzag.
+   */
   readPackedSigned(): number[] {
     return this._readPacked(decodeZigzag);
   }
 
+  /**
+   * Skip unknown fields that use standard scalar or length-delimited Protobuf wire types.
+   */
   skipField(wireType: number): void {
     if (wireType === 0) {
       this.readUnsignedVarint();
@@ -249,6 +290,10 @@ class ProtobufReader {
   }
 }
 
+/**
+ * Reverse Protobuf zigzag.
+ * Reject values outside the exact JavaScript integer range.
+ */
 function decodeZigzag(value: bigint): number {
   const decoded = (value >> 1n) ^ -(value & 1n);
   const number = Number(decoded);

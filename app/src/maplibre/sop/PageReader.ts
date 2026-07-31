@@ -1,3 +1,9 @@
+/**
+ * `PageReader` resolves metadata paths to physical Parquet columns.
+ * XZ statistics reject unrelated row groups and pages.
+ * Hyparquet decodes selected data pages with any required dictionary bytes.
+ * `PageReader` maps decoded values to row IDs.
+ */
 import {
   readColumnIndex,
   readOffsetIndex,
@@ -14,6 +20,9 @@ import { getSchemaPath } from "hyparquet/src/schema.js";
 import type { XZRange } from "./xz";
 import type { RangeReadable } from "./RangeReader";
 
+/**
+ * `PhysicalColumn` identifies one leaf column chunk and its local and global row offsets.
+ */
 export interface PhysicalColumn {
   path: string[];
   rowGroupIndex: number;
@@ -41,12 +50,14 @@ export interface LeafPage<T> {
 }
 
 /**
- * Resolves Parquet metadata and page indexes into decoded leaf-column pages.
- * It owns physical-column lookup, page selection, and decoding so SOP queries fetch only required ranges.
+ * `PageReader` owns immutable Parquet metadata and the start row for each row group.
+ * `PageReader` selects pages through XZ statistics or row IDs.
+ * Hyparquet decodes the selected column bytes.
  */
 export class PageReader {
   private readonly _rowGroupStarts: number[];
 
+  /** Calculate each row group's start row for global feature IDs. */
   constructor(
     private readonly _reader: RangeReadable,
     private readonly _metadata: FileMetaData,
@@ -59,6 +70,10 @@ export class PageReader {
     });
   }
 
+  /**
+   * Reject row groups whose XZ statistics do not overlap the query ranges.
+   * Keep a row group if its statistics are absent.
+   */
   getColumnsMatchingXZ(
     path: readonly string[],
     ranges: XZRange[],
@@ -77,6 +92,9 @@ export class PageReader {
     });
   }
 
+  /**
+   * Resolve an absolute metadata path to one physical leaf column in a row group.
+   */
   getPhysicalColumn(
     rowGroupIndex: number,
     path: readonly string[],
@@ -108,6 +126,10 @@ export class PageReader {
     };
   }
 
+  /**
+   * Use Parquet `ColumnIndex` bounds to reject pages outside all XZ ranges.
+   * Follow the Page Index rule in `spec/display-optimization.md`.
+   */
   async selectPagesByXZ(
     column: PhysicalColumn,
     ranges: XZRange[],
@@ -122,6 +144,10 @@ export class PageReader {
     );
   }
 
+  /**
+   * Select pages that contain at least one requested row ID.
+   * Keep `rowIds` in low-to-high order from the XZ scan.
+   */
   async selectPagesByRowId(
     column: PhysicalColumn,
     rowIds: number[],
@@ -136,6 +162,7 @@ export class PageReader {
     let rowIndex = 0;
 
     for (const page of pages) {
+      // Advance once through sorted row IDs.
       while (rowIndex < rowIds.length && rowIds[rowIndex] < page.rowStart) {
         rowIndex += 1;
       }
@@ -150,6 +177,10 @@ export class PageReader {
     return selectedPages;
   }
 
+  /**
+   * Decode only the selected data pages.
+   * Prefix dictionary bytes before decode when the column uses a dictionary page.
+   */
   async readLeafPages<T>(
     column: PhysicalColumn,
     pages: IndexedPage[],
@@ -171,6 +202,7 @@ export class PageReader {
         page.byteEnd,
         signal,
       );
+      // Hyparquet accepts dictionary values when dictionary bytes precede the selected page.
       const buffer = dictionary
         ? concatenateBuffers(dictionary, pageBuffer)
         : pageBuffer;
@@ -203,6 +235,10 @@ export class PageReader {
     return output;
   }
 
+  /**
+   * Create one `IndexedPage` per page from both Parquet page indexes.
+   * Require both indexes because `PageReader` does not scan full columns.
+   */
   private async _readPageIndex(
     column: PhysicalColumn,
     signal?: AbortSignal,
@@ -265,6 +301,7 @@ export class PageReader {
     });
   }
 
+  /** Read the dictionary bytes before the first data page. */
   private async _readDictionary(
     column: PhysicalColumn,
     signal?: AbortSignal,
@@ -282,6 +319,7 @@ export class PageReader {
   }
 }
 
+/** Treat XZ statistics and query ranges as inclusive intervals. */
 function rangesOverlap(
   minimum: number,
   maximum: number,
@@ -292,6 +330,10 @@ function rangesOverlap(
   );
 }
 
+/**
+ * `concatenateBuffers` copies dictionary and data page bytes into a new buffer.
+ * The copy preserves cached buffers.
+ */
 function concatenateBuffers(
   first: ArrayBuffer,
   second: ArrayBuffer,
@@ -302,6 +344,7 @@ function concatenateBuffers(
   return combined.buffer;
 }
 
+/** Flatten Hyparquet chunks in physical value order. */
 function flattenDecodedValues<T>(chunks: unknown[]): T[] {
   const values: T[] = [];
 

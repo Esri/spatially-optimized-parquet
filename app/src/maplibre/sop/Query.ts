@@ -1,3 +1,9 @@
+/**
+ * `Query` reads one SOP viewport from a remote Parquet file.
+ * `Query` loads `geodisplay` metadata and finds rows through XZ and Parquet page indexes.
+ * The PBF decoder reconstructs the selected LOD geometry.
+ * Exact extent tests reject false XZ matches before `Query` returns GeoJSON.
+ */
 import {
   loadDatasetParquetMetadata,
   selectLODLevel,
@@ -25,11 +31,15 @@ import {
   type XZRange,
 } from "./xz";
 
+/** The limit applies after the exact geometry extent test. */
 export const datasetFeatureLimit = 650_000;
 
 export interface QueryInput {
+  /** Contains one clipped extent or two extents across the antimeridian. */
   queryExtents: Bounds[];
+  /** Provides map units per source pixel for the SOP LOD choice. */
   sourceResolution: number;
+  /** Stops range reads and later work at explicit signal checks. */
   signal: AbortSignal;
 }
 
@@ -60,8 +70,9 @@ interface FeatureCollectionResult {
 }
 
 /**
- * Executes SOP viewport queries against one remote Parquet dataset without depending on a map SDK.
- * It owns metadata caching, LOD and XZ selection, page reads, geometry decoding, filtering, and GeoJSON construction.
+ * `Query` owns the metadata cache and `PageReader` for one Parquet file.
+ * `Query` uses XZ ranges and page statistics to find candidate rows.
+ * Synchronous row and geometry loops stop only at the next signal check.
  */
 export class Query {
   private readonly _rangeReader: RangeReadable;
@@ -77,6 +88,10 @@ export class Query {
       options.rangeReader ?? new RangeReader(url, byteLength);
   }
 
+  /**
+   * Load metadata once before the first viewport query.
+   * Return only the extent and geometry type that MapLibre needs.
+   */
   async loadMetadata(signal: AbortSignal): Promise<QueryMetadata> {
     const metadata = await this._getMetadata(signal);
     return {
@@ -85,6 +100,10 @@ export class Query {
     };
   }
 
+  /**
+   * `execute` prepares one LOD query from XZ ranges.
+   * The query rejects false extent matches before the 650,000-feature limit applies.
+   */
   async execute({
     queryExtents,
     sourceResolution,
@@ -129,10 +148,18 @@ export class Query {
     };
   }
 
+  /**
+   * Clear completed byte ranges.
+   * Keep parsed metadata and page index data for this `Query`.
+   */
   clear(): void {
     this._rangeReader.clear();
   }
 
+  /**
+   * Validate root metadata on its first load.
+   * Create `PageReader` after validation.
+   */
   private async _getMetadata(
     signal: AbortSignal,
   ): Promise<DatasetParquetMetadata> {
@@ -149,6 +176,10 @@ export class Query {
     return metadata;
   }
 
+  /**
+   * Use XZ statistics to reject unrelated row groups and pages.
+   * Test each decoded XZ code against the merged query ranges.
+   */
   private async _queryMatchingRowIds(
     metadata: DatasetParquetMetadata,
     xzRanges: XZRange[],
@@ -177,6 +208,7 @@ export class Query {
       for (const page of leafPages) {
         for (let index = 0; index < page.values.length; index += 1) {
           if (xzCodeMatches(Number(page.values[index]), xzRanges)) {
+            // Keep page order so later page selection receives sorted row IDs.
             matchingRows.push(page.rowStart + index);
           }
         }
@@ -190,6 +222,11 @@ export class Query {
     return { rowsByGroup };
   }
 
+  /**
+   * Read the selected LOD column only for candidate rows.
+   * Test the exact extent of each decoded PBF geometry.
+   * Do not treat an XZ match as proof of extent overlap.
+   */
   private async _buildFeatureCollection(
     lodLevel: LODLevel,
     matchingRows: MatchingRowStore,
@@ -228,6 +265,7 @@ export class Query {
           continue;
         }
 
+        // Apply the feature limit only after the exact geometry extent test.
         if (features.length === datasetFeatureLimit) {
           return {
             featureCollection: {
@@ -256,6 +294,10 @@ export class Query {
     };
   }
 
+  /**
+   * Read only pages that contain requested row IDs.
+   * Restore each row ID and value pair without a new sort.
+   */
   private async _readSelectedRows<T>(
     column: PhysicalColumn,
     rowIds: number[],
@@ -287,6 +329,7 @@ export class Query {
     return valuesByRow;
   }
 
+  /** Require metadata before any Parquet page read. */
   private _requirePageReader(): PageReader {
     if (!this._pageReader) {
       throw new Error("Dataset Parquet metadata has not been initialized.");
@@ -296,6 +339,10 @@ export class Query {
   }
 }
 
+/**
+ * Test exact geometry bounds against each clipped viewport extent.
+ * Do not run a full geometry intersection.
+ */
 function geometryIntersectsExtents(
   geometry: SupportedGeometry,
   extents: Bounds[],

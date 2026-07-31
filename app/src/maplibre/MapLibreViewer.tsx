@@ -1,3 +1,7 @@
+/**
+ * The React view creates the MapLibre map and selects one SOP dataset.
+ * `MaplibreViewer` converts the initial map scale to zoom and gives viewport reads to `MapLibreParquetLayer`.
+ */
 import maplibregl from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
 
@@ -16,8 +20,8 @@ const openFreeMapDarkStyleUrl = "https://tiles.openfreemap.org/styles/dark";
 const mapScaleAtZoomZero = 295_829_355.4545656;
 
 /**
- * Renders the MapLibre dataset workspace and connects the selected dataset to its SOP-backed layer.
- * It owns the React map and layer lifecycles so dataset changes replace the previous viewport pipeline cleanly.
+ * `MaplibreViewer` owns the map and the selected dataset layer.
+ * A dataset change removes the prior query before the new layer sets source data.
  */
 export default function MaplibreViewer() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -135,6 +139,7 @@ export default function MaplibreViewer() {
   );
 }
 
+/** Append `+` when the exact extent test reaches the feature limit. */
 function formatFeatureCount(status: DatasetLayerStatus): string {
   if (status.type !== "ready") {
     return "…";
@@ -147,6 +152,10 @@ function formatFeatureCount(status: DatasetLayerStatus): string {
     : count;
 }
 
+/**
+ * Convert the map scale to zoom with the common zoom-zero scale.
+ * Let `Query` choose the LOD from source resolution.
+ */
 function scaleToZoom(scale: number): number {
   return Math.log2(mapScaleAtZoomZero / scale);
 }

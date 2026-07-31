@@ -1,5 +1,11 @@
+/**
+ * `RangeReader` reads byte ranges from one remote Parquet file.
+ * `RangeReader` validates HTTP partial responses and caches completed exact ranges.
+ * Hyparquet uses its `AsyncBuffer` adapter for the Page Index path in `spec/display-optimization.md`.
+ */
 import type { AsyncBuffer } from "hyparquet";
 
+/** `RangeReadable` defines the byte source for metadata and page reads. */
 export interface RangeReadable {
   readonly byteLength: number;
   read(start: number, end: number, signal?: AbortSignal): Promise<ArrayBuffer>;
@@ -8,8 +14,9 @@ export interface RangeReadable {
 }
 
 /**
- * Provides validated HTTP range reads for one SOP Parquet file and caches completed requests.
- * It adapts HTTP responses to byte ranges and `AsyncBuffer` slices for metadata and page readers.
+ * `RangeReader` owns the remote file state and a cache of completed ranges.
+ * `RangeReader` validates each HTTP partial response.
+ * `RangeReader` does not combine requests whose ranges overlap or requests that remain in progress.
  */
 export class RangeReader implements RangeReadable {
   readonly byteLength: number;
@@ -23,6 +30,11 @@ export class RangeReader implements RangeReadable {
     this.byteLength = byteLength;
   }
 
+  /**
+   * Read the half-open byte range `[start, end)` with an HTTP `Range` request.
+   * Before cache insert, require status 206 and the exact byte count.
+   * Do not parse the `Content-Range` header.
+   */
   async read(
     start: number,
     end: number,
@@ -58,6 +70,11 @@ export class RangeReader implements RangeReadable {
     return buffer;
   }
 
+  /**
+   * Adapt this reader to Hyparquet's slice-based `AsyncBuffer`.
+   * Apply the supplied signal to network reads.
+   * Return completed cache entries without a new abortable request.
+   */
   asAsyncBuffer(signal?: AbortSignal): AsyncBuffer {
     return {
       byteLength: this.byteLength,
@@ -65,11 +82,16 @@ export class RangeReader implements RangeReadable {
     };
   }
 
+  /**
+   * Clear completed ranges.
+   * Do not cancel requests that are in progress.
+   */
   clear(): void {
     this._completedRangeCache.clear();
   }
 }
 
+/** Reject unsafe integers and invalid half-open ranges before any HTTP request. */
 function validateRange(start: number, end: number, byteLength: number): void {
   if (
     !Number.isSafeInteger(start) ||

@@ -1,3 +1,8 @@
+/**
+ * `MapLibreParquetLayer` converts MapLibre viewports to SOP query inputs.
+ * The layer creates and removes the MapLibre source and style layers.
+ * The layer sets GeoJSON source data only for the current request.
+ */
 import type {
   GeoJSONSource,
   Map as MapLibreMap,
@@ -41,8 +46,9 @@ const emptyFeatureCollection: GeoJSONFeatureCollection = {
 };
 
 /**
- * Connects one SOP query to MapLibre sources and styled layers for the active dataset.
- * It owns map events, viewport extraction, request cancellation, query versioning, layer lifecycle, and status publication.
+ * `MapLibreParquetLayer` owns one `Query` and all MapLibre state for a dataset.
+ * The layer cancels old range reads and rejects late results.
+ * `Query` reads metadata and each SOP column.
  */
 export class MapLibreParquetLayer {
   private readonly _query: Query;
@@ -63,6 +69,10 @@ export class MapLibreParquetLayer {
     this._onStatusChange = options.onStatusChange;
   }
 
+  /**
+   * Attach each map event listener once.
+   * Call `refresh` after `initialize` when the style already exists.
+   */
   initialize(): void {
     if (this._initialized || this._disposed) {
       return;
@@ -78,6 +88,10 @@ export class MapLibreParquetLayer {
     }
   }
 
+  /**
+   * Start a query only after initialization and style load.
+   * Replace the previous request with the new request.
+   */
   refresh(): void {
     if (!this._initialized || !this._styleReady || this._disposed) {
       return;
@@ -86,6 +100,11 @@ export class MapLibreParquetLayer {
     void this._queryCurrentView();
   }
 
+  /**
+   * `dispose` prevents future source updates and releases all map state.
+   * `dispose` cancels network reads.
+   * A synchronous decode loop stops at its next signal check.
+   */
   dispose(): void {
     if (this._disposed) {
       return;
@@ -110,6 +129,11 @@ export class MapLibreParquetLayer {
     this.refresh();
   };
 
+  /**
+   * Create one SOP query from the current map state.
+   * Cancel asynchronous reads with the signal.
+   * Reject late synchronous work with the request number.
+   */
   private async _queryCurrentView(): Promise<void> {
     const queryVersion = ++this._queryVersion;
     this._activeQuery?.abort();
@@ -128,10 +152,10 @@ export class MapLibreParquetLayer {
         sourceResolution: getMapSourceResolution(this._map),
         signal: controller.signal,
       });
-      this._publish(queryVersion, controller.signal, queryResult);
+      this._applyQueryResult(queryVersion, controller.signal, queryResult);
     } catch (error) {
       if (!isAbortError(error)) {
-        this._publishFailure(queryVersion, error);
+        this._reportQueryFailure(queryVersion, error);
       }
     } finally {
       if (queryVersion === this._queryVersion) {
@@ -140,7 +164,10 @@ export class MapLibreParquetLayer {
     }
   }
 
-  private _publish(
+  /**
+   * Apply the query result only for the current request.
+   */
+  private _applyQueryResult(
     queryVersion: number,
     signal: AbortSignal,
     result: QueryResult,
@@ -159,7 +186,8 @@ export class MapLibreParquetLayer {
     });
   }
 
-  private _publishFailure(queryVersion: number, error: unknown): void {
+  /** If no newer request exists, report the query error. */
+  private _reportQueryFailure(queryVersion: number, error: unknown): void {
     if (queryVersion !== this._queryVersion) {
       return;
     }
@@ -170,6 +198,9 @@ export class MapLibreParquetLayer {
     });
   }
 
+  /**
+   * Require the current request number and a live abort signal before a MapLibre change.
+   */
   private _isCurrentQuery(
     queryVersion: number,
     signal: AbortSignal,
@@ -255,6 +286,9 @@ export class MapLibreParquetLayer {
     }
   }
 
+  /**
+   * Remove each style layer before the source to preserve MapLibre dependency order.
+   */
   private _removeMapLayers(): void {
     if (!this._map.getStyle()) {
       return;
@@ -276,6 +310,11 @@ export class MapLibreParquetLayer {
   }
 }
 
+/**
+ * `getMapQueryExtents` clips the WGS84 viewport to `fullExtent`.
+ * Two ordered extents represent a viewport across the antimeridian.
+ * The metadata reader accepts only WKID 4326, so the viewport uses degree values.
+ */
 function getMapQueryExtents(
   map: MapLibreMap,
   fullExtent: Bounds,
@@ -292,11 +331,13 @@ function getMapQueryExtents(
     360,
   );
   if (longitudeSpan >= 360) {
+    // A full-world viewport returns the dataset extent once.
     return [{ ...fullExtent, ymin: south, ymax: north }];
   }
 
   const west = normalizeLongitude(bounds.getWest());
   const east = west + longitudeSpan;
+  // Split a viewport across the antimeridian into extents with `xmin` below `xmax`.
   const longitudeExtents =
     east <= 180
       ? [{ xmin: west, xmax: east }]
@@ -317,6 +358,7 @@ function getMapQueryExtents(
   });
 }
 
+/** Convert MapLibre zoom to longitude units per source pixel for SOP LOD choice. */
 function getMapSourceResolution(map: MapLibreMap): number {
   return 360 / (512 * 2 ** map.getZoom());
 }

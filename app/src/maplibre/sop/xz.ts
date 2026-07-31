@@ -1,3 +1,9 @@
+/**
+ * The XZ range builder creates XZ ranges for one query extent.
+ * The builder follows `spec/display-optimization.md#xz-clustering` and `spec/display-optimization.md#encoding-extents`.
+ * The hierarchy math matches `crates/spatial/src/optimized/clustering/xz.rs`.
+ * XZ cells cover extra space, so `Query` still tests exact geometry extents.
+ */
 import type { Bounds } from "./metadata";
 
 export interface XZRange {
@@ -11,12 +17,17 @@ interface XZStackItem {
   depth: number;
 }
 
+/**
+ * Build merged XZ intervals for hierarchy cells that intersect a query extent clipped to `fullExtent`.
+ * Keep `maxLevel` at 20 or less for exact JavaScript integer values.
+ */
 export function getQueryXZRanges(
   fullExtent: Bounds,
   queryExtent: Bounds,
   maxLevel: number,
 ): XZRange[] {
   const queryLevel = getExtentXZLevel(fullExtent, queryExtent, maxLevel);
+  // Limit the search to four levels below the estimated query level to reduce extra cells.
   const maximumQueryDepth = Math.min(queryLevel + 4, maxLevel);
   const ranges: XZRange[] = [];
   const stack: XZStackItem[] = [
@@ -34,6 +45,7 @@ export function getQueryXZRanges(
       item.depth === maximumQueryDepth ||
       containsExtent(queryExtent, expandedExtent)
     ) {
+      // A query that covers the full subtree returns one inclusive XZ interval.
       let end = item.codeSum;
       for (let depth = item.depth; depth < maxLevel; depth += 1) {
         end += getCodeForLevel(3, depth, maxLevel);
@@ -60,6 +72,7 @@ export function getQueryXZRanges(
   return mergeXZRanges(ranges);
 }
 
+/** Estimate the XZ level from the query extent size relative to `fullExtent`. */
 export function getExtentXZLevel(
   fullExtent: Bounds,
   queryExtent: Bounds,
@@ -77,6 +90,9 @@ export function getExtentXZLevel(
   return Math.min(Math.floor(Math.min(xLevel, yLevel)) + 1, maxLevel);
 }
 
+/**
+ * Use binary search to test one XZ code against sorted, disjoint inclusive ranges.
+ */
 export function xzCodeMatches(code: number, ranges: XZRange[]): boolean {
   let left = 0;
   let right = ranges.length - 1;
@@ -96,6 +112,7 @@ export function xzCodeMatches(code: number, ranges: XZRange[]): boolean {
   return false;
 }
 
+/** Convert a quadrant and depth to an XZ sequence offset. */
 function getCodeForLevel(
   quadrant: number,
   depth: number,
@@ -104,10 +121,14 @@ function getCodeForLevel(
   return quadrant * getElementCount(maxLevel, depth) + 1;
 }
 
+/** Count nodes below the current depth for XZ sequence math. */
 function getElementCount(maxLevel: number, sequenceIndex: number): number {
   return (4 ** (maxLevel - sequenceIndex) - 1) / 3;
 }
 
+/**
+ * Expand one cell toward the upper right because writers encode the feature lower-left point.
+ */
 function expandExtent(extent: Bounds): Bounds {
   return {
     xmin: extent.xmin,
@@ -147,6 +168,10 @@ function containsExtent(container: Bounds, contained: Bounds): boolean {
   );
 }
 
+/**
+ * Sort inclusive XZ intervals.
+ * Merge intervals that overlap or touch.
+ */
 export function mergeXZRanges(ranges: XZRange[]): XZRange[] {
   const sortedRanges = [...ranges].sort(
     (left, right) => left.start - right.start || left.end - right.end,
