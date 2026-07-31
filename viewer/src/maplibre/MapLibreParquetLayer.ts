@@ -10,6 +10,7 @@ import type {
 } from "maplibre-gl";
 
 import type { Dataset } from "../common/dataset/datasets";
+import type { DatasetLayerStatus } from "./interfaces";
 import type { Bounds, XZDisplayMetadata } from "./sop/metadata";
 import {
   Query,
@@ -23,27 +24,10 @@ const parquetOutlineLayerId = "maplibre-parquet-outline";
 const parquetLineCasingLayerId = "maplibre-parquet-line-casing";
 const parquetLineLayerId = "maplibre-parquet-line";
 
-export type DatasetLayerStatus =
-  | { type: "idle" }
-  | { type: "loading" }
-  | {
-      type: "ready";
-      featureCount: number;
-      lod: number;
-      featureLimitReached: boolean;
-      compression: string | null;
-    }
-  | { type: "failed"; message: string };
-
 interface MapLibreParquetLayerOptions {
   onStatusChange(status: DatasetLayerStatus): void;
   query?: Query;
 }
-
-const emptyFeatureCollection: GeoJSONFeatureCollection = {
-  type: "FeatureCollection",
-  features: [],
-};
 
 /**
  * `MapLibreParquetLayer` owns one `Query` and all MapLibre state for a dataset.
@@ -214,7 +198,10 @@ export class MapLibreParquetLayer {
     if (!this._map.getSource(parquetSourceId)) {
       this._map.addSource(parquetSourceId, {
         type: "geojson",
-        data: emptyFeatureCollection,
+        data: {
+          type: "FeatureCollection",
+          features: [],
+        } satisfies GeoJSONFeatureCollection,
       });
     }
     if (geometryType === "polyline") {

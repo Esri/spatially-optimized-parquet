@@ -3,17 +3,25 @@
  * `MaplibreViewer` converts the initial map scale to zoom and gives viewport reads to `MapLibreParquetLayer`.
  */
 import maplibregl from "maplibre-gl";
-import { useEffect, useRef, useState } from "react";
+import {
+  type RefObject,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import { DatasetSelectionPanel } from "../common/dataset/DatasetSelectionPanel";
-import { datasets } from "../common/dataset/datasets";
+import {
+  type Dataset,
+  datasets,
+} from "../common/dataset/datasets";
 import { formatCompactCount } from "../common/formatCompactCount";
 import {
   MapLibreParquetLayer,
-  type DatasetLayerStatus,
 } from "./MapLibreParquetLayer";
+import type { DatasetLayerStatus } from "./interfaces";
 import styles from "./MapLibreViewer.module.css";
 
 const openFreeMapDarkStyleUrl = "https://tiles.openfreemap.org/styles/dark";
@@ -25,72 +33,10 @@ const mapScaleAtZoomZero = 295_829_355.4545656;
  */
 export default function MaplibreViewer() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
-  const datasetLayerRef = useRef<MapLibreParquetLayer | null>(null);
   const [datasetIndex, setDatasetIndex] = useState(0);
-  const [mapInstance, setMapInstance] = useState<maplibregl.Map | null>(null);
-  const [status, setStatus] = useState<DatasetLayerStatus>({ type: "idle" });
   const activeDataset = datasets[datasetIndex];
-  const initialDatasetRef = useRef(activeDataset);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) {
-      return;
-    }
-    const initialDataset = initialDatasetRef.current;
-
-    const map = new maplibregl.Map({
-      container,
-      style: openFreeMapDarkStyleUrl,
-      center: initialDataset.center,
-      zoom: scaleToZoom(initialDataset.scale),
-    });
-    const resizeObserver = new ResizeObserver(() => map.resize());
-    resizeObserver.observe(container);
-    mapRef.current = map;
-    setMapInstance(map);
-
-    return () => {
-      datasetLayerRef.current?.dispose();
-      datasetLayerRef.current = null;
-      resizeObserver.disconnect();
-      if (mapRef.current === map) {
-        mapRef.current = null;
-      }
-      map.remove();
-      setMapInstance((currentMap) => (currentMap === map ? null : currentMap));
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!mapInstance || mapRef.current !== mapInstance) {
-      return;
-    }
-
-    setStatus({ type: "idle" });
-    mapInstance.jumpTo({
-      center: activeDataset.center,
-      zoom: scaleToZoom(activeDataset.scale),
-    });
-    const datasetLayer = new MapLibreParquetLayer(
-      mapInstance,
-      activeDataset,
-      {
-        onStatusChange: setStatus,
-      },
-    );
-    datasetLayerRef.current = datasetLayer;
-    datasetLayer.initialize();
-    datasetLayer.refresh();
-
-    return () => {
-      datasetLayer.dispose();
-      if (datasetLayerRef.current === datasetLayer) {
-        datasetLayerRef.current = null;
-      }
-    };
-  }, [activeDataset, mapInstance]);
+  const map = useMapLibreMap(containerRef, datasets[0]);
+  const status = useDatasetLayer(map, activeDataset);
 
   return (
     <main className={styles.maplibreWorkspace}>
@@ -102,33 +48,7 @@ export default function MaplibreViewer() {
         onDatasetSelect={setDatasetIndex}
       />
       <calcite-panel className={styles.maplibrePanel}>
-        <calcite-label
-          className={styles.panelMetric}
-          layout="inline"
-          slot="header-actions-start"
-        >
-          Features
-          <strong>{formatFeatureCount(status)}</strong>
-          <span className={styles.mapHeaderActionDivider} aria-hidden="true">
-            |
-          </span>
-          LOD
-          <strong>{status.type === "ready" ? status.lod : "…"}</strong>
-        </calcite-label>
-        {status.type === "loading" ? (
-          <span className={styles.maplibreStatus} slot="header-actions-end">
-            <calcite-loader
-              inline
-              label="Loading dataset"
-              scale="s"
-            />
-            Loading...
-          </span>
-        ) : status.type === "failed" ? (
-          <span className={styles.maplibreStatus} slot="header-actions-end">
-            Dataset failed: {status.message}
-          </span>
-        ) : null}
+        <DatasetStatusHeader status={status} />
         <div
           ref={containerRef}
           aria-label={`OpenFreeMap dark basemap with ${activeDataset.name}`}
@@ -137,6 +57,98 @@ export default function MaplibreViewer() {
       </calcite-panel>
     </main>
   );
+}
+
+function DatasetStatusHeader({ status }: { status: DatasetLayerStatus }) {
+  return (
+    <>
+      <calcite-label
+        className={styles.panelMetric}
+        layout="inline"
+        slot="header-actions-start"
+      >
+        Features
+        <strong>{formatFeatureCount(status)}</strong>
+        <span className={styles.mapHeaderActionDivider} aria-hidden="true">
+          |
+        </span>
+        LOD
+        <strong>{status.type === "ready" ? status.lod : "…"}</strong>
+      </calcite-label>
+      {status.type === "loading" ? (
+        <span className={styles.maplibreStatus} slot="header-actions-end">
+          <calcite-loader inline label="Loading dataset" scale="s" />
+          Loading...
+        </span>
+      ) : status.type === "failed" ? (
+        <span className={styles.maplibreStatus} slot="header-actions-end">
+          Dataset failed: {status.message}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+/** Create and dispose the MapLibre map for one container lifetime. */
+function useMapLibreMap(
+  containerRef: RefObject<HTMLDivElement | null>,
+  initialDataset: Dataset,
+): maplibregl.Map | null {
+  const [map, setMap] = useState<maplibregl.Map | null>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const nextMap = new maplibregl.Map({
+      container,
+      style: openFreeMapDarkStyleUrl,
+      center: initialDataset.center,
+      zoom: scaleToZoom(initialDataset.scale),
+    });
+    const resizeObserver = new ResizeObserver(() => nextMap.resize());
+    resizeObserver.observe(container);
+    setMap(nextMap);
+
+    return () => {
+      resizeObserver.disconnect();
+      nextMap.remove();
+      setMap((currentMap) => (currentMap === nextMap ? null : currentMap));
+    };
+  }, [containerRef, initialDataset]);
+
+  return map;
+}
+
+/** Replace the dataset layer when the selected dataset changes. */
+function useDatasetLayer(
+  map: maplibregl.Map | null,
+  dataset: Dataset,
+): DatasetLayerStatus {
+  const [status, setStatus] = useState<DatasetLayerStatus>({ type: "idle" });
+
+  useEffect(() => {
+    if (!map) {
+      return;
+    }
+
+    setStatus({ type: "idle" });
+    map.jumpTo({
+      center: dataset.center,
+      zoom: scaleToZoom(dataset.scale),
+    });
+    const layer = new MapLibreParquetLayer(map, dataset, {
+      onStatusChange: setStatus,
+    });
+    layer.initialize();
+    layer.refresh();
+
+    return () => layer.dispose();
+  }, [dataset, map]);
+
+  return status;
 }
 
 /** Append `+` when the exact extent test reaches the feature limit. */

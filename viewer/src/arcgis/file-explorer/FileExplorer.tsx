@@ -11,6 +11,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import type { Dataset } from "../../common/dataset/datasets";
 import {
   resolveParquetPageIndexSource,
   type ArcgisParquetPageIndexSource,
@@ -964,17 +965,16 @@ function thresholdSliderValueToByteLength(
 }
 
 export interface FileExplorerProps {
-  basemap?: string;
-  center: [number, number];
-  datasetId: string;
-  downloadSession: DownloadSessionView;
-  layout: "desktop" | "compact";
-  mainMapElementRef: RefObject<HTMLArcgisMapElement | null>;
-  parquetSource: unknown | null;
-  rowGroupBounds: readonly RowGroupBounds[] | null;
-  scale: number;
-  spatialReferenceWkid?: number;
-  visible?: boolean;
+  dataset: Dataset;
+  layout:
+    | { type: "desktop" }
+    | { type: "compact"; visible: boolean };
+  mapElementRef: RefObject<HTMLArcgisMapElement | null>;
+  session: {
+    download: DownloadSessionView;
+    parquetSource: unknown | null;
+    rowGroupBounds: readonly RowGroupBounds[] | null;
+  };
 }
 
 /**
@@ -982,18 +982,23 @@ export interface FileExplorerProps {
  * It coordinates the session's external stores with responsive explorer state so high-frequency byte updates remain localized.
  */
 export const FileExplorer = memo(function FileExplorer({
-  basemap,
-  center,
-  datasetId,
-  downloadSession,
+  dataset,
   layout,
-  mainMapElementRef,
-  parquetSource,
-  rowGroupBounds,
-  scale,
-  spatialReferenceWkid,
-  visible = true,
+  mapElementRef,
+  session,
 }: FileExplorerProps) {
+  const {
+    download: downloadSession,
+    parquetSource,
+    rowGroupBounds,
+  } = session;
+  const {
+    basemap,
+    center,
+    id: datasetId,
+    scale,
+    spatialReference: spatialReferenceWkid,
+  } = dataset;
   const [fileStructureDialog, setFileStructureDialog] = useState<{
     datasetId: string;
     snapshot: FileStructureSnapshot;
@@ -1018,7 +1023,7 @@ export const FileExplorer = memo(function FileExplorer({
           bounds={rowGroupBounds}
           center={center}
           key={datasetId}
-          mainMapElementRef={mainMapElementRef}
+          mainMapElementRef={mapElementRef}
           scale={scale}
           spatialReferenceWkid={spatialReferenceWkid}
         />
@@ -1040,9 +1045,9 @@ export const FileExplorer = memo(function FileExplorer({
 
   return (
     <>
-      {layout === "desktop" ? (
+      {layout.type === "desktop" ? (
         <div className={styles.gridDetailsColumn}>{content}</div>
-      ) : visible ? (
+      ) : layout.visible ? (
         <aside aria-label="Details" className={styles.responsiveDetailsOverlay}>
           {content}
         </aside>
