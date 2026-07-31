@@ -1,13 +1,12 @@
 /**
  * `RangeReader` reads byte ranges from one remote Parquet file.
  * `RangeReader` validates HTTP partial responses and caches completed exact ranges.
- * Hyparquet uses its `AsyncBuffer` adapter for the Page Index path in `spec/display-optimization.md`.
+ * Hyparquet uses its `AsyncBuffer` adapter for page-index predicate pushdown.
  */
 import type { AsyncBuffer } from "hyparquet";
 
 /** `RangeReadable` defines the byte source for metadata and page reads. */
 export interface RangeReadable {
-  readonly byteLength: number;
   read(start: number, end: number, signal?: AbortSignal): Promise<ArrayBuffer>;
   asAsyncBuffer(signal?: AbortSignal): AsyncBuffer;
   clear(): void;

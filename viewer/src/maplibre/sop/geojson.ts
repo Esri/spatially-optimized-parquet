@@ -33,8 +33,6 @@ export type SupportedGeometry =
 
 export interface GeoJSONFeature {
   type: "Feature";
-  /** The global Parquet row number provides stable identity within one file. */
-  id: number;
   /** The MapLibre display does not read attribute columns. */
   properties: Record<string, never>;
   geometry: SupportedGeometry;

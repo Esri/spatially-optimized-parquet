@@ -15,7 +15,7 @@
     "@arcgis/core": "5.1.0",
     "@arcgis/map-components": "5.1.0",
     "@esri/calcite-components": "5.1.1",
-    "hyparquet": "1.26.2",
+    "hyparquet": "1.27.1",
     "hyparquet-compressors": "1.1.1",
     "maplibre-gl": "5.16.0",
     "react": "19.2.8",

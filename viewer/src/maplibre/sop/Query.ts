@@ -1,9 +1,17 @@
 /**
  * `Query` reads one SOP viewport from a remote Parquet file.
- * `Query` loads `geodisplay` metadata and finds rows through XZ and Parquet page indexes.
+ * `Query` delegates XZ page pruning and decoding to Hyparquet.
+ * A narrow physical-leaf reader then fetches only the selected LOD for exact matching rows.
  * The PBF decoder reconstructs the selected LOD geometry.
  * Exact extent tests reject false XZ matches before `Query` returns GeoJSON.
  */
+import {
+  parquetRead,
+  type ParquetQueryFilter,
+  type SubColumnData,
+} from "hyparquet";
+import { compressors } from "hyparquet-compressors";
+
 import {
   loadDatasetParquetMetadata,
   selectLODLevel,
@@ -19,7 +27,10 @@ import {
   type SupportedGeometry,
 } from "./geojson";
 import { decodeGeometry } from "./pbf";
-import { PageReader, type PhysicalColumn } from "./PageReader";
+import {
+  PhysicalLeafReader,
+  type LeafRowReader,
+} from "./PhysicalLeafReader";
 import {
   RangeReader,
   type RangeReadable,
@@ -54,11 +65,10 @@ export interface QueryResult {
 }
 
 interface QueryOptions {
+  leafReader?: LeafRowReader;
+  metadataLoader?: typeof loadDatasetParquetMetadata;
+  parquetReader?: typeof parquetRead;
   rangeReader?: RangeReadable;
-}
-
-interface MatchingRowStore {
-  rowsByGroup: Map<number, number[]>;
 }
 
 interface FeatureCollectionResult {
@@ -70,20 +80,26 @@ interface FeatureCollectionResult {
 export const datasetFeatureLimit = 650_000;
 
 /**
- * `Query` owns the metadata cache and `PageReader` for one Parquet file.
- * `Query` uses XZ ranges and page statistics to find candidate rows.
+ * `Query` owns the metadata cache and SOP query semantics for one Parquet file.
+ * Hyparquet uses XZ filters and page indexes to find candidate rows.
  * Synchronous row and geometry loops stop only at the next signal check.
  */
 export class Query {
+  private _leafReader: LeafRowReader | null;
+  private readonly _metadataLoader: typeof loadDatasetParquetMetadata;
+  private readonly _parquetReader: typeof parquetRead;
   private readonly _rangeReader: RangeReadable;
   private _metadata: DatasetParquetMetadata | null = null;
-  private _pageReader: PageReader | null = null;
 
   constructor(
     url: string,
     byteLength: number,
     options: QueryOptions = {},
   ) {
+    this._leafReader = options.leafReader ?? null;
+    this._metadataLoader =
+      options.metadataLoader ?? loadDatasetParquetMetadata;
+    this._parquetReader = options.parquetReader ?? parquetRead;
     this._rangeReader =
       options.rangeReader ?? new RangeReader(url, byteLength);
   }
@@ -123,17 +139,26 @@ export class Query {
       metadata.display.levels,
       sourceResolution,
     );
-    const matchingRows = await this._queryMatchingRowIds(
-      metadata,
-      xzRanges,
-      signal,
-    );
+    const rowIds =
+      xzRanges.length === 0
+        ? []
+        : await this._queryMatchingRowIds(metadata, xzRanges, signal);
+    signal.throwIfAborted();
+    const geometryByRow =
+      rowIds.length === 0
+        ? new Map<number, Uint8Array | null>()
+        : await this._requireLeafReader().readRows(
+            lodLevel.columnPath,
+            rowIds,
+            signal,
+          );
     const {
       featureCollection,
       featureLimitReached,
     } = await this._buildFeatureCollection(
       lodLevel,
-      matchingRows,
+      rowIds,
+      geometryByRow,
       queryExtents,
       metadata.display.geometryType,
       signal,
@@ -157,8 +182,7 @@ export class Query {
   }
 
   /**
-   * Validate root metadata on its first load.
-   * Create `PageReader` after validation.
+   * Validate and cache root metadata on its first load.
    */
   private async _getMetadata(
     signal: AbortSignal,
@@ -167,122 +191,98 @@ export class Query {
       return this._metadata;
     }
 
-    const metadata = await loadDatasetParquetMetadata(
+    const metadata = await this._metadataLoader(
       this._rangeReader.asAsyncBuffer(signal),
     );
     signal.throwIfAborted();
     this._metadata = metadata;
-    this._pageReader = new PageReader(this._rangeReader, metadata.file);
+    this._leafReader ??= new PhysicalLeafReader(
+      this._rangeReader,
+      metadata.file,
+    );
     return metadata;
   }
 
   /**
-   * Use XZ statistics to reject unrelated row groups and pages.
-   * Test each decoded XZ code against the merged query ranges.
+   * Let Hyparquet prune XZ pages, then inspect decoded XZ values for exact row IDs.
+   * Avoid object assembly because `onPage` exposes physical values and global row offsets.
    */
   private async _queryMatchingRowIds(
     metadata: DatasetParquetMetadata,
     xzRanges: XZRange[],
     signal: AbortSignal,
-  ): Promise<MatchingRowStore> {
-    const pageReader = this._requirePageReader();
-    const rowsByGroup = new Map<number, number[]>();
-    const columns = pageReader.getColumnsMatchingXZ(
-      metadata.display.codePath,
-      xzRanges,
-    );
+  ): Promise<number[]> {
+    const rowIds: number[] = [];
+    const codePath = metadata.display.codePath;
 
-    for (const column of columns) {
-      const pages = await pageReader.selectPagesByXZ(
-        column,
-        xzRanges,
-        signal,
-      );
-      const leafPages = await pageReader.readLeafPages<bigint>(
-        column,
-        pages,
-        { signal },
-      );
-      const matchingRows: number[] = [];
-
-      for (const page of leafPages) {
-        for (let index = 0; index < page.values.length; index += 1) {
-          if (xzCodeMatches(Number(page.values[index]), xzRanges)) {
-            // Keep page order so later page selection receives sorted row IDs.
-            matchingRows.push(page.rowStart + index);
-          }
+    await this._parquetReader({
+      file: this._rangeReader.asAsyncBuffer(signal),
+      metadata: metadata.file,
+      columns: [getTopLevelColumn(codePath)],
+      filter: createXZFilter(codePath, xzRanges),
+      rowFormat: "object",
+      usePageIndex: true,
+      compressors,
+      onPage: (page) => {
+        if (!pathsEqual(page.pathInSchema, codePath)) {
+          return;
         }
-      }
+        appendMatchingRowIds(rowIds, page, xzRanges);
+      },
+    });
 
-      if (matchingRows.length > 0) {
-        rowsByGroup.set(column.rowGroupIndex, matchingRows);
-      }
-    }
-
-    return { rowsByGroup };
+    return [...new Set(rowIds)].sort((left, right) => left - right);
   }
 
   /**
-   * Read the selected LOD column only for candidate rows.
+   * Decode selected LOD values for exact matching rows.
    * Test the exact extent of each decoded PBF geometry.
    * Do not treat an XZ match as proof of extent overlap.
    */
   private async _buildFeatureCollection(
     lodLevel: LODLevel,
-    matchingRows: MatchingRowStore,
+    rowIds: number[],
+    geometryByRow: Map<number, unknown>,
     queryExtents: Bounds[],
     geometryType: XZDisplayMetadata["geometryType"],
     signal: AbortSignal,
   ): Promise<FeatureCollectionResult> {
     const features: GeoJSONFeature[] = [];
-    const pageReader = this._requirePageReader();
-
-    for (const [rowGroupIndex, rowIds] of matchingRows.rowsByGroup) {
+    for (const rowId of rowIds) {
       signal.throwIfAborted();
-      const geometryColumn = pageReader.getPhysicalColumn(
-        rowGroupIndex,
-        lodLevel.columnPath,
-      );
-      const geometryByRow = await this._readSelectedRows<
-        Uint8Array | null
-      >(geometryColumn, rowIds, true, signal);
-
-      for (const rowId of rowIds) {
-        const bytes = geometryByRow.get(rowId);
-        if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
-          continue;
-        }
-
-        const geometry = decodeGeometry(
-          bytes,
-          lodLevel.transform,
-          geometryType,
-        );
-        if (
-          !geometry ||
-          !geometryIntersectsExtents(geometry, queryExtents)
-        ) {
-          continue;
-        }
-
-        // Apply the feature limit only after the exact geometry extent test.
-        if (features.length === datasetFeatureLimit) {
-          return {
-            featureCollection: {
-              type: "FeatureCollection",
-              features,
-            },
-            featureLimitReached: true,
-          };
-        }
-
-        features.push({
-          type: "Feature",
-          id: geometryColumn.rowGroupStart + rowId,
-          properties: {},
-          geometry,
-        });
+      const bytes = geometryByRow.get(rowId);
+      if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
+        continue;
       }
+
+      const geometry = decodeGeometry(
+        bytes,
+        lodLevel.transform,
+        geometryType,
+      );
+      if (
+        !geometry ||
+        !geometryIntersectsExtents(geometry, queryExtents)
+      ) {
+        continue;
+      }
+
+      // Apply the feature limit only after the exact geometry extent test.
+      if (features.length === datasetFeatureLimit) {
+        return {
+          featureCollection: {
+            type: "FeatureCollection",
+            features,
+          },
+          featureLimitReached: true,
+        };
+      }
+
+      features.push({
+        type: "Feature",
+        properties: {},
+        geometry,
+      });
     }
 
     return {
@@ -294,49 +294,66 @@ export class Query {
     };
   }
 
-  /**
-   * Read only pages that contain requested row IDs.
-   * Restore each row ID and value pair without a new sort.
-   */
-  private async _readSelectedRows<T>(
-    column: PhysicalColumn,
-    rowIds: number[],
-    binary: boolean,
-    signal: AbortSignal,
-  ): Promise<Map<number, T>> {
-    const pageReader = this._requirePageReader();
-    const pages = await pageReader.selectPagesByRowId(
-      column,
-      rowIds,
-      signal,
-    );
-    const leafPages = await pageReader.readLeafPages<T>(column, pages, {
-      signal,
-      binary,
-    });
-    const requestedRows = new Set(rowIds);
-    const valuesByRow = new Map<number, T>();
-
-    for (const page of leafPages) {
-      for (let index = 0; index < page.values.length; index += 1) {
-        const rowId = page.rowStart + index;
-        if (requestedRows.has(rowId)) {
-          valuesByRow.set(rowId, page.values[index]);
-        }
-      }
-    }
-
-    return valuesByRow;
-  }
-
-  /** Require metadata before any Parquet page read. */
-  private _requirePageReader(): PageReader {
-    if (!this._pageReader) {
+  private _requireLeafReader(): LeafRowReader {
+    if (!this._leafReader) {
       throw new Error("Dataset Parquet metadata has not been initialized.");
     }
 
-    return this._pageReader;
+    return this._leafReader;
   }
+}
+
+/** Convert inclusive XZ intervals into Hyparquet range predicates. */
+export function createXZFilter(
+  codePath: readonly string[],
+  ranges: XZRange[],
+): ParquetQueryFilter {
+  if (ranges.length === 0) {
+    throw new Error("XZ filter requires at least one range.");
+  }
+
+  const field = codePath.join(".");
+  const filters = ranges.map(({ start, end }) => ({
+    [field]: {
+      $gte: start,
+      $lte: end,
+    },
+  }));
+
+  return filters.length === 1 ? filters[0] : { $or: filters };
+}
+
+/** Project the top-level column that owns a physical metadata path. */
+export function getTopLevelColumn(path: readonly string[]): string {
+  const [column] = path;
+  if (!column) {
+    throw new Error("Parquet column path must not be empty.");
+  }
+
+  return column;
+}
+
+function appendMatchingRowIds(
+  rowIds: number[],
+  page: SubColumnData,
+  ranges: XZRange[],
+): void {
+  const values = page.columnData as ArrayLike<unknown>;
+  for (let index = 0; index < values.length; index += 1) {
+    if (xzCodeMatches(Number(values[index]), ranges)) {
+      rowIds.push(page.rowStart + index);
+    }
+  }
+}
+
+function pathsEqual(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((part, index) => part === right[index])
+  );
 }
 
 /**
