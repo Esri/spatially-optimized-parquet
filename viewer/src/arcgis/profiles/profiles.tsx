@@ -42,6 +42,10 @@ const datasetMapProfileRegistry: Partial<Record<DatasetId, DatasetMapProfile>> =
 };
 
 
-export function resolveDatasetMapProfile(datasetId: DatasetId): DatasetMapProfile {
-  return datasetMapProfileRegistry[datasetId] ?? defaultDatasetMapProfile;
+export function resolveDatasetMapProfile(
+  datasetId: DatasetId | undefined,
+): DatasetMapProfile {
+  return datasetId
+    ? datasetMapProfileRegistry[datasetId] ?? defaultDatasetMapProfile
+    : defaultDatasetMapProfile;
 }

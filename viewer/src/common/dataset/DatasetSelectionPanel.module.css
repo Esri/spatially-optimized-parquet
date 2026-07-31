@@ -116,8 +116,20 @@
 }
 
 @media (max-width: 800px) {
+  .datasetSelectionPanel {
+    padding-block: 0.75rem;
+  }
+
   .datasetSelectionPanel .datasetSelectionMain {
     align-content: center;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .datasetSelectionPanel .datasetSelectionError {
+    grid-column: 1;
+  }
+
+  .datasetSelectionPanel .datasetPortalEditor {
     grid-template-columns: minmax(0, 1fr);
   }
 }
@@ -145,6 +157,33 @@
   min-width: 0;
   grid-template-columns: 18rem minmax(0, 1fr);
   gap: 1rem;
+}
+
+.datasetSourceEditor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+}
+
+.datasetPortalEditor {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) minmax(10rem, 1fr);
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.datasetSubmitAction {
+  min-width: 2.5rem;
+}
+
+.datasetSelectionError {
+  grid-column: 2;
+  overflow: hidden;
+  color: var(--calcite-color-status-danger);
+  font-size: var(--calcite-font-size--2);
+  line-height: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .datasetSelectionMetrics {

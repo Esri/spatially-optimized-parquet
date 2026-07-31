@@ -1,24 +1,30 @@
 import { useRef, useState } from "react";
 
-import { datasets, type Dataset } from "./datasets";
-import { formatByteSize } from "../formatByteSize";
-import { formatInteger } from "../formatNumber";
 import styles from "./DatasetSelectionPanel.module.css";
 
+export interface DatasetSelectionOption {
+  id: string;
+  metadata?: string;
+  name: string;
+  source?: string;
+}
+
 interface DatasetSelectionMenuProps {
-  activeDataset: Dataset;
-  onDatasetSelect(index: number): void;
+  activeLabel: string;
+  onSelect(optionId: string): void;
+  options: readonly DatasetSelectionOption[];
 }
 
 export function DatasetSelectionMenu({
-  activeDataset,
-  onDatasetSelect,
+  activeLabel,
+  onSelect,
+  options,
 }: DatasetSelectionMenuProps) {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const selectDataset = (index: number) => {
-    onDatasetSelect(index);
+  const selectDataset = (optionId: string) => {
+    onSelect(optionId);
     setMenuOpen(false);
   };
 
@@ -37,7 +43,7 @@ export function DatasetSelectionMenu({
         ref={menuButtonRef}
         type="button"
       >
-        {activeDataset.name}
+        {activeLabel}
       </button>
       {menuButtonRef.current ? (
         <calcite-popover
@@ -49,23 +55,25 @@ export function DatasetSelectionMenu({
           oncalcitePopoverClose={() => setMenuOpen(false)}
         >
           <div className={styles.datasetOptions} role="menu">
-            {datasets.map((dataset, index) => (
-              <div className={styles.datasetOption} key={dataset.id} role="none">
+            {options.map((option) => (
+              <div className={styles.datasetOption} key={option.id} role="none">
                 <button
                   className={styles.datasetOptionSelect}
-                  disabled={!dataset.url}
-                  onClick={() => selectDataset(index)}
+                  onClick={() => selectDataset(option.id)}
                   role="menuitem"
                   type="button"
                 >
-                  <span className={styles.datasetOptionName}>{dataset.name}</span>
-                  <span className={styles.datasetOptionMetadata}>
-                    {formatByteSize(dataset.byteSize)} ·{" "}
-                    {formatInteger(dataset.count)} features
-                  </span>
-                  <span className={styles.datasetOptionSource}>
-                    {dataset.source}
-                  </span>
+                  <span className={styles.datasetOptionName}>{option.name}</span>
+                  {option.metadata ? (
+                    <span className={styles.datasetOptionMetadata}>
+                      {option.metadata}
+                    </span>
+                  ) : null}
+                  {option.source ? (
+                    <span className={styles.datasetOptionSource}>
+                      {option.source}
+                    </span>
+                  ) : null}
                 </button>
               </div>
             ))}

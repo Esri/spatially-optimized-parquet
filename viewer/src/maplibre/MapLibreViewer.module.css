@@ -54,6 +54,6 @@
 
 @media (max-width: 800px) {
   .maplibreWorkspace {
-    grid-template-rows: 144px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
   }
 }

@@ -17,7 +17,12 @@ import {
 } from "react";
 
 import { DatasetSelectionPanel } from "../common/dataset/DatasetSelectionPanel";
-import { type Dataset, datasets } from "../common/dataset/datasets";
+import {
+  createCustomUrlDataset,
+  createPortalItemDataset,
+  type Dataset,
+  datasets,
+} from "../common/dataset/datasets";
 import { formatCompactCount } from "../common/formatCompactCount";
 import { formatRatio } from "../common/formatNumber";
 import { deriveFileDetailSummary } from "../parquet/fileDetails";
@@ -127,33 +132,33 @@ const MapCanvas = memo(function MapCanvas({
  * This component owns viewer-level state so map integration and file diagnostics stay synchronized when the active dataset changes.
  */
 export function ArcgisViewer() {
-  const [datasetIndex, setDatasetIndex] = useState(0);
+  const [requestedDataset, setRequestedDataset] = useState<Dataset>(datasets[0]);
   const mapElementRef = useRef<HTMLArcgisMapElement>(null);
   const gridContainerRef = useRef<HTMLElement>(null);
   const detailsLayout = useResponsiveDetailsLayout(gridContainerRef);
   const viewState = useArcgisViewState(mapElementRef);
-  const activeDataset = datasets[datasetIndex];
-  const activeProfile = resolveDatasetMapProfile(activeDataset.id);
+  const requestedProfile = resolveDatasetMapProfile(
+    requestedDataset.kind === "preset" ? requestedDataset.id : undefined,
+  );
   const datasetSession = useArcgisDatasetSession({
-    dataset: activeDataset,
+    dataset: requestedDataset,
     mapElementRef,
     mapReady: viewState.ready,
-    profile: activeProfile,
+    profile: requestedProfile,
   });
+  const activeDataset = datasetSession.dataset;
+  const activeProfile = resolveDatasetMapProfile(
+    activeDataset.kind === "preset" ? activeDataset.id : undefined,
+  );
   const downloadTopology = useSyncExternalStore(
     datasetSession.download.topology.subscribe,
     datasetSession.download.topology.getSnapshot,
   );
   const fileLayout = downloadTopology.layout;
-  const datasetByteSize = fileLayout?.byteLength ?? activeDataset.byteSize;
-  const compression = fileLayout
-    ? formatCompressionSummary(deriveFileDetailSummary(fileLayout))
-    : null;
-  const selectDataset = (index: number) => {
+  const fileSummary = fileLayout ? deriveFileDetailSummary(fileLayout) : null;
+  const requestDataset = (dataset: Dataset) => {
     detailsLayout.setOpen(false);
-    if (index !== datasetIndex) {
-      setDatasetIndex(index);
-    }
+    setRequestedDataset(dataset);
   };
 
   return (
@@ -166,10 +171,26 @@ export function ArcgisViewer() {
     >
       <DatasetSelectionPanel
         activeDataset={activeDataset}
-        byteSize={datasetByteSize}
         compact={detailsLayout.compact}
-        compression={compression}
-        onDatasetSelect={selectDataset}
+        customAction={{
+          error: datasetSession.loadError?.message ?? null,
+          loading: datasetSession.loading,
+          onCustomUrlSubmit: (url) => {
+            requestDataset(createCustomUrlDataset(url));
+          },
+          onPortalItemSubmit: (portalUrl, itemId) => {
+            requestDataset(createPortalItemDataset(portalUrl, itemId));
+          },
+        }}
+        metrics={{
+          byteSize: fileLayout?.byteLength ?? null,
+          compression: fileSummary
+            ? formatCompressionSummary(fileSummary)
+            : null,
+          featureCount: fileSummary?.rowCount ?? null,
+        }}
+        onDatasetSelect={requestDataset}
+        showPresetMetadata={false}
       />
       <ArcgisMapPanel
         dataset={activeDataset}

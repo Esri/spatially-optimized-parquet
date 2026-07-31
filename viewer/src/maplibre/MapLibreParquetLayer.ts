@@ -9,7 +9,7 @@ import type {
   Source,
 } from "maplibre-gl";
 
-import type { Dataset } from "../common/dataset/datasets";
+import type { PresetDataset } from "../common/dataset/datasets";
 import type { DatasetLayerStatus } from "./interfaces";
 import type { Bounds, XZDisplayMetadata } from "./sop/metadata";
 import {
@@ -45,11 +45,11 @@ export class MapLibreParquetLayer {
 
   constructor(
     private readonly _map: MapLibreMap,
-    dataset: Dataset,
+    dataset: PresetDataset,
     options: MapLibreParquetLayerOptions,
   ) {
     this._query =
-      options.query ?? new Query(dataset.url, dataset.byteSize);
+      options.query ?? new Query(dataset.parquet.url, dataset.byteSize);
     this._onStatusChange = options.onStatusChange;
   }
 

@@ -1,13 +1,19 @@
-import ParquetLayer from "@arcgis/core/layers/ParquetLayer";
-import ParquetFilesData from "@arcgis/core/layers/support/ParquetFilesData";
 import * as reactiveUtils from "@arcgis/core/core/reactiveUtils";
-import { useEffect, useRef, useState, type RefObject } from "react";
+import ParquetLayer from "@arcgis/core/layers/ParquetLayer";
+import {
+  useEffect,
+  useReducer,
+  useRef,
+  type RefObject,
+} from "react";
 
 import type { Dataset } from "../common/dataset/datasets";
-import type {
-  DatasetEffectLayer,
-  DatasetMapProfile,
-} from "./profiles/profiles";
+import type { RowGroupBounds } from "../parquet/rowGroupBounds";
+import { createParquetLayerData } from "./createParquetLayerData";
+import {
+  reduceDatasetSessionState,
+  type DatasetSessionState,
+} from "./datasetSessionState";
 import {
   parseParquetDiagnosticsSnapshot,
   parseParquetRangeReadEvent,
@@ -15,12 +21,19 @@ import {
   type ArcgisEventHandle,
 } from "./diagnostics";
 import { ParquetDownloadSession } from "./file-explorer/download/ParquetDownloadSession";
-import type { RowGroupBounds } from "../parquet/rowGroupBounds";
+import type {
+  DatasetEffectLayer,
+  DatasetMapProfile,
+  DatasetProfileCleanup,
+} from "./profiles/profiles";
 
 export interface ArcgisDatasetSessionResult {
+  readonly dataset: Dataset;
   readonly download: ParquetDownloadSession;
   readonly featureCount: number | null;
   readonly layer: ParquetLayer | null;
+  readonly loadError: Error | null;
+  readonly loading: boolean;
   readonly parquetSource: unknown | null;
   readonly rowGroupBounds: readonly RowGroupBounds[] | null;
 }
@@ -32,6 +45,21 @@ export interface ArcgisDatasetSessionOptions {
   readonly profile: DatasetMapProfile;
 }
 
+interface LoadedDatasetSession {
+  dataset: Dataset;
+  disposed: boolean;
+  download: ParquetDownloadSession;
+  featureCount: number | null;
+  layer: ParquetLayer | null;
+  layerViewWatcher?: { remove(): void };
+  parquetSource: unknown | null;
+  profile: DatasetMapProfile;
+  profileComponentCleanup?: DatasetProfileCleanup;
+  profileLayerCleanup?: DatasetProfileCleanup;
+  rangeReadHandle?: ArcgisEventHandle;
+  rowGroupBounds: readonly RowGroupBounds[] | null;
+}
+
 const defaultCenter: [number, number] = [-98, 39];
 const defaultScale = 25_000_000;
 
@@ -41,165 +69,298 @@ export function useArcgisDatasetSession({
   mapReady,
   profile,
 }: ArcgisDatasetSessionOptions): ArcgisDatasetSessionResult {
-  const downloadRef = useRef<ParquetDownloadSession | null>(null);
-  const layerRef = useRef<ParquetLayer | null>(null);
-  const [featureCount, setFeatureCount] = useState<number | null>(null);
-  const [layer, setLayer] = useState<ParquetLayer | null>(null);
-  const [parquetSource, setParquetSource] = useState<unknown | null>(null);
-  const [rowGroupBounds, setRowGroupBounds] =
-    useState<readonly RowGroupBounds[] | null>(null);
-
-  if (!downloadRef.current) {
-    downloadRef.current = new ParquetDownloadSession();
+  const initialSessionRef = useRef<LoadedDatasetSession | null>(null);
+  if (!initialSessionRef.current) {
+    initialSessionRef.current = createEmptyDatasetSession(dataset, profile);
   }
 
-  const download = downloadRef.current;
+  const [state, dispatch] = useReducer(
+    reduceDatasetSessionState<LoadedDatasetSession>,
+    {
+      committed: initialSessionRef.current,
+      loadError: null,
+      loading: false,
+      requestVersion: 0,
+    } satisfies DatasetSessionState<LoadedDatasetSession>,
+  );
+  const committedSessionRef = useRef(state.committed);
+  const requestVersionRef = useRef(0);
 
   useEffect(() => {
     const mapElement = mapElementRef.current;
     const map = mapElement?.map;
-    if (!mapReady || !mapElement || !map || !dataset.url) {
+    if (!mapReady || !mapElement || !map) {
       return;
     }
 
-    setFeatureCount(null);
-    setRowGroupBounds(null);
-    setParquetSource(null);
-    download.reset();
-    mapElement.center = dataset.center ?? defaultCenter;
-    mapElement.scale = dataset.scale ?? defaultScale;
-    map.layers.removeAll();
-    const parquetLayer = new ParquetLayer({
-      title: dataset.name,
-      copyright: dataset.source,
-      data: new ParquetFilesData({ urls: [dataset.url] }),
-      maxScale: dataset.maxScale,
-      ...profile.layerProperties,
-    });
-    layerRef.current = parquetLayer;
-    setLayer(parquetLayer);
-    map.add(parquetLayer);
+    const requestVersion = ++requestVersionRef.current;
+    const candidate = createDatasetCandidate(dataset, profile);
+    let cancelled = false;
+    dispatch({ type: "request-started", requestVersion });
 
-    let disposed = false;
-    let layerViewWatcher: { remove(): void } | undefined;
-    let rangeReadHandle: ArcgisEventHandle | undefined;
-    const profileLayerCleanup = hasDatasetEffectLayer(parquetLayer)
-      ? profile.configureLayer?.(parquetLayer)
-      : undefined;
-    const reportDiagnosticsError = (message: string, error: unknown) => {
-      if (disposed) {
-        return;
+    const publishCandidate = () => {
+      if (committedSessionRef.current === candidate) {
+        dispatch({ type: "session-refreshed", session: candidate });
       }
-      download.reportError(error instanceof Error ? error : new Error(message));
-      console.error(message, error);
     };
 
-    const initializeLayer = async () => {
+    const loadCandidate = async () => {
       try {
-        await parquetLayer.when();
-        if (disposed) {
+        const parquetLayer = candidate.layer;
+        if (!parquetLayer) {
+          throw new Error("Parquet layer candidate is unavailable.");
+        }
+
+        await parquetLayer.load();
+        if (cancelled || requestVersion !== requestVersionRef.current) {
+          disposeDatasetSession(candidate);
           return;
         }
 
-        try {
-          const diagnosticsSource = resolveParquetDiagnosticsSource(parquetLayer);
-          setParquetSource(diagnosticsSource);
-          rangeReadHandle = diagnosticsSource.on("range-read", (event) => {
-            try {
-              download.recordRangeRead(parseParquetRangeReadEvent(event));
-            } catch (error) {
-              reportDiagnosticsError("Failed to parse a Parquet range event.", error);
-            }
-          });
-          void diagnosticsSource.getDiagnosticsSnapshot().then((snapshotValue) => {
-            if (disposed) {
-              return;
-            }
-            const snapshot = parseParquetDiagnosticsSnapshot(snapshotValue);
-            download.loadDiagnostics(snapshot);
-            setRowGroupBounds(download.topology.getSnapshot().rowGroupBounds);
-          }).catch((error: unknown) => {
-            reportDiagnosticsError(
-              "Failed to load the Parquet diagnostics snapshot.",
-              error,
-            );
-          });
-        } catch (error) {
-          reportDiagnosticsError(
-            "Parquet layer source diagnostics are unavailable.",
-            error,
-          );
-        }
+        attachDatasetDiagnostics(candidate, publishCandidate);
+        const previousSession = committedSessionRef.current;
+        map.layers.removeAll();
+        disposeDatasetSession(previousSession);
+        map.add(parquetLayer);
+        committedSessionRef.current = candidate;
+        candidate.profileComponentCleanup = profile.mountMapComponents?.({
+          mapElement,
+          layer: parquetLayer,
+        });
+        dispatch({
+          type: "request-succeeded",
+          requestVersion,
+          session: candidate,
+        });
 
-        const layerView = await mapElement.whenLayerView(parquetLayer);
-        if (disposed) {
-          return;
-        }
-        let layerViewUpdateVersion = 0;
-        const refreshLayerViewCount = async () => {
-          const updateVersion = layerViewUpdateVersion;
-          try {
-            const count = await layerView.queryFeatureCount();
-            if (!disposed && !layerView.updating && updateVersion === layerViewUpdateVersion) {
-              setFeatureCount(count);
-            }
-          } catch (error) {
-            if (!disposed) {
-              console.error("Failed to query LayerView feature count.", error);
-            }
-          }
-        };
-        layerViewWatcher = reactiveUtils.watch(
-          () => layerView.updating,
-          (updating) => {
-            layerViewUpdateVersion += 1;
-            if (!updating) {
-              void refreshLayerViewCount();
-            }
-          },
-        );
-        if (!layerView.updating) {
-          void refreshLayerViewCount();
-        }
+        void initializeLayerView(candidate, mapElement, publishCandidate);
+        void navigateToDataset(candidate, mapElement);
       } catch (error) {
-        if (!disposed) {
-          console.error("Failed to query Parquet feature counts.", error);
+        disposeDatasetSession(candidate);
+        if (cancelled || requestVersion !== requestVersionRef.current) {
+          return;
         }
+        dispatch({
+          type: "request-failed",
+          requestVersion,
+          error: toError(error, "Failed to load the Parquet dataset."),
+        });
       }
     };
-    void initializeLayer();
+    void loadCandidate();
 
     return () => {
-      disposed = true;
-      rangeReadHandle?.remove();
-      layerViewWatcher?.remove();
-      profileLayerCleanup?.();
-      if (layerRef.current === parquetLayer) {
-        layerRef.current = null;
+      cancelled = true;
+      if (committedSessionRef.current !== candidate) {
+        disposeDatasetSession(candidate);
       }
-      setParquetSource(null);
-      setLayer((current) => current === parquetLayer ? null : current);
-      map.layers.removeAll();
     };
-  }, [dataset, download, mapElementRef, mapReady, profile]);
+  }, [dataset, mapElementRef, mapReady, profile]);
 
   useEffect(() => {
     const mapElement = mapElementRef.current;
-    if (!mapElement || !layer || !profile.mountMapComponents) {
-      return;
-    }
-    return profile.mountMapComponents({ mapElement, layer });
-  }, [layer, mapElementRef, profile]);
+    return () => {
+      const session = committedSessionRef.current;
+      if (session.layer) {
+        mapElement?.map?.layers.remove(session.layer);
+      }
+      disposeDatasetSession(session);
+    };
+  }, [mapElementRef]);
 
   return {
-    download,
-    featureCount,
-    layer,
-    parquetSource,
-    rowGroupBounds,
+    dataset: state.committed.dataset,
+    download: state.committed.download,
+    featureCount: state.committed.featureCount,
+    layer: state.committed.layer,
+    loadError: state.loadError,
+    loading: state.loading,
+    parquetSource: state.committed.parquetSource,
+    rowGroupBounds: state.committed.rowGroupBounds,
   };
+}
+
+function createEmptyDatasetSession(
+  dataset: Dataset,
+  profile: DatasetMapProfile,
+): LoadedDatasetSession {
+  return {
+    dataset,
+    disposed: false,
+    download: new ParquetDownloadSession(),
+    featureCount: null,
+    layer: null,
+    parquetSource: null,
+    profile,
+    rowGroupBounds: null,
+  };
+}
+
+function createDatasetCandidate(
+  dataset: Dataset,
+  profile: DatasetMapProfile,
+): LoadedDatasetSession {
+  const layer = new ParquetLayer({
+    title: dataset.name,
+    copyright: dataset.source,
+    data: createParquetLayerData(dataset),
+    maxScale: dataset.maxScale,
+    ...profile.layerProperties,
+  });
+  const session = createEmptyDatasetSession(dataset, profile);
+  session.layer = layer;
+  session.profileLayerCleanup = hasDatasetEffectLayer(layer)
+    ? profile.configureLayer?.(layer)
+    : undefined;
+  return session;
+}
+
+function attachDatasetDiagnostics(
+  session: LoadedDatasetSession,
+  publish: () => void,
+): void {
+  const layer = session.layer;
+  if (!layer) {
+    return;
+  }
+
+  const reportDiagnosticsError = (message: string, error: unknown) => {
+    if (session.disposed) {
+      return;
+    }
+    session.download.reportError(toError(error, message));
+    console.error(message, error);
+  };
+
+  try {
+    const diagnosticsSource = resolveParquetDiagnosticsSource(layer);
+    session.parquetSource = diagnosticsSource;
+    session.rangeReadHandle = diagnosticsSource.on("range-read", (event) => {
+      try {
+        session.download.recordRangeRead(parseParquetRangeReadEvent(event));
+      } catch (error) {
+        reportDiagnosticsError("Failed to parse a Parquet range event.", error);
+      }
+    });
+    void diagnosticsSource.getDiagnosticsSnapshot().then((snapshotValue) => {
+      if (session.disposed) {
+        return;
+      }
+      const snapshot = parseParquetDiagnosticsSnapshot(snapshotValue);
+      session.download.loadDiagnostics(snapshot);
+      session.rowGroupBounds =
+        session.download.topology.getSnapshot().rowGroupBounds;
+      publish();
+    }).catch((error: unknown) => {
+      reportDiagnosticsError(
+        "Failed to load the Parquet diagnostics snapshot.",
+        error,
+      );
+    });
+  } catch (error) {
+    reportDiagnosticsError(
+      "Parquet layer source diagnostics are unavailable.",
+      error,
+    );
+  }
+}
+
+async function initializeLayerView(
+  session: LoadedDatasetSession,
+  mapElement: HTMLArcgisMapElement,
+  publish: () => void,
+): Promise<void> {
+  const layer = session.layer;
+  if (!layer) {
+    return;
+  }
+
+  try {
+    const layerView = await mapElement.whenLayerView(layer);
+    if (session.disposed) {
+      return;
+    }
+
+    let layerViewUpdateVersion = 0;
+    const refreshLayerViewCount = async () => {
+      const updateVersion = layerViewUpdateVersion;
+      try {
+        const count = await layerView.queryFeatureCount();
+        if (
+          !session.disposed &&
+          !layerView.updating &&
+          updateVersion === layerViewUpdateVersion
+        ) {
+          session.featureCount = count;
+          publish();
+        }
+      } catch (error) {
+        if (!session.disposed) {
+          console.error("Failed to query LayerView feature count.", error);
+        }
+      }
+    };
+
+    session.layerViewWatcher = reactiveUtils.watch(
+      () => layerView.updating,
+      (updating) => {
+        layerViewUpdateVersion += 1;
+        if (!updating) {
+          void refreshLayerViewCount();
+        }
+      },
+    );
+    if (!layerView.updating) {
+      void refreshLayerViewCount();
+    }
+  } catch (error) {
+    if (!session.disposed) {
+      console.error("Failed to initialize the Parquet LayerView.", error);
+    }
+  }
+}
+
+async function navigateToDataset(
+  session: LoadedDatasetSession,
+  mapElement: HTMLArcgisMapElement,
+): Promise<void> {
+  if (session.dataset.kind === "preset") {
+    mapElement.center = session.dataset.center ?? defaultCenter;
+    mapElement.scale = session.dataset.scale ?? defaultScale;
+    return;
+  }
+
+  const fullExtent = session.layer?.fullExtent;
+  if (!fullExtent) {
+    return;
+  }
+
+  try {
+    await mapElement.view.goTo(fullExtent, { animate: false });
+  } catch (error) {
+    if (!session.disposed) {
+      console.error("Failed to navigate to the Parquet full extent.", error);
+    }
+  }
+}
+
+function disposeDatasetSession(session: LoadedDatasetSession): void {
+  if (session.disposed) {
+    return;
+  }
+
+  session.disposed = true;
+  session.rangeReadHandle?.remove();
+  session.layerViewWatcher?.remove();
+  session.profileComponentCleanup?.();
+  session.profileLayerCleanup?.();
+  session.layer?.destroy();
 }
 
 function hasDatasetEffectLayer(layer: object): layer is DatasetEffectLayer {
   return "effect" in layer;
+}
+
+function toError(error: unknown, fallbackMessage: string): Error {
+  return error instanceof Error ? error : new Error(fallbackMessage);
 }

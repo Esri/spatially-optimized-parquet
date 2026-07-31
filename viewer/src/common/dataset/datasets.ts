@@ -7,11 +7,24 @@ export type DatasetId =
   | "unified-schools"
   | "country-borders";
 
-export interface Dataset {
-  id: DatasetId;
-  url: string;
+export type DatasetKind = "preset" | "custom-url" | "portal-item";
+
+export type ParquetDatasetSource =
+  | {
+      type: "url";
+      url: string;
+    }
+  | {
+      type: "portal-item";
+      portalUrl: string;
+      itemId: string;
+    };
+
+interface DatasetBase {
+  id: string;
+  kind: DatasetKind;
+  parquet: ParquetDatasetSource;
   name: string;
-  count: number;
   source: string;
   sourceUrl?: string;
   outSpatialReference?: 3857;
@@ -21,8 +34,40 @@ export interface Dataset {
   maxScale?: number;
   basemap?: string;
   spatialReference?: number;
+}
+
+export interface PresetDataset extends DatasetBase {
+  id: DatasetId;
+  kind: "preset";
+  parquet: {
+    type: "url";
+    url: string;
+  };
+  count: number;
   byteSize: number;
 }
+
+export interface CustomUrlDataset extends DatasetBase {
+  kind: "custom-url";
+  parquet: {
+    type: "url";
+    url: string;
+  };
+}
+
+export interface PortalItemDataset extends DatasetBase {
+  kind: "portal-item";
+  parquet: {
+    type: "portal-item";
+    portalUrl: string;
+    itemId: string;
+  };
+}
+
+export type Dataset =
+  | PresetDataset
+  | CustomUrlDataset
+  | PortalItemDataset;
 
 export interface Bookmark {
   name: string;
@@ -30,14 +75,25 @@ export interface Bookmark {
   scale: number;
 }
 
-export const datasets: Dataset[] = [
+const customDatasetCenter: [number, number] = [-98, 39];
+const customDatasetScale = 25_000_000;
+export const defaultCustomDatasetUrl =
+  "https://stgeadlsv278968f2d.blob.core.windows.net/parquet/sop/0.1/us_schools.parquet";
+export const defaultPortalUrl = "https://jsapi.maps.arcgis.com/";
+export const defaultPortalItemId = "5efaf71a6e064e9ea4e67821166c61cd";
+
+export const datasets: PresetDataset[] = [
   {
     id: "census-blocks",
+    kind: "preset",
     name: "Census Blocks, Demographics",
     source: "United States Census",
     sourceUrl: "https://data.census.gov/",
     count: 11_155_486,
-    url: "https://fd-stgeadlsv278968f2d-g4hrhshhhuaxgqc7.a02.azurefd.net/sop/0.1/census_blocks.parquet",
+    parquet: {
+      type: "url",
+      url: "https://fd-stgeadlsv278968f2d-g4hrhshhhuaxgqc7.a02.azurefd.net/sop/0.1/census_blocks.parquet",
+    },
     center: [-74.006, 40.68],
     scale: 577_791 / 2,
     byteSize: 12_975_526_811,
@@ -66,11 +122,15 @@ export const datasets: Dataset[] = [
   },
   {
     id: "building-footprints-japan",
+    kind: "preset",
     name: "Building Footprints, Japan",
     source: "OpenStreetMap contributors, Overture Maps Foundation",
     sourceUrl: "https://overturemaps.org/",
     count: 53_742_978,
-    url: "https://fd-stgeadlsv278968f2d-g4hrhshhhuaxgqc7.a02.azurefd.net/sop/0.1/japan_buildings.parquet",
+    parquet: {
+      type: "url",
+      url: "https://fd-stgeadlsv278968f2d-g4hrhshhhuaxgqc7.a02.azurefd.net/sop/0.1/japan_buildings.parquet",
+    },
     bookmarks: [],
     center: [139.783372, 35.675360],
     scale: 144_448 / 4,
@@ -80,11 +140,15 @@ export const datasets: Dataset[] = [
 
   {
     id: "national-building-database-france",
+    kind: "preset",
     name: "National Building Database, France",
     source: "Centre Scientifique et Technique du Bâtiment",
     sourceUrl: "https://www.data.gouv.fr/datasets/base-de-donnees-nationale-des-batiments",
     count: 32_220_045,
-    url: "https://fd-stgeadlsv278968f2d-g4hrhshhhuaxgqc7.a02.azurefd.net/sop/0.1/france_buildings.parquet",
+    parquet: {
+      type: "url",
+      url: "https://fd-stgeadlsv278968f2d-g4hrhshhhuaxgqc7.a02.azurefd.net/sop/0.1/france_buildings.parquet",
+    },
     center: [2.3522, 48.8566],
     scale: 144_448 / 2,
     byteSize: 8_034_324_439,
@@ -92,11 +156,15 @@ export const datasets: Dataset[] = [
 
   {
     id: "alaska-3d-hydrography",
+    kind: "preset",
     name: "Alaska Hydrography",
     source: "U.S. Geological Survey",
     sourceUrl: "https://www.sciencebase.gov/catalog/item/69743a65d4be0260181a121b" ,
     count: 3_278_591,
-    url: "https://fd-stgeadlsv278968f2d-g4hrhshhhuaxgqc7.a02.azurefd.net/sop/0.1/hydro_alaska.parquet",
+    parquet: {
+      type: "url",
+      url: "https://fd-stgeadlsv278968f2d-g4hrhshhhuaxgqc7.a02.azurefd.net/sop/0.1/hydro_alaska.parquet",
+    },
     center: [-149.9003, 61.2181],
     scale: 144_448 * 16,
     basemap: "6178c4387d07481f87539022ab641aeb",
@@ -105,11 +173,15 @@ export const datasets: Dataset[] = [
   },
   {
     id: "country-borders",
+    kind: "preset",
     name: "Country Borders, Overture",
     source: "OpenStreetMap contributors, Overture Maps Foundation",
     sourceUrl: "https://overturemaps.org/",
     count: 219,
-    url: "https://stgeadlsv278968f2d.blob.core.windows.net/parquet/sop/0.1/country_borders.parquet",
+    parquet: {
+      type: "url",
+      url: "https://stgeadlsv278968f2d.blob.core.windows.net/parquet/sop/0.1/country_borders.parquet",
+    },
     bookmarks: [],
     center: [0, 0],
     scale: 144_448 * 512,
@@ -117,14 +189,76 @@ export const datasets: Dataset[] = [
   },
   {
     id: "unified-schools",
+    kind: "preset",
     name: "Unified School Districts",
     source: "United States Census",
     sourceUrl: "https://www.census.gov/geographies/mapping-files/time-series/geo/tiger-geopackage-file.html",
     count: 10867,
-    url: "https://stgeadlsv278968f2d.blob.core.windows.net/parquet/sop/0.1/us_schools.parquet",
+    parquet: {
+      type: "url",
+      url: "https://stgeadlsv278968f2d.blob.core.windows.net/parquet/sop/0.1/us_schools.parquet",
+    },
     bookmarks: [],
     center: [-77.03, 38.895],
     scale: 144_448 * 64,
     byteSize: 310481871,
   },
 ]
+
+export function createCustomUrlDataset(url: string): CustomUrlDataset {
+  const validatedUrl = validateNetworkUrl(url, "Parquet URL");
+  return {
+    id: `custom-url:${validatedUrl}`,
+    kind: "custom-url",
+    parquet: { type: "url", url: validatedUrl },
+    name: "Custom URL",
+    source: "--",
+    center: customDatasetCenter,
+    scale: customDatasetScale,
+  };
+}
+
+export function createPortalItemDataset(
+  portalUrl: string,
+  itemId: string,
+): PortalItemDataset {
+  const validatedPortalUrl = validateNetworkUrl(portalUrl, "Portal URL");
+  const validatedItemId = itemId.trim();
+  if (!validatedItemId) {
+    throw new Error("Portal item ID is required.");
+  }
+
+  return {
+    id: `portal-item:${validatedPortalUrl}:${validatedItemId}`,
+    kind: "portal-item",
+    parquet: {
+      type: "portal-item",
+      portalUrl: validatedPortalUrl,
+      itemId: validatedItemId,
+    },
+    name: "Portal Item",
+    source: "--",
+    center: customDatasetCenter,
+    scale: customDatasetScale,
+  };
+}
+
+export function validateNetworkUrl(value: string, label = "URL"): string {
+  const trimmedValue = value.trim();
+  if (!trimmedValue) {
+    throw new Error(`${label} is required.`);
+  }
+
+  let url: URL;
+  try {
+    url = new URL(trimmedValue);
+  } catch {
+    throw new Error(`${label} must be an absolute URL.`);
+  }
+
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`${label} must use HTTP or HTTPS.`);
+  }
+
+  return trimmedValue;
+}

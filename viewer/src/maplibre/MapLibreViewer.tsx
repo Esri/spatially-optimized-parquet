@@ -14,7 +14,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import { DatasetSelectionPanel } from "../common/dataset/DatasetSelectionPanel";
 import {
-  type Dataset,
+  type PresetDataset,
   datasets,
 } from "../common/dataset/datasets";
 import { formatCompactCount } from "../common/formatCompactCount";
@@ -42,10 +42,19 @@ export default function MaplibreViewer() {
     <main className={styles.maplibreWorkspace}>
       <DatasetSelectionPanel
         activeDataset={activeDataset}
-        compression={
-          status.type === "ready" ? status.compression : null
-        }
-        onDatasetSelect={setDatasetIndex}
+        metrics={{
+          byteSize: activeDataset.byteSize,
+          compression: status.type === "ready" ? status.compression : null,
+          featureCount: activeDataset.count,
+        }}
+        onDatasetSelect={(dataset) => {
+          const index = datasets.findIndex(
+            (candidate) => candidate.id === dataset.id,
+          );
+          if (index >= 0) {
+            setDatasetIndex(index);
+          }
+        }}
       />
       <calcite-panel className={styles.maplibrePanel}>
         <DatasetStatusHeader status={status} />
@@ -92,7 +101,7 @@ function DatasetStatusHeader({ status }: { status: DatasetLayerStatus }) {
 /** Create and dispose the MapLibre map for one container lifetime. */
 function useMapLibreMap(
   containerRef: RefObject<HTMLDivElement | null>,
-  initialDataset: Dataset,
+  initialDataset: PresetDataset,
 ): maplibregl.Map | null {
   const [map, setMap] = useState<maplibregl.Map | null>(null);
 
@@ -125,7 +134,7 @@ function useMapLibreMap(
 /** Replace the dataset layer when the selected dataset changes. */
 function useDatasetLayer(
   map: maplibregl.Map | null,
-  dataset: Dataset,
+  dataset: PresetDataset,
 ): DatasetLayerStatus {
   const [status, setStatus] = useState<DatasetLayerStatus>({ type: "idle" });
 
