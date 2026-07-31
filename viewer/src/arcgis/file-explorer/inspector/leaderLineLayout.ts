@@ -29,47 +29,6 @@ export function assignLeaderLineLanes(
   throw new Error("Unable to route leader lines without crossings.");
 }
 
-function findBestLaneAssignment(
-  spans: readonly LeaderLineSpan[],
-  laneCount: number,
-  minimumGap: number,
-): number[] | null {
-  let bestLanes: number[] | null = null;
-  let bestOrderCost = Number.POSITIVE_INFINITY;
-  const lanes = new Array<number>(spans.length).fill(0);
-
-  const visit = (spanIndex: number) => {
-    if (spanIndex === spans.length) {
-      if (new Set(lanes).size !== laneCount) {
-        return;
-      }
-      if (leaderLineRoutesIntersect(spans, lanes, minimumGap)) {
-        return;
-      }
-
-      const orderCost = lanes.reduce((cost, lane, index) => {
-        const preferredLane = spans.length === 1
-          ? 0
-          : (index / (spans.length - 1)) * (laneCount - 1);
-        return cost + Math.abs(lane - preferredLane);
-      }, 0);
-      if (orderCost < bestOrderCost) {
-        bestOrderCost = orderCost;
-        bestLanes = [...lanes];
-      }
-      return;
-    }
-
-    for (let lane = 0; lane < laneCount; lane += 1) {
-      lanes[spanIndex] = lane;
-      visit(spanIndex + 1);
-    }
-  };
-
-  visit(0);
-  return bestLanes;
-}
-
 export function leaderLineRoutesIntersect(
   spans: readonly LeaderLineSpan[],
   lanes: readonly number[],
@@ -114,6 +73,47 @@ export function leaderLineRoutesIntersect(
   }
 
   return false;
+}
+
+function findBestLaneAssignment(
+  spans: readonly LeaderLineSpan[],
+  laneCount: number,
+  minimumGap: number,
+): number[] | null {
+  let bestLanes: number[] | null = null;
+  let bestOrderCost = Number.POSITIVE_INFINITY;
+  const lanes = new Array<number>(spans.length).fill(0);
+
+  const visit = (spanIndex: number) => {
+    if (spanIndex === spans.length) {
+      if (new Set(lanes).size !== laneCount) {
+        return;
+      }
+      if (leaderLineRoutesIntersect(spans, lanes, minimumGap)) {
+        return;
+      }
+
+      const orderCost = lanes.reduce((cost, lane, index) => {
+        const preferredLane = spans.length === 1
+          ? 0
+          : (index / (spans.length - 1)) * (laneCount - 1);
+        return cost + Math.abs(lane - preferredLane);
+      }, 0);
+      if (orderCost < bestOrderCost) {
+        bestOrderCost = orderCost;
+        bestLanes = [...lanes];
+      }
+      return;
+    }
+
+    for (let lane = 0; lane < laneCount; lane += 1) {
+      lanes[spanIndex] = lane;
+      visit(spanIndex + 1);
+    }
+  };
+
+  visit(0);
+  return bestLanes;
 }
 
 function isInsideHorizontalSpan(

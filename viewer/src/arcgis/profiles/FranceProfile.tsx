@@ -11,8 +11,9 @@ const maximumConstructionYear = 2024;
 const initialConstructionYear = maximumConstructionYear;
 const animationStepMilliseconds = 50;
 
-export const FranceProfile = {
-  layerProperties: {
+export function createFranceProfile(): DatasetMapProfile {
+  return {
+    layerProperties: {
     renderer: createConstructionYearRenderer(initialConstructionYear),
     popupTemplate: {
       title: "{libelle_commune_insee}",
@@ -143,8 +144,9 @@ export const FranceProfile = {
           : null}
       </>
     );
-  },
-} satisfies DatasetMapProfile;
+    },
+  };
+}
 
 function createConstructionYearRenderer(year: number) {
   return {

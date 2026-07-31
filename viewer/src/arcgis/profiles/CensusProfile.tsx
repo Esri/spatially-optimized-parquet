@@ -52,8 +52,9 @@ const demographicAttributes = [
 
 const defaultPopulationThreshold = 300;
 
-export const CensusProfile = {
-  layerProperties: {
+export function createCensusProfile(): DatasetMapProfile {
+  return {
+    layerProperties: {
     renderer: createDotDensityRenderer(10),
     popupTemplate: {
       title: "Census block {GEOID}",
@@ -204,8 +205,9 @@ export const CensusProfile = {
         layer.effect = null;
       }
     };
-  },
-} satisfies DatasetMapProfile;
+    },
+  };
+}
 
 function renderCensusRendererControls({
   demographicsEnabled,

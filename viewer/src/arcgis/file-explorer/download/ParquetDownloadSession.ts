@@ -49,6 +49,7 @@ const emptyBlockSnapshot: DownloadBlockSnapshot = {
   loadingMask: 0,
   activeMask: 0,
 };
+
 const emptyTrackSnapshot: DownloadTrackSnapshot = {
   downloadedByteLength: 0,
   filledSubpartCount: 0,
@@ -56,6 +57,7 @@ const emptyTrackSnapshot: DownloadTrackSnapshot = {
   visibleBlockCount: 0,
   visibleBlockIds: [],
 };
+
 
 /**
  * Coordinates diagnostics, byte coverage, request activity, and published download snapshots.

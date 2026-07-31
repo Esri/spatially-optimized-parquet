@@ -78,39 +78,6 @@ export async function loadDatasetParquetMetadata(
 }
 
 /**
- * Report the physical codec and the ratio of total raw bytes to compressed bytes.
- */
-function formatCompression(metadata: FileMetaData): string | null {
-  const codecs = new Set<string>();
-  let compressedSize = 0n;
-  let uncompressedSize = 0n;
-
-  for (const rowGroup of metadata.row_groups) {
-    for (const column of rowGroup.columns) {
-      const columnMetadata = column.meta_data;
-      if (!columnMetadata) {
-        continue;
-      }
-      codecs.add(columnMetadata.codec);
-      compressedSize += columnMetadata.total_compressed_size;
-      uncompressedSize += columnMetadata.total_uncompressed_size;
-    }
-  }
-
-  if (codecs.size === 0) {
-    return null;
-  }
-  const codec = codecs.size === 1 ? [...codecs][0] : "Mixed";
-  const ratio = formatRatio(
-    Number(uncompressedSize),
-    Number(compressedSize),
-    1,
-    "x",
-  );
-  return ratio ? `${codec.toUpperCase()} ${ratio}` : codec;
-}
-
-/**
  * Use `spec/display-optimization.md#select-multiscale-levels` to choose the closest stored level with enough detail.
  * If numeric drift prevents a match, use the most detailed level.
  */
@@ -178,6 +145,39 @@ export function parseXZDisplayMetadata(value: unknown): XZDisplayMetadata {
     levels,
     version: typeof value.version === "string" ? value.version : null,
   };
+}
+
+/**
+ * Report the physical codec and the ratio of total raw bytes to compressed bytes.
+ */
+function formatCompression(metadata: FileMetaData): string | null {
+  const codecs = new Set<string>();
+  let compressedSize = 0n;
+  let uncompressedSize = 0n;
+
+  for (const rowGroup of metadata.row_groups) {
+    for (const column of rowGroup.columns) {
+      const columnMetadata = column.meta_data;
+      if (!columnMetadata) {
+        continue;
+      }
+      codecs.add(columnMetadata.codec);
+      compressedSize += columnMetadata.total_compressed_size;
+      uncompressedSize += columnMetadata.total_uncompressed_size;
+    }
+  }
+
+  if (codecs.size === 0) {
+    return null;
+  }
+  const codec = codecs.size === 1 ? [...codecs][0] : "Mixed";
+  const ratio = formatRatio(
+    Number(uncompressedSize),
+    Number(compressedSize),
+    1,
+    "x",
+  );
+  return ratio ? `${codec.toUpperCase()} ${ratio}` : codec;
 }
 
 /**

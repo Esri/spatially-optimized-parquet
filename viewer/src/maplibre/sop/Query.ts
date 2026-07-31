@@ -31,9 +31,6 @@ import {
   type XZRange,
 } from "./xz";
 
-/** The limit applies after the exact geometry extent test. */
-export const datasetFeatureLimit = 650_000;
-
 export interface QueryInput {
   /** Contains one clipped extent or two extents across the antimeridian. */
   queryExtents: Bounds[];
@@ -68,6 +65,9 @@ interface FeatureCollectionResult {
   featureCollection: GeoJSONFeatureCollection;
   featureLimitReached: boolean;
 }
+
+/** The limit applies after the exact geometry extent test. */
+export const datasetFeatureLimit = 650_000;
 
 /**
  * `Query` owns the metadata cache and `PageReader` for one Parquet file.

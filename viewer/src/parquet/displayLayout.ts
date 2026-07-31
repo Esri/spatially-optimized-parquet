@@ -5,9 +5,6 @@ import {
   rangesOverlap,
 } from "./fileLayout";
 
-export const displayBlockByteLength = 2 * 1024 * 1024;
-export const displaySubpartCount = 16;
-
 export type DownloadTrackKind = "column" | "page-index" | "footer";
 
 export interface DownloadPhysicalPiece {
@@ -63,6 +60,9 @@ interface SourceSegment {
   nullCount: number | null;
   recordCount: number | null;
 }
+
+export const displayBlockByteLength = 2 * 1024 * 1024;
+export const displaySubpartCount = 16;
 
 export function createDownloadDisplayLayout(layout: FileLayout): DownloadDisplayLayout {
   const tracks: DownloadTrackLayout[] = [];

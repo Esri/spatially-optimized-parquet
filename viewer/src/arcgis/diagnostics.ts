@@ -398,6 +398,14 @@ function validateOptionalBounds(
   }
 }
 
+function readNullableBoundedByteRange(
+  value: unknown,
+  name: string,
+  byteLength: number,
+): ArcgisParquetByteRange | null {
+  return value === null ? null : readBoundedByteRange(value, name, byteLength);
+}
+
 function readBoundedByteRange(
   value: unknown,
   name: string,
@@ -408,14 +416,6 @@ function readBoundedByteRange(
     throw new TypeError(`${name} exceeds the file byteLength.`);
   }
   return range;
-}
-
-function readNullableBoundedByteRange(
-  value: unknown,
-  name: string,
-  byteLength: number,
-): ArcgisParquetByteRange | null {
-  return value === null ? null : readBoundedByteRange(value, name, byteLength);
 }
 
 function readByteRange(
@@ -453,15 +453,15 @@ function isParquetDiagnosticsSource(
   );
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function readRecord(value: unknown, name: string): Record<string, unknown> {
   if (!isRecord(value)) {
     throw new TypeError(`Invalid ${name}.`);
   }
   return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function readArray(value: unknown, name: string): unknown[] {
@@ -478,19 +478,12 @@ function readVersion(value: unknown, name: string): 1 {
   return 1;
 }
 
-function readStructuralInteger(value: unknown, name: string): number {
-  if (!Number.isSafeInteger(value) || typeof value !== "number" || value < 0) {
-    throw new TypeError(`Invalid ${name}.`);
-  }
-  return value;
-}
-
 function readNullableStructuralInteger(value: unknown, name: string): number | null {
   return value === null ? null : readStructuralInteger(value, name);
 }
 
-function readFiniteNumber(value: unknown, name: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
+function readStructuralInteger(value: unknown, name: string): number {
+  if (!Number.isSafeInteger(value) || typeof value !== "number" || value < 0) {
     throw new TypeError(`Invalid ${name}.`);
   }
   return value;
@@ -500,8 +493,8 @@ function readNullableFiniteNumber(value: unknown, name: string): number | null {
   return value === null ? null : readFiniteNumber(value, name);
 }
 
-function readString(value: unknown, name: string): string {
-  if (typeof value !== "string") {
+function readFiniteNumber(value: unknown, name: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new TypeError(`Invalid ${name}.`);
   }
   return value;
@@ -519,8 +512,8 @@ function readNullableString(value: unknown, name: string): string | null {
   return value === null ? null : readString(value, name);
 }
 
-function readBoolean(value: unknown, name: string): boolean {
-  if (typeof value !== "boolean") {
+function readString(value: unknown, name: string): string {
+  if (typeof value !== "string") {
     throw new TypeError(`Invalid ${name}.`);
   }
   return value;
@@ -528,4 +521,11 @@ function readBoolean(value: unknown, name: string): boolean {
 
 function readNullableBoolean(value: unknown, name: string): boolean | null {
   return value === null ? null : readBoolean(value, name);
+}
+
+function readBoolean(value: unknown, name: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new TypeError(`Invalid ${name}.`);
+  }
+  return value;
 }

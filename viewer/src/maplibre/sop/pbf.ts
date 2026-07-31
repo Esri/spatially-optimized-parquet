@@ -60,6 +60,96 @@ export function decodeGeometry(
 }
 
 /**
+ * `ProtobufReader` owns the byte cursor and validates the Esri PBF wire subset.
+ * Each operation advances one cursor for one payload.
+ * Geometry reconstruction stays outside `ProtobufReader`, so wire checks cannot change geometry parts.
+ */
+class ProtobufReader {
+  private _offset = 0;
+
+  constructor(private readonly _bytes: Uint8Array) {}
+
+  get done(): boolean {
+    return this._offset === this._bytes.length;
+  }
+
+  /**
+   * Read one unsigned base-128 varint.
+   * Reject truncated values and values longer than 64 bits.
+   */
+  readUnsignedVarint(): bigint {
+    let value = 0n;
+    let shift = 0n;
+
+    while (this._offset < this._bytes.length && shift <= 63n) {
+      const byte = this._bytes[this._offset];
+      this._offset += 1;
+      value |= BigInt(byte & 0x7f) << shift;
+      if ((byte & 0x80) === 0) {
+        return value;
+      }
+      shift += 7n;
+    }
+
+    throw new Error("PBF geometry contains a truncated or oversized varint.");
+  }
+
+  readPackedUnsigned(): number[] {
+    return this._readPacked((value) => Number(value));
+  }
+
+  /**
+   * Decode packed `sint64` values with Protobuf zigzag.
+   */
+  readPackedSigned(): number[] {
+    return this._readPacked(decodeZigzag);
+  }
+
+  /**
+   * Skip unknown fields that use standard scalar or length-delimited Protobuf wire types.
+   */
+  skipField(wireType: number): void {
+    if (wireType === 0) {
+      this.readUnsignedVarint();
+    } else if (wireType === 1) {
+      this._advance(8);
+    } else if (wireType === 2) {
+      this._advance(Number(this.readUnsignedVarint()));
+    } else if (wireType === 5) {
+      this._advance(4);
+    } else {
+      throw new Error(`PBF geometry uses unsupported wire type ${wireType}.`);
+    }
+  }
+
+  private _readPacked(convert: (value: bigint) => number): number[] {
+    const byteLength = Number(this.readUnsignedVarint());
+    const end = this._offset + byteLength;
+    if (!Number.isSafeInteger(byteLength) || end > this._bytes.length) {
+      throw new Error("PBF geometry contains a truncated packed field.");
+    }
+
+    const values: number[] = [];
+    while (this._offset < end) {
+      values.push(convert(this.readUnsignedVarint()));
+    }
+    if (this._offset !== end) {
+      throw new Error("PBF geometry packed field ended at an invalid offset.");
+    }
+
+    return values;
+  }
+
+  private _advance(byteLength: number): void {
+    const nextOffset = this._offset + byteLength;
+    if (!Number.isSafeInteger(byteLength) || nextOffset > this._bytes.length) {
+      throw new Error("PBF geometry contains a truncated field.");
+    }
+    this._offset = nextOffset;
+  }
+}
+
+/**
  * Decode the `lengths` and `coords` fields from `spec/display-optimization.md#encoding`.
  * Accept packed and unpacked repeated values.
  */
@@ -198,96 +288,6 @@ function signedRingArea(ring: Ring): number {
   }
 
   return area / 2;
-}
-
-/**
- * `ProtobufReader` owns the byte cursor and validates the Esri PBF wire subset.
- * Each operation advances one cursor for one payload.
- * Geometry reconstruction stays outside `ProtobufReader`, so wire checks cannot change geometry parts.
- */
-class ProtobufReader {
-  private _offset = 0;
-
-  constructor(private readonly _bytes: Uint8Array) {}
-
-  get done(): boolean {
-    return this._offset === this._bytes.length;
-  }
-
-  /**
-   * Read one unsigned base-128 varint.
-   * Reject truncated values and values longer than 64 bits.
-   */
-  readUnsignedVarint(): bigint {
-    let value = 0n;
-    let shift = 0n;
-
-    while (this._offset < this._bytes.length && shift <= 63n) {
-      const byte = this._bytes[this._offset];
-      this._offset += 1;
-      value |= BigInt(byte & 0x7f) << shift;
-      if ((byte & 0x80) === 0) {
-        return value;
-      }
-      shift += 7n;
-    }
-
-    throw new Error("PBF geometry contains a truncated or oversized varint.");
-  }
-
-  readPackedUnsigned(): number[] {
-    return this._readPacked((value) => Number(value));
-  }
-
-  /**
-   * Decode packed `sint64` values with Protobuf zigzag.
-   */
-  readPackedSigned(): number[] {
-    return this._readPacked(decodeZigzag);
-  }
-
-  /**
-   * Skip unknown fields that use standard scalar or length-delimited Protobuf wire types.
-   */
-  skipField(wireType: number): void {
-    if (wireType === 0) {
-      this.readUnsignedVarint();
-    } else if (wireType === 1) {
-      this._advance(8);
-    } else if (wireType === 2) {
-      this._advance(Number(this.readUnsignedVarint()));
-    } else if (wireType === 5) {
-      this._advance(4);
-    } else {
-      throw new Error(`PBF geometry uses unsupported wire type ${wireType}.`);
-    }
-  }
-
-  private _readPacked(convert: (value: bigint) => number): number[] {
-    const byteLength = Number(this.readUnsignedVarint());
-    const end = this._offset + byteLength;
-    if (!Number.isSafeInteger(byteLength) || end > this._bytes.length) {
-      throw new Error("PBF geometry contains a truncated packed field.");
-    }
-
-    const values: number[] = [];
-    while (this._offset < end) {
-      values.push(convert(this.readUnsignedVarint()));
-    }
-    if (this._offset !== end) {
-      throw new Error("PBF geometry packed field ended at an invalid offset.");
-    }
-
-    return values;
-  }
-
-  private _advance(byteLength: number): void {
-    const nextOffset = this._offset + byteLength;
-    if (!Number.isSafeInteger(byteLength) || nextOffset > this._bytes.length) {
-      throw new Error("PBF geometry contains a truncated field.");
-    }
-    this._offset = nextOffset;
-  }
 }
 
 /**

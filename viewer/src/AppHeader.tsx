@@ -6,10 +6,6 @@ interface AppHeaderProps {
   onViewerChange(viewer: ViewerType): void;
 }
 
-function viewerToggleLabel(viewer: ViewerType): string {
-  return viewer === "arcgis" ? "MapLibre Starter Code" : "ArcGIS Maps SDK";
-}
-
 export function AppHeader({
   viewer,
   onViewerChange,
@@ -46,4 +42,8 @@ export function AppHeader({
       </calcite-menu>
     </calcite-navigation>
   );
+}
+
+function viewerToggleLabel(viewer: ViewerType): string {
+  return viewer === "arcgis" ? "MapLibre Starter Code" : "ArcGIS Maps SDK";
 }

@@ -112,6 +112,28 @@ export function xzCodeMatches(code: number, ranges: XZRange[]): boolean {
   return false;
 }
 
+/**
+ * Sort inclusive XZ intervals.
+ * Merge intervals that overlap or touch.
+ */
+export function mergeXZRanges(ranges: XZRange[]): XZRange[] {
+  const sortedRanges = [...ranges].sort(
+    (left, right) => left.start - right.start || left.end - right.end,
+  );
+  const mergedRanges: XZRange[] = [];
+
+  for (const range of sortedRanges) {
+    const current = mergedRanges.at(-1);
+    if (current && current.end + 1 >= range.start) {
+      current.end = Math.max(current.end, range.end);
+    } else {
+      mergedRanges.push({ ...range });
+    }
+  }
+
+  return mergedRanges;
+}
+
 /** Convert a quadrant and depth to an XZ sequence offset. */
 function getCodeForLevel(
   quadrant: number,
@@ -166,26 +188,4 @@ function containsExtent(container: Bounds, contained: Bounds): boolean {
     contained.ymin >= container.ymin &&
     contained.ymax <= container.ymax
   );
-}
-
-/**
- * Sort inclusive XZ intervals.
- * Merge intervals that overlap or touch.
- */
-export function mergeXZRanges(ranges: XZRange[]): XZRange[] {
-  const sortedRanges = [...ranges].sort(
-    (left, right) => left.start - right.start || left.end - right.end,
-  );
-  const mergedRanges: XZRange[] = [];
-
-  for (const range of sortedRanges) {
-    const current = mergedRanges.at(-1);
-    if (current && current.end + 1 >= range.start) {
-      current.end = Math.max(current.end, range.end);
-    } else {
-      mergedRanges.push({ ...range });
-    }
-  }
-
-  return mergedRanges;
 }

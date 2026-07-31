@@ -12,6 +12,7 @@ import {
 import { createPortal } from "react-dom";
 
 import type { Dataset } from "../../common/dataset/datasets";
+import type { ArcgisDatasetSessionResult } from "../useArcgisDatasetSession";
 import {
   resolveParquetPageIndexSource,
   type ArcgisParquetPageIndexSource,
@@ -22,7 +23,6 @@ import type {
   DownloadBlockLayout,
   DownloadTrackLayout,
 } from "../../parquet/displayLayout";
-import type { RowGroupBounds } from "../../parquet/rowGroupBounds";
 import { InspectorDialog } from "./inspector/InspectorDialog";
 import type { FileStructureSnapshot } from "./inspector/ParquetFileStructureStore";
 import { Minimap } from "./minimap/Minimap";
@@ -34,42 +34,437 @@ import {
 } from "./download/ParquetDownloadSession";
 import styles from "./FileExplorer.module.css";
 
+export interface FileExplorerProps {
+  dataset: Dataset;
+  layout:
+    | { type: "desktop" }
+    | { type: "compact"; visible: boolean };
+  mapElementRef: RefObject<HTMLArcgisMapElement | null>;
+  session: ArcgisDatasetSessionResult;
+}
+
 const columnThresholdSliderMaximum = 1000;
 const minimumPositiveColumnThreshold = 1024;
 const defaultColumnDownloadThreshold = 250 * 1024;
 const tooltipOpenDelayMs = 100;
 const tooltipGracePeriodMs = 200;
 
-const DownloadSubpart = memo(function DownloadSubpart({
-  index,
-  cachedMask,
-  loadingMask,
-  activeMask,
-  highlighted,
+/**
+ * Presents live Parquet download activity as file tracks, row-group details, and inspection tools.
+ * It coordinates the session's external stores with responsive explorer state so high-frequency byte updates remain localized.
+ */
+export const FileExplorer = memo(function FileExplorer({
+  dataset,
+  layout,
+  mapElementRef,
+  session,
+}: FileExplorerProps) {
+  const {
+    download: downloadSession,
+    parquetSource,
+    rowGroupBounds,
+  } = session;
+  const datasetId = dataset.id;
+  const [fileStructureDialog, setFileStructureDialog] = useState<{
+    datasetId: string;
+    snapshot: FileStructureSnapshot;
+    source: ArcgisParquetPageIndexSource;
+  } | null>(null);
+  const openFileStructure = () => {
+    const snapshot = downloadSession.createFileStructureSnapshot();
+    if (!snapshot || !parquetSource) {
+      return;
+    }
+    setFileStructureDialog({
+      datasetId,
+      snapshot,
+      source: resolveParquetPageIndexSource(parquetSource),
+    });
+  };
+  const content = (
+    <>
+      <div className={styles.fileExplorerOverview}>
+        <Minimap
+          bounds={rowGroupBounds}
+          dataset={dataset}
+          key={datasetId}
+          mainMapElementRef={mapElementRef}
+        />
+        <div className={styles.fileStructureAction}>
+          <calcite-button
+            appearance="solid"
+            className={styles.fileStructureButton}
+            iconStart="magnifying-glass"
+            onClick={openFileStructure}
+            width="full"
+          >
+            Explore file layout
+          </calcite-button>
+        </div>
+      </div>
+      <FileDownload downloadSession={downloadSession} />
+    </>
+  );
+
+  return (
+    <>
+      {layout.type === "desktop" ? (
+        <div className={styles.gridDetailsColumn}>{content}</div>
+      ) : layout.visible ? (
+        <aside aria-label="Details" className={styles.responsiveDetailsOverlay}>
+          {content}
+        </aside>
+      ) : null}
+      {fileStructureDialog?.datasetId === datasetId ? (
+        createPortal(
+          <InspectorDialog
+            onClose={() => setFileStructureDialog(null)}
+            snapshot={fileStructureDialog.snapshot}
+            source={fileStructureDialog.source}
+          />,
+          document.body,
+        )
+      ) : null}
+    </>
+  );
+});
+
+const FileDownload = memo(function FileDownload({
+  downloadSession,
 }: {
-  index: number;
-  cachedMask: number;
-  loadingMask: number;
-  activeMask: number;
-  highlighted: boolean;
+  downloadSession: DownloadSessionView;
 }) {
-  const mask = 1 << index;
-  const state = (activeMask & mask) !== 0
-    ? "active"
-    : (loadingMask & mask) !== 0
-      ? "loading"
-      : (cachedMask & mask) !== 0
-        ? "cached"
-        : "empty";
-  const stateClassName = state === "empty" ? null : styles[state];
+  const topology = useSyncExternalStore(
+    downloadSession.topology.subscribe,
+    downloadSession.topology.getSnapshot,
+  );
+  const [minimumDownloadedByteLength, setMinimumDownloadedByteLength] = useState(
+    defaultColumnDownloadThreshold,
+  );
+  const maximumColumnByteLength = Math.max(
+    minimumPositiveColumnThreshold,
+    ...topology.tracks
+      .filter((track) => track.kind === "column")
+      .map((track) => track.byteLength),
+  );
+  return (
+    <>
+      {topology.layout ? (
+        <div className={styles.columnThresholdFrame}>
+          <BytesLoaded
+            byteLength={topology.layout.byteLength}
+            downloadSession={downloadSession}
+          />
+          <ColumnDownloadThreshold
+            maximumByteLength={maximumColumnByteLength}
+            minimumDownloadedByteLength={minimumDownloadedByteLength}
+            onChange={setMinimumDownloadedByteLength}
+          />
+        </div>
+      ) : null}
+      <div className={styles.occupancyGridFrame}>
+        <div
+          className={styles.occupancyFlow}
+          role="img"
+          aria-label="Parquet download coverage by track"
+        >
+          {topology.layout ? (
+            <DownloadTrackList
+              downloadSession={downloadSession}
+              minimumDownloadedByteLength={minimumDownloadedByteLength}
+              tracks={topology.tracks}
+            />
+          ) : (
+            <span className={styles.occupancyStatus}>
+              {topology.error
+                ? "Unable to load Parquet diagnostics."
+                : null}
+            </span>
+          )}
+        </div>
+      </div>
+      {topology.layout ? (
+        <DownloadCoverageFooter
+          downloadSession={downloadSession}
+          minimumDownloadedByteLength={minimumDownloadedByteLength}
+          tracks={topology.tracks}
+        />
+      ) : null}
+    </>
+  );
+});
+
+const BytesLoaded = memo(function BytesLoaded({
+  downloadSession,
+  byteLength,
+}: {
+  downloadSession: DownloadSessionView;
+  byteLength: number | null;
+}) {
+  const summary = useSyncExternalStore(
+    downloadSession.summary.subscribe,
+    downloadSession.summary.getSnapshot,
+  );
+  return (
+    <div className={styles.bytesLoaded}>
+      <div className={styles.fileStatLabel}>Bytes Loaded</div>
+      <div className={styles.fileStatValue}>
+        {formatByteSize(summary.downloadedByteLength)}
+        <span className={styles.fileStatUnit}>
+          / {byteLength === null ? "…" : formatByteSize(byteLength)}
+        </span>
+      </div>
+    </div>
+  );
+});
+
+const ColumnDownloadThreshold = memo(function ColumnDownloadThreshold({
+  maximumByteLength,
+  minimumDownloadedByteLength,
+  onChange,
+}: {
+  maximumByteLength: number;
+  minimumDownloadedByteLength: number;
+  onChange: (byteLength: number) => void;
+}) {
+  const sliderValue = byteLengthToThresholdSliderValue(
+    minimumDownloadedByteLength,
+    maximumByteLength,
+  );
+
+  return (
+    <label className={styles.columnThresholdControl}>
+      <span>
+        Show with at least
+        <strong>{formatByteSize(minimumDownloadedByteLength)}</strong>
+      </span>
+      <calcite-slider
+        label="Minimum downloaded bytes required to show a column"
+        max={columnThresholdSliderMaximum}
+        min={0}
+        oncalciteSliderInput={(event: Event) => {
+          const value = Number((event.currentTarget as HTMLCalciteSliderElement).value);
+          onChange(thresholdSliderValueToByteLength(value, maximumByteLength));
+        }}
+        step={1}
+        value={sliderValue}
+      />
+    </label>
+  );
+});
+
+const DownloadTrackList = memo(function DownloadTrackList({
+  downloadSession,
+  minimumDownloadedByteLength,
+  tracks,
+}: {
+  downloadSession: DownloadSessionView;
+  minimumDownloadedByteLength: number;
+  tracks: readonly DownloadTrackLayout[];
+}) {
+  const [activeTooltipTrackId, setActiveTooltipTrackId] = useState<string | null>(null);
+  const summary = useSyncExternalStore(
+    downloadSession.summary.subscribe,
+    downloadSession.summary.getSnapshot,
+  );
+  const trackOrder = new Map(tracks.map((track, index) => [track.id, index]));
+  const sortedTracks = [...tracks].sort((first, second) => {
+    const downloadedByteDifference =
+      downloadSession.track(second.id).getSnapshot().downloadedByteLength -
+      downloadSession.track(first.id).getSnapshot().downloadedByteLength;
+    return downloadedByteDifference !== 0
+      ? downloadedByteDifference
+      : (trackOrder.get(first.id) ?? 0) - (trackOrder.get(second.id) ?? 0);
+  });
+
+  return sortedTracks.map((track) => (
+    <DownloadTrack
+      downloadSession={downloadSession}
+      key={track.id}
+      minimumDownloadedByteLength={minimumDownloadedByteLength}
+      onTooltipClose={() => {
+        setActiveTooltipTrackId((activeTrackId) =>
+          activeTrackId === track.id ? null : activeTrackId,
+        );
+      }}
+      onTooltipOpen={() => setActiveTooltipTrackId(track.id)}
+      tooltipActive={activeTooltipTrackId === track.id}
+      totalDownloadedByteLength={summary.downloadedByteLength}
+      track={track}
+    />
+  ));
+});
+
+const DownloadCoverageFooter = memo(function DownloadCoverageFooter({
+  downloadSession,
+  minimumDownloadedByteLength,
+  tracks,
+}: {
+  downloadSession: DownloadSessionView;
+  minimumDownloadedByteLength: number;
+  tracks: readonly DownloadTrackLayout[];
+}) {
+  const summary = useSyncExternalStore(
+    downloadSession.summary.subscribe,
+    downloadSession.summary.getSnapshot,
+  );
+  const visibleColumnCount = tracks.filter((track) => {
+    if (track.kind !== "column") {
+      return false;
+    }
+    const snapshot = downloadSession.track(track.id).getSnapshot();
+    return (
+      snapshot.visibleBlockCount > 0 &&
+      snapshot.downloadedByteLength >= minimumDownloadedByteLength
+    );
+  }).length;
+
+  return (
+    <div className={styles.occupancyFooter}>
+      <span className={styles.occupancySummary}>
+        {visibleColumnCount}/{summary.columnCount} columns
+      </span>
+      <span className={styles.occupancyLegend} aria-label="Download state">
+        <span>
+          <i className={styles.loaded} aria-hidden="true" />
+          Loaded
+        </span>
+        <span>
+          <i aria-hidden="true" />
+          Not loaded
+        </span>
+      </span>
+    </div>
+  );
+});
+
+const DownloadTrack = memo(function DownloadTrack({
+  track,
+  downloadSession,
+  minimumDownloadedByteLength,
+  onTooltipClose,
+  onTooltipOpen,
+  tooltipActive,
+  totalDownloadedByteLength,
+}: {
+  track: DownloadTrackLayout;
+  downloadSession: DownloadSessionView;
+  minimumDownloadedByteLength: number;
+  onTooltipClose: () => void;
+  onTooltipOpen: () => void;
+  tooltipActive: boolean;
+  totalDownloadedByteLength: number;
+}) {
+  const channel = useMemo(
+    () => downloadSession.track(track.id),
+    [downloadSession, track.id],
+  );
+  const snapshot = useSyncExternalStore(channel.subscribe, channel.getSnapshot);
+  const tooltip = useDownloadTrackTooltip({
+    onClose: onTooltipClose,
+    onOpen: onTooltipOpen,
+    tooltipActive,
+  });
+  const blockById = useMemo(
+    () => new Map(track.blocks.map((block) => [block.id, block])),
+    [track.blocks],
+  );
+  const supportsRowGroupTooltip =
+    track.kind === "column" || track.kind === "page-index";
+
+  if (
+    snapshot.visibleBlockCount === 0 ||
+    (track.kind === "column" &&
+      snapshot.downloadedByteLength < minimumDownloadedByteLength)
+  ) {
+    return null;
+  }
+
+  const rowGroupCoverage = tooltip.hoveredBlock && tooltipActive
+    ? downloadSession.rowGroupCoverage(track.id)
+    : [];
+  const highlightedBlockMasks =
+    tooltip.hoveredRowGroupIndex === null || !tooltipActive
+    ? undefined
+    : downloadSession.rowGroupBlockMasks(
+        track.id,
+        tooltip.hoveredRowGroupIndex,
+      );
+
   return (
     <span
       className={[
-        styles.chunkSubpart,
-        stateClassName,
-        highlighted ? styles.selected : null,
+        styles.columnRange,
+        tooltip.hoveredBlock && tooltipActive
+          ? styles.columnRangeSelected
+          : null,
       ].filter(Boolean).join(" ")}
-    />
+      onMouseLeave={tooltip.scheduleClose}
+    >
+      <span className={styles.columnRangeContent}>
+        <span className={styles.columnLabel}>
+          <span className={styles.columnDownloadShare}>
+            {formatDownloadPercent(
+              totalDownloadedByteLength === 0
+                ? 0
+                : (snapshot.downloadedByteLength / totalDownloadedByteLength) *
+                    100,
+            )}
+          </span>
+          {track.label}
+          <DownloadTrackProgress
+            downloadedByteLength={snapshot.downloadedByteLength}
+            track={track}
+          />
+        </span>
+        <span className={styles.columnBlocks}>
+          {snapshot.visibleBlockIds.map((blockId) => {
+            const block = blockById.get(blockId);
+            return block ? (
+              <DownloadChunk
+                block={block}
+                downloadSession={downloadSession}
+                highlightedMask={highlightedBlockMasks?.get(block.id) ?? 0}
+                key={block.id}
+                onHover={
+                  supportsRowGroupTooltip ? tooltip.scheduleOpen : undefined
+                }
+                onHoverEnd={
+                  supportsRowGroupTooltip ? tooltip.cancelOpen : undefined
+                }
+              />
+            ) : null;
+          })}
+        </span>
+      </span>
+      {tooltip.hoveredBlock && tooltipActive && supportsRowGroupTooltip ? (
+        createPortal(
+          <TrackRowGroupTooltip
+            anchor={tooltip.hoveredBlock}
+            coverage={rowGroupCoverage}
+            onMouseEnter={tooltip.cancelClose}
+            onMouseLeave={tooltip.scheduleClose}
+            onRowGroupHover={tooltip.setHoveredRowGroupIndex}
+            title={`${track.label} by row group`}
+          />,
+          document.body,
+        )
+      ) : null}
+    </span>
+  );
+});
+
+const DownloadTrackProgress = memo(function DownloadTrackProgress({
+  track,
+  downloadedByteLength,
+}: {
+  track: DownloadTrackLayout;
+  downloadedByteLength: number;
+}) {
+  return (
+    <span className={styles.columnProgress}>
+      ({formatByteSize(downloadedByteLength)}/{formatByteSize(track.byteLength)})
+    </span>
   );
 });
 
@@ -119,169 +514,36 @@ const DownloadChunk = memo(function DownloadChunk({
   );
 });
 
-const DownloadTrackProgress = memo(function DownloadTrackProgress({
-  track,
-  downloadedByteLength,
+const DownloadSubpart = memo(function DownloadSubpart({
+  index,
+  cachedMask,
+  loadingMask,
+  activeMask,
+  highlighted,
 }: {
-  track: DownloadTrackLayout;
-  downloadedByteLength: number;
+  index: number;
+  cachedMask: number;
+  loadingMask: number;
+  activeMask: number;
+  highlighted: boolean;
 }) {
-  return (
-    <span className={styles.columnProgress}>
-      ({formatByteSize(downloadedByteLength)}/{formatByteSize(track.byteLength)})
-    </span>
-  );
-});
-
-const DownloadTrack = memo(function DownloadTrack({
-  track,
-  downloadSession,
-  minimumDownloadedByteLength,
-  onTooltipClose,
-  onTooltipOpen,
-  tooltipActive,
-  totalDownloadedByteLength,
-}: {
-  track: DownloadTrackLayout;
-  downloadSession: DownloadSessionView;
-  minimumDownloadedByteLength: number;
-  onTooltipClose: () => void;
-  onTooltipOpen: () => void;
-  tooltipActive: boolean;
-  totalDownloadedByteLength: number;
-}) {
-  const channel = useMemo(
-    () => downloadSession.track(track.id),
-    [downloadSession, track.id],
-  );
-  const snapshot = useSyncExternalStore(channel.subscribe, channel.getSnapshot);
-  const [hoveredBlock, setHoveredBlock] = useState<HTMLSpanElement | null>(null);
-  const [hoveredRowGroupIndex, setHoveredRowGroupIndex] = useState<number | null>(null);
-  const openTooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const closeTooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (openTooltipTimerRef.current !== null) {
-      clearTimeout(openTooltipTimerRef.current);
-    }
-    if (closeTooltipTimerRef.current !== null) {
-      clearTimeout(closeTooltipTimerRef.current);
-    }
-  }, []);
-  const blockById = useMemo(
-    () => new Map(track.blocks.map((block) => [block.id, block])),
-    [track.blocks],
-  );
-  const supportsRowGroupTooltip =
-    track.kind === "column" || track.kind === "page-index";
-
-  if (
-    snapshot.visibleBlockCount === 0 ||
-    (track.kind === "column" &&
-      snapshot.downloadedByteLength < minimumDownloadedByteLength)
-  ) {
-    return null;
-  }
-
-  const rowGroupCoverage = hoveredBlock && tooltipActive
-    ? downloadSession.rowGroupCoverage(track.id)
-    : [];
-  const highlightedBlockMasks = hoveredRowGroupIndex === null || !tooltipActive
-    ? undefined
-    : downloadSession.rowGroupBlockMasks(track.id, hoveredRowGroupIndex);
-  const cancelTooltipClose = () => {
-    if (closeTooltipTimerRef.current !== null) {
-      clearTimeout(closeTooltipTimerRef.current);
-      closeTooltipTimerRef.current = null;
-    }
-  };
-  const cancelTooltipOpen = () => {
-    if (openTooltipTimerRef.current !== null) {
-      clearTimeout(openTooltipTimerRef.current);
-      openTooltipTimerRef.current = null;
-    }
-  };
-  const scheduleTooltipOpen = (element: HTMLSpanElement) => {
-    cancelTooltipClose();
-    cancelTooltipOpen();
-    if (hoveredBlock && tooltipActive) {
-      return;
-    }
-    openTooltipTimerRef.current = setTimeout(() => {
-      openTooltipTimerRef.current = null;
-      onTooltipOpen();
-      setHoveredRowGroupIndex(null);
-      const firstAggregateBlock =
-        element.parentElement?.querySelector<HTMLSpanElement>(
-          `.${styles.chunk}`,
-        ) ?? element;
-      setHoveredBlock(firstAggregateBlock);
-    }, tooltipOpenDelayMs);
-  };
-  const scheduleTooltipClose = () => {
-    cancelTooltipOpen();
-    cancelTooltipClose();
-    closeTooltipTimerRef.current = setTimeout(() => {
-      closeTooltipTimerRef.current = null;
-      setHoveredBlock(null);
-      setHoveredRowGroupIndex(null);
-      onTooltipClose();
-    }, tooltipGracePeriodMs);
-  };
-
+  const mask = 1 << index;
+  const state = (activeMask & mask) !== 0
+    ? "active"
+    : (loadingMask & mask) !== 0
+      ? "loading"
+      : (cachedMask & mask) !== 0
+        ? "cached"
+        : "empty";
+  const stateClassName = state === "empty" ? null : styles[state];
   return (
     <span
       className={[
-        styles.columnRange,
-        hoveredBlock && tooltipActive ? styles.columnRangeSelected : null,
+        styles.chunkSubpart,
+        stateClassName,
+        highlighted ? styles.selected : null,
       ].filter(Boolean).join(" ")}
-      onMouseLeave={scheduleTooltipClose}
-    >
-      <span className={styles.columnRangeContent}>
-        <span className={styles.columnLabel}>
-          <span className={styles.columnDownloadShare}>
-            {formatDownloadPercent(
-              totalDownloadedByteLength === 0
-                ? 0
-                : (snapshot.downloadedByteLength / totalDownloadedByteLength) *
-                    100,
-            )}
-          </span>
-          {track.label}
-          <DownloadTrackProgress
-            downloadedByteLength={snapshot.downloadedByteLength}
-            track={track}
-          />
-        </span>
-        <span className={styles.columnBlocks}>
-          {snapshot.visibleBlockIds.map((blockId) => {
-            const block = blockById.get(blockId);
-            return block ? (
-              <DownloadChunk
-                block={block}
-                downloadSession={downloadSession}
-                highlightedMask={highlightedBlockMasks?.get(block.id) ?? 0}
-                key={block.id}
-                onHover={supportsRowGroupTooltip ? scheduleTooltipOpen : undefined}
-                onHoverEnd={supportsRowGroupTooltip ? cancelTooltipOpen : undefined}
-              />
-            ) : null;
-          })}
-        </span>
-      </span>
-      {hoveredBlock && tooltipActive && supportsRowGroupTooltip ? (
-        createPortal(
-          <TrackRowGroupTooltip
-            anchor={hoveredBlock}
-            coverage={rowGroupCoverage}
-            onMouseEnter={cancelTooltipClose}
-            onMouseLeave={scheduleTooltipClose}
-            onRowGroupHover={setHoveredRowGroupIndex}
-            title={`${track.label} by row group`}
-          />,
-          document.body,
-        )
-      ) : null}
-    </span>
+    />
   );
 });
 
@@ -623,6 +885,81 @@ const ColumnStatistics = memo(function ColumnStatistics({
   );
 });
 
+function useDownloadTrackTooltip({
+  onClose,
+  onOpen,
+  tooltipActive,
+}: {
+  onClose(): void;
+  onOpen(): void;
+  tooltipActive: boolean;
+}) {
+  const [hoveredBlock, setHoveredBlock] = useState<HTMLSpanElement | null>(null);
+  const [hoveredRowGroupIndex, setHoveredRowGroupIndex] =
+    useState<number | null>(null);
+  const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (openTimerRef.current !== null) {
+      clearTimeout(openTimerRef.current);
+    }
+    if (closeTimerRef.current !== null) {
+      clearTimeout(closeTimerRef.current);
+    }
+  }, []);
+
+  const cancelClose = () => {
+    if (closeTimerRef.current !== null) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  };
+  const cancelOpen = () => {
+    if (openTimerRef.current !== null) {
+      clearTimeout(openTimerRef.current);
+      openTimerRef.current = null;
+    }
+  };
+  const scheduleOpen = (element: HTMLSpanElement) => {
+    cancelClose();
+    cancelOpen();
+    if (hoveredBlock && tooltipActive) {
+      return;
+    }
+    openTimerRef.current = setTimeout(() => {
+      openTimerRef.current = null;
+      onOpen();
+      setHoveredRowGroupIndex(null);
+      setHoveredBlock(
+        element.parentElement?.querySelector<HTMLSpanElement>(
+          `.${styles.chunk}`,
+        ) ?? element,
+      );
+    }, tooltipOpenDelayMs);
+  };
+  const scheduleClose = () => {
+    cancelOpen();
+    cancelClose();
+    closeTimerRef.current = setTimeout(() => {
+      closeTimerRef.current = null;
+      setHoveredBlock(null);
+      setHoveredRowGroupIndex(null);
+      onClose();
+    }, tooltipGracePeriodMs);
+  };
+
+  return {
+    cancelClose,
+    cancelOpen,
+    hoveredBlock,
+    hoveredRowGroupIndex,
+    scheduleClose,
+    scheduleOpen,
+    setHoveredRowGroupIndex,
+  };
+}
+
 function formatColumnStatisticValue(
   value: number | string | null | undefined,
 ): string {
@@ -719,215 +1056,6 @@ function createAdjacentTooltipStyle(
   };
 }
 
-const BytesLoaded = memo(function BytesLoaded({
-  downloadSession,
-  byteLength,
-}: {
-  downloadSession: DownloadSessionView;
-  byteLength: number | null;
-}) {
-  const summary = useSyncExternalStore(
-    downloadSession.summary.subscribe,
-    downloadSession.summary.getSnapshot,
-  );
-  return (
-    <div className={styles.bytesLoaded}>
-      <div className={styles.fileStatLabel}>Bytes Loaded</div>
-      <div className={styles.fileStatValue}>
-        {formatByteSize(summary.downloadedByteLength)}
-        <span className={styles.fileStatUnit}>
-          / {byteLength === null ? "…" : formatByteSize(byteLength)}
-        </span>
-      </div>
-    </div>
-  );
-});
-
-const DownloadCoverageFooter = memo(function DownloadCoverageFooter({
-  downloadSession,
-  minimumDownloadedByteLength,
-  tracks,
-}: {
-  downloadSession: DownloadSessionView;
-  minimumDownloadedByteLength: number;
-  tracks: readonly DownloadTrackLayout[];
-}) {
-  const summary = useSyncExternalStore(
-    downloadSession.summary.subscribe,
-    downloadSession.summary.getSnapshot,
-  );
-  const visibleColumnCount = tracks.filter((track) => {
-    if (track.kind !== "column") {
-      return false;
-    }
-    const snapshot = downloadSession.track(track.id).getSnapshot();
-    return (
-      snapshot.visibleBlockCount > 0 &&
-      snapshot.downloadedByteLength >= minimumDownloadedByteLength
-    );
-  }).length;
-
-  return (
-    <div className={styles.occupancyFooter}>
-      <span className={styles.occupancySummary}>
-        {visibleColumnCount}/{summary.columnCount} columns
-      </span>
-      <span className={styles.occupancyLegend} aria-label="Download state">
-        <span>
-          <i className={styles.loaded} aria-hidden="true" />
-          Loaded
-        </span>
-        <span>
-          <i aria-hidden="true" />
-          Not loaded
-        </span>
-      </span>
-    </div>
-  );
-});
-
-const ColumnDownloadThreshold = memo(function ColumnDownloadThreshold({
-  maximumByteLength,
-  minimumDownloadedByteLength,
-  onChange,
-}: {
-  maximumByteLength: number;
-  minimumDownloadedByteLength: number;
-  onChange: (byteLength: number) => void;
-}) {
-  const sliderValue = byteLengthToThresholdSliderValue(
-    minimumDownloadedByteLength,
-    maximumByteLength,
-  );
-
-  return (
-    <label className={styles.columnThresholdControl}>
-      <span>
-        Show with at least
-        <strong>{formatByteSize(minimumDownloadedByteLength)}</strong>
-      </span>
-      <calcite-slider
-        label="Minimum downloaded bytes required to show a column"
-        max={columnThresholdSliderMaximum}
-        min={0}
-        oncalciteSliderInput={(event: Event) => {
-          const value = Number((event.currentTarget as HTMLCalciteSliderElement).value);
-          onChange(thresholdSliderValueToByteLength(value, maximumByteLength));
-        }}
-        step={1}
-        value={sliderValue}
-      />
-    </label>
-  );
-});
-
-const DownloadTrackList = memo(function DownloadTrackList({
-  downloadSession,
-  minimumDownloadedByteLength,
-  tracks,
-}: {
-  downloadSession: DownloadSessionView;
-  minimumDownloadedByteLength: number;
-  tracks: readonly DownloadTrackLayout[];
-}) {
-  const [activeTooltipTrackId, setActiveTooltipTrackId] = useState<string | null>(null);
-  const summary = useSyncExternalStore(
-    downloadSession.summary.subscribe,
-    downloadSession.summary.getSnapshot,
-  );
-  const trackOrder = new Map(tracks.map((track, index) => [track.id, index]));
-  const sortedTracks = [...tracks].sort((first, second) => {
-    const downloadedByteDifference =
-      downloadSession.track(second.id).getSnapshot().downloadedByteLength -
-      downloadSession.track(first.id).getSnapshot().downloadedByteLength;
-    return downloadedByteDifference !== 0
-      ? downloadedByteDifference
-      : (trackOrder.get(first.id) ?? 0) - (trackOrder.get(second.id) ?? 0);
-  });
-
-  return sortedTracks.map((track) => (
-    <DownloadTrack
-      downloadSession={downloadSession}
-      key={track.id}
-      minimumDownloadedByteLength={minimumDownloadedByteLength}
-      onTooltipClose={() => {
-        setActiveTooltipTrackId((activeTrackId) =>
-          activeTrackId === track.id ? null : activeTrackId,
-        );
-      }}
-      onTooltipOpen={() => setActiveTooltipTrackId(track.id)}
-      tooltipActive={activeTooltipTrackId === track.id}
-      totalDownloadedByteLength={summary.downloadedByteLength}
-      track={track}
-    />
-  ));
-});
-
-const FileDownload = memo(function FileDownload({
-  downloadSession,
-}: {
-  downloadSession: DownloadSessionView;
-}) {
-  const topology = useSyncExternalStore(
-    downloadSession.topology.subscribe,
-    downloadSession.topology.getSnapshot,
-  );
-  const [minimumDownloadedByteLength, setMinimumDownloadedByteLength] = useState(
-    defaultColumnDownloadThreshold,
-  );
-  const maximumColumnByteLength = Math.max(
-    minimumPositiveColumnThreshold,
-    ...topology.tracks
-      .filter((track) => track.kind === "column")
-      .map((track) => track.byteLength),
-  );
-  return (
-    <>
-      {topology.layout ? (
-        <div className={styles.columnThresholdFrame}>
-          <BytesLoaded
-            byteLength={topology.layout.byteLength}
-            downloadSession={downloadSession}
-          />
-          <ColumnDownloadThreshold
-            maximumByteLength={maximumColumnByteLength}
-            minimumDownloadedByteLength={minimumDownloadedByteLength}
-            onChange={setMinimumDownloadedByteLength}
-          />
-        </div>
-      ) : null}
-      <div className={styles.occupancyGridFrame}>
-        <div
-          className={styles.occupancyFlow}
-          role="img"
-          aria-label="Parquet download coverage by track"
-        >
-          {topology.layout ? (
-            <DownloadTrackList
-              downloadSession={downloadSession}
-              minimumDownloadedByteLength={minimumDownloadedByteLength}
-              tracks={topology.tracks}
-            />
-          ) : (
-            <span className={styles.occupancyStatus}>
-              {topology.error
-                ? "Unable to load Parquet diagnostics."
-                : null}
-            </span>
-          )}
-        </div>
-      </div>
-      {topology.layout ? (
-        <DownloadCoverageFooter
-          downloadSession={downloadSession}
-          minimumDownloadedByteLength={minimumDownloadedByteLength}
-          tracks={topology.tracks}
-        />
-      ) : null}
-    </>
-  );
-});
-
 function byteLengthToThresholdSliderValue(
   byteLength: number,
   maximumByteLength: number,
@@ -963,105 +1091,3 @@ function thresholdSliderValueToByteLength(
       ),
   );
 }
-
-export interface FileExplorerProps {
-  dataset: Dataset;
-  layout:
-    | { type: "desktop" }
-    | { type: "compact"; visible: boolean };
-  mapElementRef: RefObject<HTMLArcgisMapElement | null>;
-  session: {
-    download: DownloadSessionView;
-    parquetSource: unknown | null;
-    rowGroupBounds: readonly RowGroupBounds[] | null;
-  };
-}
-
-/**
- * Presents live Parquet download activity as file tracks, row-group details, and inspection tools.
- * It coordinates the session's external stores with responsive explorer state so high-frequency byte updates remain localized.
- */
-export const FileExplorer = memo(function FileExplorer({
-  dataset,
-  layout,
-  mapElementRef,
-  session,
-}: FileExplorerProps) {
-  const {
-    download: downloadSession,
-    parquetSource,
-    rowGroupBounds,
-  } = session;
-  const {
-    basemap,
-    center,
-    id: datasetId,
-    scale,
-    spatialReference: spatialReferenceWkid,
-  } = dataset;
-  const [fileStructureDialog, setFileStructureDialog] = useState<{
-    datasetId: string;
-    snapshot: FileStructureSnapshot;
-    source: ArcgisParquetPageIndexSource;
-  } | null>(null);
-  const openFileStructure = () => {
-    const snapshot = downloadSession.createFileStructureSnapshot();
-    if (!snapshot || !parquetSource) {
-      return;
-    }
-    setFileStructureDialog({
-      datasetId,
-      snapshot,
-      source: resolveParquetPageIndexSource(parquetSource),
-    });
-  };
-  const content = (
-    <>
-      <div className={styles.fileExplorerOverview}>
-        <Minimap
-          basemapId={basemap}
-          bounds={rowGroupBounds}
-          center={center}
-          key={datasetId}
-          mainMapElementRef={mapElementRef}
-          scale={scale}
-          spatialReferenceWkid={spatialReferenceWkid}
-        />
-        <div className={styles.fileStructureAction}>
-          <calcite-button
-            appearance="solid"
-            className={styles.fileStructureButton}
-            iconStart="magnifying-glass"
-            onClick={openFileStructure}
-            width="full"
-          >
-            Explore file layout
-          </calcite-button>
-        </div>
-      </div>
-      <FileDownload downloadSession={downloadSession} />
-    </>
-  );
-
-  return (
-    <>
-      {layout.type === "desktop" ? (
-        <div className={styles.gridDetailsColumn}>{content}</div>
-      ) : layout.visible ? (
-        <aside aria-label="Details" className={styles.responsiveDetailsOverlay}>
-          {content}
-        </aside>
-      ) : null}
-      {fileStructureDialog?.datasetId === datasetId ? (
-        createPortal(
-          <InspectorDialog
-            onClose={() => setFileStructureDialog(null)}
-            snapshot={fileStructureDialog.snapshot}
-            source={fileStructureDialog.source}
-          />,
-          document.body,
-        )
-      ) : null}
-    </>
-  );
-});

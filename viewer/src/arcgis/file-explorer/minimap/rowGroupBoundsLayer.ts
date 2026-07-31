@@ -3,29 +3,6 @@ import Graphic from "@arcgis/core/Graphic";
 
 import type { RowGroupBounds } from "../../../parquet/rowGroupBounds";
 
-function createDebugBoundsSymbol(outlineColor: string) {
-  return {
-    type: "simple-fill" as const,
-    color: [0, 0, 0, 0],
-    outline: { color: outlineColor, width: 1 },
-  };
-}
-
-function createDebugLabelClass(colorClass: number, textColor: string) {
-  return {
-    where: `COLOR_CLASS = ${colorClass}`,
-    labelExpressionInfo: { expression: "'RG ' + Text($feature.ROW_GROUP)" },
-    labelPlacement: "always-horizontal" as const,
-    symbol: {
-      type: "text" as const,
-      color: textColor,
-      haloColor: [0, 0, 0, 0.8],
-      haloSize: 2,
-      font: { family: "Arial", size: 14, weight: "bold" as const },
-    },
-  };
-}
-
 export function createRowGroupBoundsLayer(
   bounds: readonly RowGroupBounds[],
   labelsVisible = true,
@@ -79,4 +56,27 @@ export function createRowGroupBoundsLayer(
       ],
     },
   });
+}
+
+function createDebugBoundsSymbol(outlineColor: string) {
+  return {
+    type: "simple-fill" as const,
+    color: [0, 0, 0, 0],
+    outline: { color: outlineColor, width: 1 },
+  };
+}
+
+function createDebugLabelClass(colorClass: number, textColor: string) {
+  return {
+    where: `COLOR_CLASS = ${colorClass}`,
+    labelExpressionInfo: { expression: "'RG ' + Text($feature.ROW_GROUP)" },
+    labelPlacement: "always-horizontal" as const,
+    symbol: {
+      type: "text" as const,
+      color: textColor,
+      haloColor: [0, 0, 0, 0.8],
+      haloSize: 2,
+      font: { family: "Arial", size: 14, weight: "bold" as const },
+    },
+  };
 }

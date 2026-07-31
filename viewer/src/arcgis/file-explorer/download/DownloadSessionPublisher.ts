@@ -6,8 +6,6 @@ import type {
   ReadonlyExternalStore,
 } from "./types";
 
-const updateIntervalMs = 64;
-
 interface SnapshotProvider {
   createTopologySnapshot(): DownloadTopologySnapshot;
   createSummarySnapshot(): DownloadSummarySnapshot;
@@ -15,56 +13,7 @@ interface SnapshotProvider {
   createTrackSnapshot(trackId: string): DownloadTrackSnapshot;
 }
 
-/**
- * Provides a React-compatible external store around one snapshot reader.
- * It owns subscriber notification so the session model does not depend on component lifecycle details.
- */
-class ExternalStoreChannel<Snapshot> implements ReadonlyExternalStore<Snapshot> {
-  private readonly _listeners = new Set<() => void>();
-
-  constructor(private readonly _readSnapshot: () => Snapshot) {}
-
-  subscribe = (listener: () => void): (() => void) => {
-    this._listeners.add(listener);
-    return () => this._listeners.delete(listener);
-  };
-
-  getSnapshot = (): Snapshot => {
-    return this._readSnapshot();
-  };
-
-  notify(): void {
-    for (const listener of this._listeners) {
-      listener();
-    }
-  }
-}
-
-/**
- * Provides lazily created external-store channels for independently addressable snapshots.
- * It owns the channel registry so updates notify only subscribers for the affected key.
- */
-class KeyedExternalStoreChannel<Key, Snapshot> {
-  private readonly _channels = new Map<Key, ExternalStoreChannel<Snapshot>>();
-
-  constructor(
-    private readonly _readSnapshot: (key: Key) => Snapshot,
-  ) {}
-
-  channel(key: Key): ReadonlyExternalStore<Snapshot> {
-    const existing = this._channels.get(key);
-    if (existing) {
-      return existing;
-    }
-    const channel = new ExternalStoreChannel(() => this._readSnapshot(key));
-    this._channels.set(key, channel);
-    return channel;
-  }
-
-  notify(key: Key): void {
-    this._channels.get(key)?.notify();
-  }
-}
+const updateIntervalMs = 64;
 
 /**
  * Coordinates batched snapshot refreshes and external-store notifications for a download session.
@@ -229,3 +178,54 @@ export class DownloadSessionPublisher {
     }
   }
 }
+
+  /**
+   * Provides lazily created external-store channels for independently addressable snapshots.
+   * It owns the channel registry so updates notify only subscribers for the affected key.
+   */
+  class KeyedExternalStoreChannel<Key, Snapshot> {
+    private readonly _channels = new Map<Key, ExternalStoreChannel<Snapshot>>();
+
+    constructor(
+      private readonly _readSnapshot: (key: Key) => Snapshot,
+    ) {}
+
+    channel(key: Key): ReadonlyExternalStore<Snapshot> {
+      const existing = this._channels.get(key);
+      if (existing) {
+        return existing;
+      }
+      const channel = new ExternalStoreChannel(() => this._readSnapshot(key));
+      this._channels.set(key, channel);
+      return channel;
+    }
+
+    notify(key: Key): void {
+      this._channels.get(key)?.notify();
+    }
+  }
+
+  /**
+   * Provides a React-compatible external store around one snapshot reader.
+   * It owns subscriber notification so the session model does not depend on component lifecycle details.
+   */
+  class ExternalStoreChannel<Snapshot> implements ReadonlyExternalStore<Snapshot> {
+    private readonly _listeners = new Set<() => void>();
+
+    constructor(private readonly _readSnapshot: () => Snapshot) {}
+
+    subscribe = (listener: () => void): (() => void) => {
+      this._listeners.add(listener);
+      return () => this._listeners.delete(listener);
+    };
+
+    getSnapshot = (): Snapshot => {
+      return this._readSnapshot();
+    };
+
+    notify(): void {
+      for (const listener of this._listeners) {
+        listener();
+      }
+    }
+  }

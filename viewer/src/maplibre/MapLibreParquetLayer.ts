@@ -18,16 +18,16 @@ import {
 } from "./sop/Query";
 import type { GeoJSONFeatureCollection } from "./sop/geojson";
 
+interface MapLibreParquetLayerOptions {
+  onStatusChange(status: DatasetLayerStatus): void;
+  query?: Query;
+}
+
 const parquetSourceId = "maplibre-parquet-dataset";
 const parquetFillLayerId = "maplibre-parquet-fill";
 const parquetOutlineLayerId = "maplibre-parquet-outline";
 const parquetLineCasingLayerId = "maplibre-parquet-line-casing";
 const parquetLineLayerId = "maplibre-parquet-line";
-
-interface MapLibreParquetLayerOptions {
-  onStatusChange(status: DatasetLayerStatus): void;
-  query?: Query;
-}
 
 /**
  * `MapLibreParquetLayer` owns one `Query` and all MapLibre state for a dataset.

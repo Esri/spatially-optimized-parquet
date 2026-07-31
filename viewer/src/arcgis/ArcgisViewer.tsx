@@ -27,7 +27,10 @@ import {
   type DatasetMapProfile,
   resolveDatasetMapProfile,
 } from "./profiles/profiles";
-import { useArcgisDatasetSession } from "./useArcgisDatasetSession";
+import {
+  type ArcgisDatasetSessionResult,
+  useArcgisDatasetSession,
+} from "./useArcgisDatasetSession";
 
 interface ViewCenter {
   latitude: number;
@@ -46,14 +49,12 @@ interface ArcgisViewState {
 }
 
 interface MapPanelHeaderProps {
-  compactDetailsLayout: boolean;
   dataset: Dataset;
   debugEnabled: boolean;
-  detailsOpen: boolean;
+  detailsLayout: ResponsiveDetailsLayout;
   featureCount: number | null;
   mapElementRef: RefObject<HTMLArcgisMapElement | null>;
   setDebugEnabled(enabled: boolean): void;
-  setDetailsOpen(open: boolean): void;
   setHeaderActionsElement(element: HTMLDivElement | null): void;
   viewCenter: ViewCenter | null;
 }
@@ -67,16 +68,59 @@ interface MapCanvasProps {
 }
 
 interface ArcgisMapPanelProps {
-  compactDetailsLayout: boolean;
   dataset: Dataset;
-  detailsOpen: boolean;
-  featureCount: number | null;
-  layer: ParquetLayer | null;
+  detailsLayout: ResponsiveDetailsLayout;
   mapElementRef: RefObject<HTMLArcgisMapElement | null>;
   profile: DatasetMapProfile;
-  setDetailsOpen(open: boolean): void;
-  viewCenter: ViewCenter | null;
+  session: ArcgisDatasetSessionResult;
+  viewState: ArcgisViewState;
 }
+
+const defaultCenter: [number, number] = [-98, 39];
+const defaultScale = 25_000_000;
+const detailsLayoutBreakpoint = 1024;
+
+const MapCanvas = memo(function MapCanvas({
+  dataset,
+  headerActionsElement,
+  layer,
+  mapElementRef,
+  profile,
+}: MapCanvasProps) {
+  const MapSlotComponent = profile.mapSlotComponent;
+  const basemap = useMemo(
+    () => createDatasetBasemap(dataset.basemap),
+    [dataset.basemap],
+  );
+  const spatialReference = useMemo(
+    () => createDatasetSpatialReference(dataset.spatialReference),
+    [dataset.spatialReference],
+  );
+  const constraints = useMemo(
+    () => new MapViewConstraints({ minScale: dataset.scale * 4 }),
+    [dataset.scale],
+  );
+
+  return (
+    <arcgis-map
+      ref={mapElementRef}
+      aria-label={`${dataset.name} map`}
+      spatialReference={spatialReference}
+      basemap={basemap}
+      constraints={constraints}
+      center={defaultCenter}
+      scale={defaultScale}
+    >
+      {MapSlotComponent ? (
+        <MapSlotComponent
+          headerActionsElement={headerActionsElement}
+          key={layer?.id ?? "empty"}
+          layer={layer}
+        />
+      ) : null}
+    </arcgis-map>
+  );
+});
 
 /**
  * Renders the ArcGIS dataset workspace and coordinates its map, dataset session, and download explorer.
@@ -86,19 +130,14 @@ export function ArcgisViewer() {
   const [datasetIndex, setDatasetIndex] = useState(0);
   const mapElementRef = useRef<HTMLArcgisMapElement>(null);
   const gridContainerRef = useRef<HTMLElement>(null);
-  const {
-    compact: compactDetailsLayout,
-    open: responsiveDetailsOpen,
-    setOpen: setResponsiveDetailsOpen,
-  } = useResponsiveDetailsLayout(gridContainerRef);
-  const { center: viewCenter, ready: mapReady } =
-    useArcgisViewState(mapElementRef);
+  const detailsLayout = useResponsiveDetailsLayout(gridContainerRef);
+  const viewState = useArcgisViewState(mapElementRef);
   const activeDataset = datasets[datasetIndex];
   const activeProfile = resolveDatasetMapProfile(activeDataset.id);
   const datasetSession = useArcgisDatasetSession({
     dataset: activeDataset,
     mapElementRef,
-    mapReady,
+    mapReady: viewState.ready,
     profile: activeProfile,
   });
   const downloadTopology = useSyncExternalStore(
@@ -111,7 +150,7 @@ export function ArcgisViewer() {
     ? formatCompressionSummary(deriveFileDetailSummary(fileLayout))
     : null;
   const selectDataset = (index: number) => {
-    setResponsiveDetailsOpen(false);
+    detailsLayout.setOpen(false);
     if (index !== datasetIndex) {
       setDatasetIndex(index);
     }
@@ -122,32 +161,29 @@ export function ArcgisViewer() {
       ref={gridContainerRef}
       className={[
         styles.gridContainer,
-        compactDetailsLayout ? styles.compact : null,
+        detailsLayout.compact ? styles.compact : null,
       ].filter(Boolean).join(" ")}
     >
       <DatasetSelectionPanel
         activeDataset={activeDataset}
         byteSize={datasetByteSize}
-        compact={compactDetailsLayout}
+        compact={detailsLayout.compact}
         compression={compression}
         onDatasetSelect={selectDataset}
       />
       <ArcgisMapPanel
-        compactDetailsLayout={compactDetailsLayout}
         dataset={activeDataset}
-        detailsOpen={responsiveDetailsOpen}
-        featureCount={datasetSession.featureCount}
-        layer={datasetSession.layer}
+        detailsLayout={detailsLayout}
         mapElementRef={mapElementRef}
         profile={activeProfile}
-        setDetailsOpen={setResponsiveDetailsOpen}
-        viewCenter={viewCenter}
+        session={datasetSession}
+        viewState={viewState}
       />
       <FileExplorer
         dataset={activeDataset}
         layout={
-          compactDetailsLayout
-            ? { type: "compact", visible: responsiveDetailsOpen }
+          detailsLayout.compact
+            ? { type: "compact", visible: detailsLayout.open }
             : { type: "desktop" }
         }
         mapElementRef={mapElementRef}
@@ -156,10 +192,6 @@ export function ArcgisViewer() {
     </main>
   );
 }
-
-const defaultCenter: [number, number] = [-98, 39];
-const defaultScale = 25_000_000;
-const detailsLayoutBreakpoint = 1024;
 
 function useResponsiveDetailsLayout(
   containerRef: RefObject<HTMLElement | null>,
@@ -244,6 +276,43 @@ function useArcgisViewState(
   return { center, ready };
 }
 
+function ArcgisMapPanel({
+  dataset,
+  detailsLayout,
+  mapElementRef,
+  profile,
+  session,
+  viewState,
+}: ArcgisMapPanelProps) {
+  const [debugEnabled, setDebugEnabled] = useState(false);
+  const [headerActionsElement, setHeaderActionsElement] =
+    useState<HTMLDivElement | null>(null);
+
+  useParquetDebugLabels(session.layer, debugEnabled);
+
+  return (
+    <calcite-panel className={styles.gridMap}>
+      <MapPanelHeader
+        dataset={dataset}
+        debugEnabled={debugEnabled}
+        detailsLayout={detailsLayout}
+        featureCount={session.featureCount}
+        mapElementRef={mapElementRef}
+        setDebugEnabled={setDebugEnabled}
+        setHeaderActionsElement={setHeaderActionsElement}
+        viewCenter={viewState.center}
+      />
+      <MapCanvas
+        dataset={dataset}
+        headerActionsElement={headerActionsElement}
+        layer={session.layer}
+        mapElementRef={mapElementRef}
+        profile={profile}
+      />
+    </calcite-panel>
+  );
+}
+
 function useParquetDebugLabels(
   layer: ParquetLayer | null,
   enabled: boolean,
@@ -278,64 +347,16 @@ function useParquetDebugLabels(
   }, [enabled, layer]);
 }
 
-function ArcgisMapPanel({
-  compactDetailsLayout,
-  dataset,
-  detailsOpen,
-  featureCount,
-  layer,
-  mapElementRef,
-  profile,
-  setDetailsOpen,
-  viewCenter,
-}: ArcgisMapPanelProps) {
-  const [debugEnabled, setDebugEnabled] = useState(false);
-  const [headerActionsElement, setHeaderActionsElement] =
-    useState<HTMLDivElement | null>(null);
-
-  useParquetDebugLabels(layer, debugEnabled);
-
-  return (
-    <calcite-panel className={styles.gridMap}>
-      <MapPanelHeader
-        compactDetailsLayout={compactDetailsLayout}
-        dataset={dataset}
-        debugEnabled={debugEnabled}
-        detailsOpen={detailsOpen}
-        featureCount={featureCount}
-        mapElementRef={mapElementRef}
-        setDebugEnabled={setDebugEnabled}
-        setDetailsOpen={setDetailsOpen}
-        setHeaderActionsElement={setHeaderActionsElement}
-        viewCenter={viewCenter}
-      />
-      <MapCanvas
-        dataset={dataset}
-        headerActionsElement={headerActionsElement}
-        layer={layer}
-        mapElementRef={mapElementRef}
-        profile={profile}
-      />
-    </calcite-panel>
-  );
-}
-
 function MapPanelHeader({
-  compactDetailsLayout,
   dataset,
   debugEnabled,
-  detailsOpen,
+  detailsLayout,
   featureCount,
   mapElementRef,
   setDebugEnabled,
-  setDetailsOpen,
   setHeaderActionsElement,
   viewCenter,
 }: MapPanelHeaderProps) {
-  const [bookmarksButton, setBookmarksButton] =
-    useState<HTMLCalciteButtonElement | null>(null);
-  const [bookmarksOpen, setBookmarksOpen] = useState(false);
-
   return (
     <>
       <calcite-label
@@ -364,68 +385,17 @@ function MapPanelHeader({
           className={styles.mapProfileHeaderActionTarget}
           ref={setHeaderActionsElement}
         />
-        {dataset.bookmarks?.length ? (
-          <>
-            <calcite-button
-              ref={setBookmarksButton}
-              appearance="transparent"
-              iconStart="bookmark-f"
-              kind="neutral"
-              label="Bookmarks"
-              onClick={() => {
-                requestAnimationFrame(() => {
-                  setBookmarksOpen((open) => !open);
-                });
-              }}
-            />
-            {bookmarksButton ? (
-              <calcite-popover
-                label="Bookmarks"
-                open={bookmarksOpen}
-                overlayPositioning="fixed"
-                placement="bottom-end"
-                referenceElement={bookmarksButton}
-                oncalcitePopoverClose={() => setBookmarksOpen(false)}
-              >
-                <div className={styles.mapBookmarkList}>
-                  {dataset.bookmarks.map((bookmark) => (
-                    <calcite-button
-                      appearance="transparent"
-                      key={bookmark.name}
-                      kind="neutral"
-                      width="full"
-                      onClick={() => {
-                        setBookmarksOpen(false);
-                        void mapElementRef.current?.view.goTo(
-                          new Viewpoint({
-                            targetGeometry: {
-                              type: "point",
-                              longitude: bookmark.center[0],
-                              latitude: bookmark.center[1],
-                            },
-                            scale: bookmark.scale,
-                          }),
-                        );
-                      }}
-                    >
-                      {bookmark.name}
-                    </calcite-button>
-                  ))}
-                </div>
-              </calcite-popover>
-            ) : null}
-          </>
-        ) : null}
+        <MapBookmarksMenu dataset={dataset} mapElementRef={mapElementRef} />
       </div>
-      {compactDetailsLayout ? (
+      {detailsLayout.compact ? (
         <calcite-button
           appearance="transparent"
-          aria-expanded={detailsOpen}
+          aria-expanded={detailsLayout.open}
           kind="neutral"
-          label={detailsOpen ? "Close details" : "Open details"}
+          label={detailsLayout.open ? "Close details" : "Open details"}
           scale="m"
           slot="header-actions-end"
-          onClick={() => setDetailsOpen(!detailsOpen)}
+          onClick={() => detailsLayout.setOpen(!detailsLayout.open)}
         >
           Details
         </calcite-button>
@@ -447,47 +417,71 @@ function MapPanelHeader({
   );
 }
 
-const MapCanvas = memo(function MapCanvas({
+function MapBookmarksMenu({
   dataset,
-  headerActionsElement,
-  layer,
   mapElementRef,
-  profile,
-}: MapCanvasProps) {
-  const MapSlotComponent = profile.mapSlotComponent;
-  const basemap = useMemo(
-    () => createDatasetBasemap(dataset.basemap),
-    [dataset.basemap],
-  );
-  const spatialReference = useMemo(
-    () => createDatasetSpatialReference(dataset.spatialReference),
-    [dataset.spatialReference],
-  );
-  const constraints = useMemo(
-    () => new MapViewConstraints({ minScale: dataset.scale * 4 }),
-    [dataset.scale],
-  );
+}: {
+  dataset: Dataset;
+  mapElementRef: RefObject<HTMLArcgisMapElement | null>;
+}) {
+  const [button, setButton] = useState<HTMLCalciteButtonElement | null>(null);
+  const [open, setOpen] = useState(false);
+
+  if (!dataset.bookmarks?.length) {
+    return null;
+  }
 
   return (
-    <arcgis-map
-      ref={mapElementRef}
-      aria-label={`${dataset.name} map`}
-      spatialReference={spatialReference}
-      basemap={basemap}
-      constraints={constraints}
-      center={defaultCenter}
-      scale={defaultScale}
-    >
-      {MapSlotComponent ? (
-        <MapSlotComponent
-          headerActionsElement={headerActionsElement}
-          key={layer?.id ?? "empty"}
-          layer={layer}
-        />
+    <>
+      <calcite-button
+        ref={setButton}
+        appearance="transparent"
+        iconStart="bookmark-f"
+        kind="neutral"
+        label="Bookmarks"
+        onClick={() => {
+          requestAnimationFrame(() => setOpen((current) => !current));
+        }}
+      />
+      {button ? (
+        <calcite-popover
+          label="Bookmarks"
+          open={open}
+          overlayPositioning="fixed"
+          placement="bottom-end"
+          referenceElement={button}
+          oncalcitePopoverClose={() => setOpen(false)}
+        >
+          <div className={styles.mapBookmarkList}>
+            {dataset.bookmarks.map((bookmark) => (
+              <calcite-button
+                appearance="transparent"
+                key={bookmark.name}
+                kind="neutral"
+                width="full"
+                onClick={() => {
+                  setOpen(false);
+                  void mapElementRef.current?.view.goTo(
+                    new Viewpoint({
+                      targetGeometry: {
+                        type: "point",
+                        longitude: bookmark.center[0],
+                        latitude: bookmark.center[1],
+                      },
+                      scale: bookmark.scale,
+                    }),
+                  );
+                }}
+              >
+                {bookmark.name}
+              </calcite-button>
+            ))}
+          </div>
+        </calcite-popover>
       ) : null}
-    </arcgis-map>
+    </>
   );
-});
+}
 
 function createDatasetBasemap(basemapId?: string): Basemap | string {
   return basemapId

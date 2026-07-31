@@ -22,19 +22,6 @@ import type {
   DownloadTrackSnapshot,
 } from "./types";
 
-const emptyBlockSnapshot: DownloadBlockSnapshot = {
-  cachedMask: 0,
-  loadingMask: 0,
-  activeMask: 0,
-};
-const emptyTrackSnapshot: DownloadTrackSnapshot = {
-  downloadedByteLength: 0,
-  filledSubpartCount: 0,
-  subpartCount: 0,
-  visibleBlockCount: 0,
-  visibleBlockIds: [],
-};
-
 interface MutableBlockState {
   cachedMask: number;
   loadingCount: number[];
@@ -57,6 +44,25 @@ export interface ProjectionTopologyInput {
   rowGroupBounds: readonly RowGroupBounds[] | null;
   error: Error | null;
 }
+
+interface MutableProjectionChange {
+  blockIds: Set<string>;
+  trackIds: Set<string>;
+}
+
+const emptyBlockSnapshot: DownloadBlockSnapshot = {
+  cachedMask: 0,
+  loadingMask: 0,
+  activeMask: 0,
+};
+
+const emptyTrackSnapshot: DownloadTrackSnapshot = {
+  downloadedByteLength: 0,
+  filledSubpartCount: 0,
+  subpartCount: 0,
+  visibleBlockCount: 0,
+  visibleBlockIds: [],
+};
 
 /**
  * Represents download activity as the block, track, and row-group state consumed by the file explorer.
@@ -458,11 +464,6 @@ export class ParquetDownloadProjection {
     }
     return impacts;
   }
-}
-
-interface MutableProjectionChange {
-  blockIds: Set<string>;
-  trackIds: Set<string>;
 }
 
 function createProjectionChange(): MutableProjectionChange {

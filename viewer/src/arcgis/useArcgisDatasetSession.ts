@@ -17,9 +17,6 @@ import {
 import { ParquetDownloadSession } from "./file-explorer/download/ParquetDownloadSession";
 import type { RowGroupBounds } from "../parquet/rowGroupBounds";
 
-const defaultCenter: [number, number] = [-98, 39];
-const defaultScale = 25_000_000;
-
 export interface ArcgisDatasetSessionResult {
   readonly download: ParquetDownloadSession;
   readonly featureCount: number | null;
@@ -35,9 +32,8 @@ export interface ArcgisDatasetSessionOptions {
   readonly profile: DatasetMapProfile;
 }
 
-function hasDatasetEffectLayer(layer: object): layer is DatasetEffectLayer {
-  return "effect" in layer;
-}
+const defaultCenter: [number, number] = [-98, 39];
+const defaultScale = 25_000_000;
 
 export function useArcgisDatasetSession({
   dataset,
@@ -202,4 +198,8 @@ export function useArcgisDatasetSession({
     parquetSource,
     rowGroupBounds,
   };
+}
+
+function hasDatasetEffectLayer(layer: object): layer is DatasetEffectLayer {
+  return "effect" in layer;
 }

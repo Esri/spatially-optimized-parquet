@@ -7,6 +7,7 @@ import VectorTileLayer from "@arcgis/core/layers/VectorTileLayer";
 import SpatialReference from "@arcgis/core/geometry/SpatialReference";
 import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
+import type { Dataset } from "../../../common/dataset/datasets";
 import {
   calculateRowGroupFocusExtent,
   type RowGroupBounds,
@@ -14,43 +15,28 @@ import {
 import { createRowGroupBoundsLayer } from "./rowGroupBoundsLayer";
 import styles from "./Minimap.module.css";
 
-function createDatasetBasemap(basemapId?: string): Basemap | string {
-  return basemapId
-    ? new Basemap({
-        baseLayers: [new VectorTileLayer({ portalItem: { id: basemapId } })],
-      })
-    : "dark-gray-vector";
-}
-
-function createDatasetSpatialReference(wkid?: number): SpatialReference {
-  return new SpatialReference({ wkid: wkid ?? 3857 });
-}
-
 /**
  * Shows row-group bounds beside the main map and mirrors its current extent.
  * It owns the two-way view coordination so contributors can change overview behavior without coupling it to the main viewer.
  */
 export const Minimap = memo(function Minimap({
-  basemapId,
   bounds,
-  center,
+  dataset,
   mainMapElementRef,
-  scale,
-  spatialReferenceWkid,
 }: {
-  basemapId?: string;
   bounds: readonly RowGroupBounds[] | null;
-  center: [number, number];
+  dataset: Dataset;
   mainMapElementRef: RefObject<HTMLArcgisMapElement | null>;
-  scale: number;
-  spatialReferenceWkid?: number;
 }) {
   const mapElementRef = useRef<HTMLArcgisMapElement>(null);
   const [overviewReady, setOverviewReady] = useState(false);
-  const basemap = useMemo(() => createDatasetBasemap(basemapId), [basemapId]);
+  const basemap = useMemo(
+    () => createDatasetBasemap(dataset.basemap),
+    [dataset.basemap],
+  );
   const spatialReference = useMemo(
-    () => createDatasetSpatialReference(spatialReferenceWkid),
-    [spatialReferenceWkid],
+    () => createDatasetSpatialReference(dataset.spatialReference),
+    [dataset.spatialReference],
   );
 
   useEffect(() => {
@@ -59,8 +45,8 @@ export const Minimap = memo(function Minimap({
       return;
     }
 
-    mapElement.center = center;
-    mapElement.scale = scale;
+    mapElement.center = dataset.center;
+    mapElement.scale = dataset.scale;
     let disposed = false;
     let boundsLayer: ReturnType<typeof createRowGroupBoundsLayer> | undefined;
     let extentLayer: GraphicsLayer | undefined;
@@ -153,7 +139,7 @@ export const Minimap = memo(function Minimap({
         mapElement.map?.remove(boundsLayer);
       }
     };
-  }, [bounds, center, mainMapElementRef, scale]);
+  }, [bounds, dataset.center, dataset.scale, mainMapElementRef]);
 
   return (
     <div className={styles.rowGroupOverview}>
@@ -165,8 +151,8 @@ export const Minimap = memo(function Minimap({
             className={overviewReady ? styles.ready : undefined}
             spatialReference={spatialReference}
             basemap={basemap}
-            center={center}
-            scale={scale}
+            center={dataset.center}
+            scale={dataset.scale}
           />
         ) : null}
         {!bounds || !overviewReady ? (
@@ -178,3 +164,15 @@ export const Minimap = memo(function Minimap({
     </div>
   );
 });
+
+function createDatasetBasemap(basemapId?: string): Basemap | string {
+  return basemapId
+    ? new Basemap({
+        baseLayers: [new VectorTileLayer({ portalItem: { id: basemapId } })],
+      })
+    : "dark-gray-vector";
+}
+
+function createDatasetSpatialReference(wkid?: number): SpatialReference {
+  return new SpatialReference({ wkid: wkid ?? 3857 });
+}
