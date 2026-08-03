@@ -73,10 +73,8 @@ export const FileExplorer = memo(function FileExplorer({
     : 0;
   const selectedFile = datasetDownload.files[selectedFileIndex] ?? null;
   const downloadSession = datasetDownload.aggregateDownload;
-  const fileStructureSnapshot = useMemo(
-    () => selectedFile?.download.createFileStructureSnapshot() ?? null,
-    [selectedFile],
-  );
+  const fileStructureSnapshot =
+    selectedFile?.download.createFileStructureSnapshot() ?? null;
   const [fileStructureDialog, setFileStructureDialog] = useState<{
     datasetId: string;
     source: ParquetPageIndexSource;
