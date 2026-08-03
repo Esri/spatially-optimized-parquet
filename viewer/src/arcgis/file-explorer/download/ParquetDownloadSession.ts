@@ -1,6 +1,6 @@
 import type {
-  ArcgisParquetDiagnosticsSnapshotV1,
-  ArcgisParquetFileDiagnosticsV1,
+  ParquetDiagnosticsSnapshot,
+  ParquetFileDiagnostics,
   ArcgisParquetRangeReadEvent,
 } from "../../diagnostics";
 import type { ParquetByteCoverage } from "../../../parquet/ParquetByteCoverage";
@@ -15,8 +15,8 @@ import {
 } from "../../../parquet/fileLayout";
 import {
   deriveRowGroupBounds,
-  type RowGroupBounds,
-} from "../../../parquet/rowGroupBounds";
+  type ApproximateBound,
+} from "../../../common/xz_bounds/approximateBounds";
 import { ParquetDownloadCoverage } from "./ParquetDownloadCoverage";
 import {
   ParquetDownloadProjection,
@@ -67,7 +67,7 @@ const emptyTrackSnapshot: DownloadTrackSnapshot = {
  */
 export class ParquetDownloadSession implements DownloadSessionView {
   private _layout: FileLayout | null = null;
-  private _rowGroupBounds: RowGroupBounds[] | null = null;
+  private _rowGroupBounds: ApproximateBound[] | null = null;
   private _error: Error | null = null;
   private _acceptedFileNames = new Set<string>();
   private _fileOffsets = new Map<string, number>();
@@ -120,8 +120,8 @@ export class ParquetDownloadSession implements DownloadSessionView {
   }
 
   loadDiagnostics(
-    diagnostics: ArcgisParquetDiagnosticsSnapshotV1,
-    file: ArcgisParquetFileDiagnosticsV1,
+    diagnostics: ParquetDiagnosticsSnapshot,
+    file: ParquetFileDiagnostics,
   ): void {
     try {
       const layout = deriveFileLayout(diagnostics, file);
@@ -144,7 +144,7 @@ export class ParquetDownloadSession implements DownloadSessionView {
 
   loadDatasetLayouts(
     layouts: readonly FileLayout[],
-    rowGroupBounds: readonly RowGroupBounds[],
+    rowGroupBounds: readonly ApproximateBound[],
   ): void {
     const datasetLayout = createDatasetDownloadDisplayLayout(layouts);
     const layout: FileLayout = {
@@ -251,7 +251,7 @@ export class ParquetDownloadSession implements DownloadSessionView {
     displayLayout: DownloadDisplayLayout;
     fileOffsets: ReadonlyMap<string, number>;
     layout: FileLayout;
-    rowGroupBounds: readonly RowGroupBounds[];
+    rowGroupBounds: readonly ApproximateBound[];
   }): void {
     this._acceptedFileNames = new Set(acceptedFileNames);
     this._fileOffsets = new Map(fileOffsets);

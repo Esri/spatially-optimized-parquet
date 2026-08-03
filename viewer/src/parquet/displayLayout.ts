@@ -176,7 +176,7 @@ export function createDatasetDownloadDisplayLayout(
       aggregateRowGroupIndex += 1;
     }
 
-    indexSegments.push(...layout.pageIndexes.map((pageIndex) => {
+    for (const pageIndex of layout.pageIndexes) {
       const rowGroupIndex = rowGroupIndexByFile.get(
         createRowGroupKey(layout.fileId, pageIndex.rowGroupIndex),
       );
@@ -185,7 +185,7 @@ export function createDatasetDownloadDisplayLayout(
           `Row group ${pageIndex.rowGroupIndex} is missing from diagnostics file ${layout.fileId}.`,
         );
       }
-      return {
+      indexSegments.push({
         id: `file${layout.fileId}-${pageIndex.id}`,
         physicalRange: shiftRange(pageIndex.byteRange, fileOffset),
         rowGroupIndex,
@@ -197,8 +197,8 @@ export function createDatasetDownloadDisplayLayout(
         maximumValue: pageIndex.maximumValue,
         nullCount: pageIndex.nullCount,
         recordCount: pageIndex.recordCount,
-      };
-    }));
+      });
+    }
     footerSegments.push({
       id: `file${layout.fileId}-footer`,
       physicalRange: shiftRange(layout.footer, fileOffset),

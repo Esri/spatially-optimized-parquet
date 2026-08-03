@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
-  ArcgisParquetDiagnosticsSnapshotV1,
-  ArcgisParquetFileDiagnosticsV1,
+  ParquetDiagnosticsSnapshot,
+  ParquetFileDiagnostics,
 } from "../../diagnostics";
 import { ParquetDatasetDownloadSession } from "./ParquetDatasetDownloadSession";
 
@@ -11,9 +11,9 @@ describe("ParquetDatasetDownloadSession", () => {
     vi.useRealTimers();
   });
 
-  it("isolates overlapping byte ranges by diagnostics file", () => {
+  it("isolates overlapping byte ranges by diagnostics file", async () => {
     const session = new ParquetDatasetDownloadSession();
-    session.loadDiagnostics(createDiagnostics());
+    await session.loadDiagnostics(createDiagnostics(), pageIndexSource);
 
     expect(session.detailSummary).toMatchObject({
       byteLength: 3_000,
@@ -21,7 +21,7 @@ describe("ParquetDatasetDownloadSession", () => {
       rowCount: 5,
       compressionCodecs: ["GZIP", "SNAPPY"],
     });
-    expect(session.rowGroupBounds).toHaveLength(2);
+    expect(session.approximateBounds).toHaveLength(2);
 
     session.recordRangeRead({
       phase: "complete",
@@ -45,7 +45,7 @@ describe("ParquetDatasetDownloadSession", () => {
     ).toBe(0);
   });
 
-  it("replays range events received before diagnostics initialization", () => {
+  it("replays range events received before diagnostics initialization", async () => {
     const session = new ParquetDatasetDownloadSession();
     session.recordRangeRead({
       phase: "complete",
@@ -54,7 +54,7 @@ describe("ParquetDatasetDownloadSession", () => {
       range: { start: 10, end: 40 },
     });
 
-    session.loadDiagnostics(createDiagnostics());
+    await session.loadDiagnostics(createDiagnostics(), pageIndexSource);
 
     expect(
       session.files[1].download
@@ -63,10 +63,10 @@ describe("ParquetDatasetDownloadSession", () => {
     ).toBe(30);
   });
 
-  it("generates column blocks from combined bytes across every file", () => {
+  it("generates column blocks from combined bytes across every file", async () => {
     vi.useFakeTimers();
     const session = new ParquetDatasetDownloadSession();
-    session.loadDiagnostics(createDiagnostics());
+    await session.loadDiagnostics(createDiagnostics(), pageIndexSource);
     const aggregate = session.aggregateDownload;
     const columnTrack = aggregate.topology
       .getSnapshot()
@@ -110,10 +110,10 @@ describe("ParquetDatasetDownloadSession", () => {
     ]);
   });
 
-  it("reports unknown files without contaminating any child coverage", () => {
+  it("reports unknown files without contaminating any child coverage", async () => {
     vi.useFakeTimers();
     const session = new ParquetDatasetDownloadSession();
-    session.loadDiagnostics(createDiagnostics());
+    await session.loadDiagnostics(createDiagnostics(), pageIndexSource);
 
     session.recordRangeRead({
       phase: "complete",
@@ -131,7 +131,7 @@ describe("ParquetDatasetDownloadSession", () => {
     }
   });
 
-  it("rejects duplicate event-routing filenames", () => {
+  it("rejects duplicate event-routing filenames", async () => {
     const session = new ParquetDatasetDownloadSession();
     const diagnostics = createDiagnostics();
     diagnostics.files[1] = {
@@ -139,15 +139,15 @@ describe("ParquetDatasetDownloadSession", () => {
       fileName: diagnostics.files[0].fileName,
     };
 
-    expect(() => session.loadDiagnostics(diagnostics)).toThrow(
+    await expect(session.loadDiagnostics(diagnostics, pageIndexSource)).rejects.toThrow(
       'duplicate fileName "first.parquet"',
     );
     expect(session.files).toHaveLength(0);
   });
 
-  it("disposes every child session", () => {
+  it("disposes every child session", async () => {
     const session = new ParquetDatasetDownloadSession();
-    session.loadDiagnostics(createDiagnostics());
+    await session.loadDiagnostics(createDiagnostics(), pageIndexSource);
     const childSessions = session.files.map(({ download }) => download);
 
     session.dispose();
@@ -158,7 +158,7 @@ describe("ParquetDatasetDownloadSession", () => {
     }
   });
 
-  it("loads file diagnostics when GeoParquet row-group bounds are unavailable", () => {
+  it("loads file diagnostics when GeoParquet row-group bounds are unavailable", async () => {
     const session = new ParquetDatasetDownloadSession();
     const diagnostics = createDiagnostics();
     diagnostics.files = diagnostics.files.map((file) => ({
@@ -169,15 +169,20 @@ describe("ParquetDatasetDownloadSession", () => {
       })),
     }));
 
-    session.loadDiagnostics(diagnostics);
+    await session.loadDiagnostics(diagnostics, pageIndexSource);
 
     expect(session.files).toHaveLength(2);
     expect(session.detailSummary?.rowCount).toBe(5);
-    expect(session.rowGroupBounds).toBeNull();
+    expect(session.approximateBounds).toBeNull();
   });
 });
 
-function createDiagnostics(): ArcgisParquetDiagnosticsSnapshotV1 {
+const pageIndexSource = {
+  getColumnIndex: vi.fn().mockResolvedValue(null),
+  getOffsetIndex: vi.fn().mockResolvedValue(null),
+};
+
+function createDiagnostics(): ParquetDiagnosticsSnapshot {
   return {
     files: [
       createFile(0, "first.parquet", 1_000, 2, "GZIP"),
@@ -192,7 +197,7 @@ function createFile(
   byteLength: number,
   rowCount: number,
   compression: string,
-): ArcgisParquetFileDiagnosticsV1 {
+): ParquetFileDiagnostics {
   const dataEnd = Math.floor(byteLength / 2);
   return {
     version: 1,

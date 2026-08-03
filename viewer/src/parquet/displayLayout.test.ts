@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { createDownloadDisplayLayout, displaySubpartCount } from "./displayLayout";
+import {
+  createDatasetDownloadDisplayLayout,
+  createDownloadDisplayLayout,
+  displaySubpartCount,
+} from "./displayLayout";
 import type { FileLayout } from "./fileLayout";
 
 describe("createDownloadDisplayLayout", () => {
@@ -76,5 +80,41 @@ describe("createDownloadDisplayLayout", () => {
     expect(column?.blocks[0].logicalRange).toEqual({ start: 0, end: 1_399_900 });
     expect(column?.blocks[0].physicalPieces).toHaveLength(2);
     expect(column?.blocks[0].subparts).toHaveLength(displaySubpartCount);
+  });
+});
+
+describe("createDatasetDownloadDisplayLayout", () => {
+  it("aggregates page-index segments without variadic stack growth", () => {
+    const pageIndexCount = 150_000;
+    const layout: FileLayout = {
+      fileId: 0,
+      fileName: "large.parquet",
+      byteLength: 1,
+      footer: { start: 0, end: 1 },
+      keyValueMetadata: [],
+      rowGroups: [{
+        index: 0,
+        byteRange: { start: 0, end: 0 },
+        columns: [],
+      }],
+      pageIndexes: Array.from({ length: pageIndexCount }, (_, index) => ({
+        id: `page-${index}`,
+        rowGroupIndex: 0,
+        fieldName: "geometry",
+        kind: "column" as const,
+        byteRange: { start: 0, end: 0 },
+        minimumValue: null,
+        maximumValue: null,
+        nullCount: null,
+        recordCount: 0,
+      })),
+    };
+
+    const display = createDatasetDownloadDisplayLayout([layout]);
+    const pageIndexTrack = display.displayLayout.tracks.find(
+      ({ id }) => id === "page-index",
+    );
+
+    expect(pageIndexTrack?.segments).toHaveLength(pageIndexCount);
   });
 });

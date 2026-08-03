@@ -1,7 +1,12 @@
-import type { ArcgisParquetKeyValueMetadataV1 } from "./fileLayout";
+import type { ParquetKeyValueMetadata } from "./fileLayout";
+
+export interface GeodisplayMetadata {
+  parentPath: string[];
+  value: Record<string, unknown>;
+}
 
 export function formatParquetKeyValueMetadata(
-  metadata: readonly ArcgisParquetKeyValueMetadataV1[],
+  metadata: readonly ParquetKeyValueMetadata[],
 ): string {
   const values = Object.fromEntries(
     metadata.map(({ key, value }) => [key, parseMetadataValue(value)]),
@@ -10,14 +15,18 @@ export function formatParquetKeyValueMetadata(
 }
 
 export function extractGeodisplayVersion(
-  metadata: readonly ArcgisParquetKeyValueMetadataV1[],
+  metadata: readonly ParquetKeyValueMetadata[],
 ): string | null {
+  return readVersion(extractGeodisplayMetadata(metadata)?.value);
+}
+
+export function extractGeodisplayMetadata(
+  metadata: readonly ParquetKeyValueMetadata[],
+): GeodisplayMetadata | null {
   const directValue = metadata.find(({ key }) => key === "geodisplay")?.value;
-  const directVersion = directValue
-    ? readVersion(parseMetadataValue(directValue))
-    : null;
-  if (directVersion) {
-    return directVersion;
+  const directMetadata = directValue ? parseMetadataValue(directValue) : null;
+  if (isRecord(directMetadata)) {
+    return { parentPath: [], value: directMetadata };
   }
 
   const sparkValue = metadata.find(
@@ -31,12 +40,12 @@ export function extractGeodisplayVersion(
     (field) => isRecord(field) && field.name === "geodisplay",
   );
   return isRecord(geodisplayField) && isRecord(geodisplayField.metadata)
-    ? readVersion(geodisplayField.metadata)
+    ? { parentPath: ["geodisplay"], value: geodisplayField.metadata }
     : null;
 }
 
 export function extractGeoParquetVersion(
-  metadata: readonly ArcgisParquetKeyValueMetadataV1[],
+  metadata: readonly ParquetKeyValueMetadata[],
 ): string | null {
   const geoValue = metadata.find(({ key }) => key === "geo")?.value;
   return geoValue ? readVersion(parseMetadataValue(geoValue)) : null;

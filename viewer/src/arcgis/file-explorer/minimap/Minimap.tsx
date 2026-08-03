@@ -8,10 +8,8 @@ import SpatialReference from "@arcgis/core/geometry/SpatialReference";
 import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import type { Dataset } from "../../../common/dataset/datasets";
-import {
-  calculateRowGroupFocusExtent,
-  type RowGroupBounds,
-} from "../../../parquet/rowGroupBounds";
+import { calculateXZFocusExtent } from "../../../common/xz_bounds/defaultExtent";
+import type { ApproximateBound } from "../../../common/xz_bounds/approximateBounds";
 import { createRowGroupBoundsLayer } from "./rowGroupBoundsLayer";
 import styles from "./Minimap.module.css";
 
@@ -21,12 +19,14 @@ import styles from "./Minimap.module.css";
  */
 export const Minimap = memo(function Minimap({
   bounds,
+  boundsApproximate,
   dataset,
   diagnosticsReady,
   fullExtent,
   mainMapElementRef,
 }: {
-  bounds: readonly RowGroupBounds[] | null;
+  bounds: readonly ApproximateBound[] | null;
+  boundsApproximate: boolean;
   dataset: Dataset;
   diagnosticsReady: boolean;
   fullExtent: Extent | null;
@@ -71,15 +71,14 @@ export const Minimap = memo(function Minimap({
           await boundsLayer.when();
         }
         const focusExtent = bounds
-          ? calculateRowGroupFocusExtent(bounds)
+          ? calculateXZFocusExtent(bounds)?.extent
           : undefined;
-        const overviewExtent = fullExtent ??
-          (focusExtent
-            ? new Extent({
-                ...focusExtent,
-                spatialReference: { wkid: 4326 },
-              })
-            : null);
+        const overviewExtent = focusExtent
+          ? new Extent({
+              ...focusExtent,
+              spatialReference: { wkid: 4326 },
+            })
+          : fullExtent;
         if (!disposed && overviewExtent) {
           await mapElement.view.goTo(overviewExtent, { animate: false });
         }
@@ -176,14 +175,24 @@ export const Minimap = memo(function Minimap({
             Loading row groups…
           </div>
         ) : null}
-        {overviewReady && diagnosticsReady && !bounds ? (
+        {overviewReady &&
+        diagnosticsReady &&
+        (boundsApproximate || !bounds) ? (
           <div
-            aria-label="Why row group bounds are unavailable"
+            aria-label={
+              boundsApproximate
+                ? "Why row group bounds are approximate"
+                : "Why row group bounds are unavailable"
+            }
             className={styles.rowGroupBoundsUnavailable}
             id="row-group-bounds-info"
             tabIndex={0}
           >
-            <span>Row group bounds not supported</span>
+            <span>
+              {boundsApproximate
+                ? "Row group bounds approximated"
+                : "Row group bounds not supported"}
+            </span>
             <span className={styles.rowGroupBoundsInfo} aria-hidden="true">
               <calcite-icon icon="information" scale="s" />
             </span>
@@ -191,8 +200,9 @@ export const Minimap = memo(function Minimap({
               overlayPositioning="fixed"
               referenceElement="row-group-bounds-info"
             >
-              Row group bounds require the newly added native spatial types
-              with geospatial statistics.
+              {boundsApproximate
+                ? "Bounds are approximated from XZ column statistics. Exact row group bounds require newly added native spatial types with geospatial statistics."
+                : "Row group bounds require newly added native spatial types with geospatial statistics."}
             </calcite-tooltip>
           </div>
         ) : null}

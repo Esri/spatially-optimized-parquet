@@ -15,8 +15,8 @@ import type { Dataset } from "../../common/dataset/datasets";
 import type { ArcgisDatasetSessionResult } from "../useArcgisDatasetSession";
 import {
   resolveParquetPageIndexSource,
-  type ArcgisParquetPageIndexSource,
-} from "./inspector/arcgisPageIndexes";
+  type ParquetPageIndexSource,
+} from "./inspector/parquetPageIndexes";
 import { formatByteSize } from "../../common/formatByteSize";
 import { formatInteger, formatPercent } from "../../common/formatNumber";
 import type {
@@ -79,7 +79,7 @@ export const FileExplorer = memo(function FileExplorer({
   );
   const [fileStructureDialog, setFileStructureDialog] = useState<{
     datasetId: string;
-    source: ArcgisParquetPageIndexSource;
+    source: ParquetPageIndexSource;
   } | null>(null);
   const openFileStructure = () => {
     if (!fileStructureSnapshot || !parquetSource) {
@@ -105,7 +105,8 @@ export const FileExplorer = memo(function FileExplorer({
     <>
       <div className={styles.fileExplorerOverview}>
         <Minimap
-          bounds={datasetDownload.rowGroupBounds}
+          boundsApproximate={datasetDownload.boundsApproximate}
+          bounds={datasetDownload.approximateBounds}
           dataset={dataset}
           diagnosticsReady={datasetDownload.files.length > 0}
           fullExtent={

@@ -34,7 +34,7 @@ import {
   extractGeodisplayVersion,
   formatParquetKeyValueMetadata,
 } from "../../../parquet/keyValueMetadata";
-import type { ArcgisParquetPageIndexSource } from "./arcgisPageIndexes";
+import type { ParquetPageIndexSource } from "./parquetPageIndexes";
 import {
   ParquetFileStructureStore,
   type ColumnDetailState,
@@ -82,7 +82,7 @@ export function InspectorDialog({
   onNextFile(): void;
   onPreviousFile(): void;
   snapshot: FileStructureSnapshot;
-  source: ArcgisParquetPageIndexSource;
+  source: ParquetPageIndexSource;
   onClose(): void;
 }) {
   const store = useMemo(

@@ -11,34 +11,34 @@ export interface ArcgisParquetDiagnosticsSource {
 }
 
 import type {
-  ArcgisParquetByteRange,
-  ArcgisParquetColumnChunkDiagnosticsV1,
-  ArcgisParquetColumnChunkStatisticsV1,
-  ArcgisParquetColumnDiagnosticsV1,
-  ArcgisParquetDiagnosticsSnapshotV1,
-  ArcgisParquetFileDiagnosticsV1,
-  ArcgisParquetGeospatialBoundsV1,
-  ArcgisParquetNumericValue,
-  ArcgisParquetRowGroupDiagnosticsV1,
+  ParquetByteRange,
+  ParquetColumnChunkDiagnostics,
+  ParquetColumnChunkStatistics,
+  ParquetColumnDiagnostics,
+  ParquetDiagnosticsSnapshot,
+  ParquetFileDiagnostics,
+  ParquetGeospatialBounds,
+  ParquetNumericValue,
+  ParquetRowGroupDiagnostics,
 } from "../parquet/fileLayout";
 
 export type {
-  ArcgisParquetByteRange,
-  ArcgisParquetColumnChunkDiagnosticsV1,
-  ArcgisParquetColumnChunkStatisticsV1,
-  ArcgisParquetColumnDiagnosticsV1,
-  ArcgisParquetDiagnosticsSnapshotV1,
-  ArcgisParquetFileDiagnosticsV1,
-  ArcgisParquetGeospatialBoundsV1,
-  ArcgisParquetKeyValueMetadataV1,
-  ArcgisParquetNumericValue,
-  ArcgisParquetRowGroupDiagnosticsV1,
+  ParquetByteRange,
+  ParquetColumnChunkDiagnostics,
+  ParquetColumnChunkStatistics,
+  ParquetColumnDiagnostics,
+  ParquetDiagnosticsSnapshot,
+  ParquetFileDiagnostics,
+  ParquetGeospatialBounds,
+  ParquetKeyValueMetadata,
+  ParquetNumericValue,
+  ParquetRowGroupDiagnostics,
 } from "../parquet/fileLayout";
 
 interface ArcgisParquetRangeReadEventBase {
   fileId: string;
   requestId: number;
-  range: ArcgisParquetByteRange;
+  range: ParquetByteRange;
 }
 
 export interface ArcgisParquetRangeReadStartEvent
@@ -77,7 +77,7 @@ export function resolveParquetDiagnosticsSource(
 
 export function parseParquetDiagnosticsSnapshot(
   value: unknown,
-): ArcgisParquetDiagnosticsSnapshotV1 {
+): ParquetDiagnosticsSnapshot {
   const snapshot = readRecord(value, "diagnostics snapshot");
   const files = readArray(snapshot.files, "diagnostics snapshot.files").map(
     (file, fileIndex) => parseFileDiagnostics(file, `diagnostics snapshot.files[${fileIndex}]`),
@@ -131,7 +131,7 @@ export function parseParquetRangeReadEvent(
 function parseFileDiagnostics(
   value: unknown,
   name: string,
-): ArcgisParquetFileDiagnosticsV1 {
+): ParquetFileDiagnostics {
   const file = readRecord(value, name);
   readVersion(file.version, `${name}.version`);
   const fileId = readStructuralInteger(file.fileId, `${name}.fileId`);
@@ -183,7 +183,7 @@ function parseFileDiagnostics(
 function parseColumnDiagnostics(
   value: unknown,
   name: string,
-): ArcgisParquetColumnDiagnosticsV1 {
+): ParquetColumnDiagnostics {
   const column = readRecord(value, name);
   return {
     index: readStructuralInteger(column.index, `${name}.index`),
@@ -210,7 +210,7 @@ function parseRowGroupDiagnostics(
   name: string,
   byteLength: number,
   columnCount: number,
-): ArcgisParquetRowGroupDiagnosticsV1 {
+): ParquetRowGroupDiagnostics {
   const rowGroup = readRecord(value, name);
   const rowStart = readStructuralInteger(rowGroup.rowStart, `${name}.rowStart`);
   const rowCount = readStructuralInteger(rowGroup.rowCount, `${name}.rowCount`);
@@ -254,7 +254,7 @@ function parseColumnChunkDiagnostics(
   name: string,
   byteLength: number,
   columnCount: number,
-): ArcgisParquetColumnChunkDiagnosticsV1 {
+): ParquetColumnChunkDiagnostics {
   const chunk = readRecord(value, name);
   const columnIndex = readStructuralInteger(chunk.columnIndex, `${name}.columnIndex`);
   if (columnIndex >= columnCount) {
@@ -305,7 +305,7 @@ function parseColumnChunkDiagnostics(
 function parseChunkStatistics(
   value: unknown,
   name: string,
-): ArcgisParquetColumnChunkStatisticsV1 {
+): ParquetColumnChunkStatistics {
   const statistics = readRecord(value, name);
   return {
     numValues: readStructuralInteger(statistics.numValues, `${name}.numValues`),
@@ -325,7 +325,7 @@ function parseChunkStatistics(
 function readNullableNumericValue(
   value: unknown,
   name: string,
-): ArcgisParquetNumericValue | null {
+): ParquetNumericValue | null {
   if (value === null) {
     return null;
   }
@@ -359,7 +359,7 @@ function readNullableNumericValue(
 function readNullableBounds(
   value: unknown,
   name: string,
-): ArcgisParquetGeospatialBoundsV1 | null {
+): ParquetGeospatialBounds | null {
   if (value === null) {
     return null;
   }
@@ -407,7 +407,7 @@ function readNullableBoundedByteRange(
   value: unknown,
   name: string,
   byteLength: number,
-): ArcgisParquetByteRange | null {
+): ParquetByteRange | null {
   return value === null ? null : readBoundedByteRange(value, name, byteLength);
 }
 
@@ -415,7 +415,7 @@ function readBoundedByteRange(
   value: unknown,
   name: string,
   byteLength: number,
-): ArcgisParquetByteRange {
+): ParquetByteRange {
   const range = readByteRange(value, name, false);
   if (range.end > byteLength) {
     throw new TypeError(`${name} exceeds the file byteLength.`);
@@ -427,7 +427,7 @@ function readByteRange(
   value: unknown,
   name: string,
   allowEmpty: boolean,
-): ArcgisParquetByteRange {
+): ParquetByteRange {
   const range = readRecord(value, name);
   const start = readStructuralInteger(range.start, `${name}.start`);
   const end = readStructuralInteger(range.end, `${name}.end`);

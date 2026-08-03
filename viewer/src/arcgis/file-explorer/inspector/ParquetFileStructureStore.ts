@@ -1,10 +1,10 @@
 import type {
-  ArcgisParquetColumnIndex,
-  ArcgisParquetOffsetIndex,
-  ArcgisParquetPageIndexSource,
-  ArcgisParquetPageIndexTarget,
-  ArcgisParquetPageStatistic,
-} from "./arcgisPageIndexes";
+  ParquetColumnIndex,
+  ParquetOffsetIndex,
+  ParquetPageIndexSource,
+  ParquetPageIndexTarget,
+  ParquetPageStatistic,
+} from "./parquetPageIndexes";
 import type { ParquetByteCoverage } from "../../../parquet/ParquetByteCoverage";
 import type {
   ByteRange,
@@ -19,7 +19,7 @@ export interface FileStructurePage {
   rowEnd: number;
   byteRange: ByteRange;
   compressedPageSize: number;
-  statistic: ArcgisParquetPageStatistic;
+  statistic: ParquetPageStatistic;
 }
 
 export interface FileStructureGap {
@@ -64,7 +64,7 @@ export class ParquetFileStructureStore {
 
   constructor(
     readonly snapshot: FileStructureSnapshot,
-    private readonly _source: ArcgisParquetPageIndexSource,
+    private readonly _source: ParquetPageIndexSource,
   ) {}
 
   subscribe = (listener: () => void): (() => void) => {
@@ -149,7 +149,7 @@ export class ParquetFileStructureStore {
 
   private async _loadColumn(column: ColumnLayout): Promise<void> {
     const generation = this._generation;
-    const target: ArcgisParquetPageIndexTarget = {
+    const target: ParquetPageIndexTarget = {
       fileId: this.snapshot.layout.fileId,
       rowGroupIndex: column.rowGroupIndex,
       columnIndex: column.columnIndex,
@@ -228,8 +228,8 @@ export class ParquetFileStructureStore {
 }
 
 function mergePages(
-  columnIndex: ArcgisParquetColumnIndex | null,
-  offsetIndex: ArcgisParquetOffsetIndex,
+  columnIndex: ParquetColumnIndex | null,
+  offsetIndex: ParquetOffsetIndex,
 ): FileStructurePage[] {
   if (columnIndex && columnIndex.pages.length !== offsetIndex.pages.length) {
     throw new Error("Column and offset indexes contain different page counts.");
@@ -247,7 +247,7 @@ function mergePages(
 
 function deriveGaps(
   columnRange: ByteRange,
-  offsetIndex: ArcgisParquetOffsetIndex,
+  offsetIndex: ParquetOffsetIndex,
 ): FileStructureGap[] {
   const pages = [...offsetIndex.pages].sort(
     (first, second) => first.byteStart - second.byteStart,

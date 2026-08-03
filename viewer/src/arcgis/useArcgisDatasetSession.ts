@@ -1,4 +1,5 @@
 import * as reactiveUtils from "@arcgis/core/core/reactiveUtils";
+import Extent from "@arcgis/core/geometry/Extent";
 import ParquetLayer from "@arcgis/core/layers/ParquetLayer";
 import {
   useEffect,
@@ -8,6 +9,7 @@ import {
 } from "react";
 
 import type { Dataset } from "../common/dataset/datasets";
+import { calculateDefaultXZExtent } from "../common/xz_bounds/defaultExtent";
 import { createParquetLayerData } from "./createParquetLayerData";
 import {
   reduceDatasetSessionState,
@@ -20,6 +22,7 @@ import {
   type ArcgisEventHandle,
 } from "./diagnostics";
 import { ParquetDatasetDownloadSession } from "./file-explorer/download/ParquetDatasetDownloadSession";
+import { resolveParquetPageIndexSource } from "./file-explorer/inspector/parquetPageIndexes";
 import type {
   DatasetEffectLayer,
   DatasetMapProfile,
@@ -114,7 +117,10 @@ export function useArcgisDatasetSession({
           return;
         }
 
-        attachDatasetDiagnostics(candidate, publishCandidate);
+        const diagnosticsReady = attachDatasetDiagnostics(
+          candidate,
+          publishCandidate,
+        );
         const previousSession = committedSessionRef.current;
         map.layers.removeAll();
         disposeDatasetSession(previousSession);
@@ -131,7 +137,13 @@ export function useArcgisDatasetSession({
         });
 
         void initializeLayerView(candidate, mapElement, publishCandidate);
-        void navigateToDataset(candidate, mapElement);
+        if (candidate.dataset.kind === "preset") {
+          void navigateToDataset(candidate, mapElement);
+        } else {
+          void diagnosticsReady.then(() => {
+            void navigateToDataset(candidate, mapElement);
+          });
+        }
       } catch (error) {
         disposeDatasetSession(candidate);
         if (cancelled || requestVersion !== requestVersionRef.current) {
@@ -213,10 +225,10 @@ function createDatasetCandidate(
 function attachDatasetDiagnostics(
   session: LoadedDatasetSession,
   publish: () => void,
-): void {
+): Promise<void> {
   const layer = session.layer;
   if (!layer) {
-    return;
+    return Promise.resolve();
   }
 
   const reportDiagnosticsError = (message: string, error: unknown) => {
@@ -237,12 +249,18 @@ function attachDatasetDiagnostics(
         reportDiagnosticsError("Failed to parse a Parquet range event.", error);
       }
     });
-    void diagnosticsSource.getDiagnosticsSnapshot().then((snapshotValue) => {
+    return diagnosticsSource.getDiagnosticsSnapshot().then(async (snapshotValue) => {
       if (session.disposed) {
         return;
       }
       const snapshot = parseParquetDiagnosticsSnapshot(snapshotValue);
-      session.download.loadDiagnostics(snapshot);
+      await session.download.loadDiagnostics(
+        snapshot,
+        resolveParquetPageIndexSource(diagnosticsSource),
+      );
+      if (session.disposed) {
+        return;
+      }
       publish();
     }).catch((error: unknown) => {
       reportDiagnosticsError(
@@ -255,6 +273,7 @@ function attachDatasetDiagnostics(
       "Parquet layer source diagnostics are unavailable.",
       error,
     );
+    return Promise.resolve();
   }
 }
 
@@ -317,19 +336,32 @@ async function navigateToDataset(
   session: LoadedDatasetSession,
   mapElement: HTMLArcgisMapElement,
 ): Promise<void> {
+  if (session.disposed) {
+    return;
+  }
+
   if (session.dataset.kind === "preset") {
     mapElement.center = session.dataset.center ?? defaultCenter;
     mapElement.scale = session.dataset.scale ?? defaultScale;
     return;
   }
 
-  const fullExtent = session.layer?.fullExtent;
-  if (!fullExtent) {
+  const bounds = session.download.approximateBounds;
+  const focusExtent = bounds
+    ? calculateDefaultXZExtent(bounds)?.extent
+    : null;
+  const navigationExtent = focusExtent
+    ? new Extent({
+        ...focusExtent,
+        spatialReference: { wkid: 4326 },
+      })
+    : session.layer?.fullExtent;
+  if (!navigationExtent) {
     return;
   }
 
   try {
-    await mapElement.view.goTo(fullExtent, { animate: false });
+    await mapElement.view.goTo(navigationExtent, { animate: false });
   } catch (error) {
     if (!session.disposed) {
       console.error("Failed to navigate to the Parquet full extent.", error);

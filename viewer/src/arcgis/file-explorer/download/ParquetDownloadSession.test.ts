@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
-  ArcgisParquetDiagnosticsSnapshotV1,
+  ParquetDiagnosticsSnapshot,
   ArcgisParquetRangeReadCompleteEvent,
   ArcgisParquetRangeReadStartEvent,
 } from "../../diagnostics";
 import { ParquetDownloadSession } from "./ParquetDownloadSession";
 
-const diagnostics: ArcgisParquetDiagnosticsSnapshotV1 = {
+const diagnostics: ParquetDiagnosticsSnapshot = {
   files: [{
     version: 1,
     fileId: 0,

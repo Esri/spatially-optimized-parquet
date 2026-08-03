@@ -1,15 +1,15 @@
-export interface ArcgisParquetByteRange {
+export interface ParquetByteRange {
   start: number;
   end: number;
 }
 
-export type ArcgisParquetNumericValue =
+export type ParquetNumericValue =
   | { type: "int32"; value: number }
   | { type: "int64"; value: string }
   | { type: "float32"; value: number }
   | { type: "float64"; value: number };
 
-export interface ArcgisParquetColumnDiagnosticsV1 {
+export interface ParquetColumnDiagnostics {
   index: number;
   path: string[];
   name: string;
@@ -20,23 +20,23 @@ export interface ArcgisParquetColumnDiagnosticsV1 {
   maxRepetitionLevel: number;
 }
 
-export interface ArcgisParquetColumnChunkStatisticsV1 {
+export interface ParquetColumnChunkStatistics {
   numValues: number;
   nullCount: number | null;
   distinctCount: number | null;
   nanCount: number | null;
-  min: ArcgisParquetNumericValue | null;
-  max: ArcgisParquetNumericValue | null;
+  min: ParquetNumericValue | null;
+  max: ParquetNumericValue | null;
   minExact: boolean | null;
   maxExact: boolean | null;
 }
 
-export interface ArcgisParquetColumnChunkDiagnosticsV1 {
+export interface ParquetColumnChunkDiagnostics {
   columnIndex: number;
-  dataRange: ArcgisParquetByteRange;
-  columnIndexRange: ArcgisParquetByteRange | null;
-  offsetIndexRange: ArcgisParquetByteRange | null;
-  statistics: ArcgisParquetColumnChunkStatisticsV1;
+  dataRange: ParquetByteRange;
+  columnIndexRange: ParquetByteRange | null;
+  offsetIndexRange: ParquetByteRange | null;
+  statistics: ParquetColumnChunkStatistics;
   compression: string;
   encodings: string[];
   compressedSize: number;
@@ -45,7 +45,7 @@ export interface ArcgisParquetColumnChunkDiagnosticsV1 {
   dataPageOffset: number;
 }
 
-export interface ArcgisParquetGeospatialBoundsV1 {
+export interface ParquetGeospatialBounds {
   xmin: number;
   xmax: number;
   ymin: number;
@@ -56,36 +56,36 @@ export interface ArcgisParquetGeospatialBoundsV1 {
   mmax: number | null;
 }
 
-export interface ArcgisParquetRowGroupDiagnosticsV1 {
+export interface ParquetRowGroupDiagnostics {
   index: number;
   rowStart: number;
   rowCount: number;
-  dataRange: ArcgisParquetByteRange | null;
-  bounds: ArcgisParquetGeospatialBoundsV1 | null;
-  columns: ArcgisParquetColumnChunkDiagnosticsV1[];
+  dataRange: ParquetByteRange | null;
+  bounds: ParquetGeospatialBounds | null;
+  columns: ParquetColumnChunkDiagnostics[];
 }
 
-export interface ArcgisParquetKeyValueMetadataV1 {
+export interface ParquetKeyValueMetadata {
   key: string;
   value: string | null;
 }
 
-export interface ArcgisParquetFileDiagnosticsV1 {
+export interface ParquetFileDiagnostics {
   version: 1;
   fileId: number;
   fileName: string;
   byteLength: number;
-  footerRange: ArcgisParquetByteRange;
-  keyValueMetadata: ArcgisParquetKeyValueMetadataV1[];
-  columns: ArcgisParquetColumnDiagnosticsV1[];
-  rowGroups: ArcgisParquetRowGroupDiagnosticsV1[];
+  footerRange: ParquetByteRange;
+  keyValueMetadata: ParquetKeyValueMetadata[];
+  columns: ParquetColumnDiagnostics[];
+  rowGroups: ParquetRowGroupDiagnostics[];
 }
 
-export interface ArcgisParquetDiagnosticsSnapshotV1 {
-  files: ArcgisParquetFileDiagnosticsV1[];
+export interface ParquetDiagnosticsSnapshot {
+  files: ParquetFileDiagnostics[];
 }
 
-export type ByteRange = ArcgisParquetByteRange;
+export type ByteRange = ParquetByteRange;
 export type ColumnStatisticValue = number | string;
 
 export interface ColumnLayout {
@@ -135,14 +135,14 @@ export interface FileLayout {
   fileName: string;
   byteLength: number;
   footer: ByteRange;
-  keyValueMetadata: ArcgisParquetKeyValueMetadataV1[];
+  keyValueMetadata: ParquetKeyValueMetadata[];
   rowGroups: RowGroupLayout[];
   pageIndexes: PageIndexLayout[];
 }
 
 export function deriveFileLayout(
-  snapshot: ArcgisParquetDiagnosticsSnapshotV1,
-  file: ArcgisParquetFileDiagnosticsV1,
+  snapshot: ParquetDiagnosticsSnapshot,
+  file: ParquetFileDiagnostics,
 ): FileLayout {
   assertSnapshotFile(snapshot, file);
   const pageIndexes: PageIndexLayout[] = [];
@@ -213,8 +213,8 @@ export function rangesOverlap(first: ByteRange, second: ByteRange): boolean {
 }
 
 function assertSnapshotFile(
-  snapshot: ArcgisParquetDiagnosticsSnapshotV1,
-  file: ArcgisParquetFileDiagnosticsV1,
+  snapshot: ParquetDiagnosticsSnapshot,
+  file: ParquetFileDiagnostics,
 ): void {
   const snapshotFile = snapshot.files.find(
     (candidate) =>
@@ -226,7 +226,7 @@ function assertSnapshotFile(
 }
 
 function derivePageIndexes(
-  chunk: ArcgisParquetFileDiagnosticsV1["rowGroups"][number]["columns"][number],
+  chunk: ParquetFileDiagnostics["rowGroups"][number]["columns"][number],
   {
     fieldName,
     rowGroupIndex,
