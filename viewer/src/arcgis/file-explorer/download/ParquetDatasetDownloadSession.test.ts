@@ -13,7 +13,7 @@ describe("ParquetDatasetDownloadSession", () => {
 
   it("isolates overlapping byte ranges by diagnostics file", async () => {
     const session = new ParquetDatasetDownloadSession();
-    await session.loadDiagnostics(createDiagnostics(), pageIndexSource);
+    await session.loadDiagnostics(createDiagnostics());
 
     expect(session.detailSummary).toMatchObject({
       byteLength: 3_000,
@@ -21,7 +21,7 @@ describe("ParquetDatasetDownloadSession", () => {
       rowCount: 5,
       compressionCodecs: ["GZIP", "SNAPPY"],
     });
-    expect(session.approximateBounds).toHaveLength(2);
+    expect(session.rowGroupBounds).toHaveLength(2);
 
     session.recordRangeRead({
       phase: "complete",
@@ -54,7 +54,7 @@ describe("ParquetDatasetDownloadSession", () => {
       range: { start: 10, end: 40 },
     });
 
-    await session.loadDiagnostics(createDiagnostics(), pageIndexSource);
+    await session.loadDiagnostics(createDiagnostics());
 
     expect(
       session.files[1].download
@@ -66,7 +66,7 @@ describe("ParquetDatasetDownloadSession", () => {
   it("generates column blocks from combined bytes across every file", async () => {
     vi.useFakeTimers();
     const session = new ParquetDatasetDownloadSession();
-    await session.loadDiagnostics(createDiagnostics(), pageIndexSource);
+    await session.loadDiagnostics(createDiagnostics());
     const aggregate = session.aggregateDownload;
     const columnTrack = aggregate.topology
       .getSnapshot()
@@ -113,7 +113,7 @@ describe("ParquetDatasetDownloadSession", () => {
   it("reports unknown files without contaminating any child coverage", async () => {
     vi.useFakeTimers();
     const session = new ParquetDatasetDownloadSession();
-    await session.loadDiagnostics(createDiagnostics(), pageIndexSource);
+    await session.loadDiagnostics(createDiagnostics());
 
     session.recordRangeRead({
       phase: "complete",
@@ -139,7 +139,7 @@ describe("ParquetDatasetDownloadSession", () => {
       fileName: diagnostics.files[0].fileName,
     };
 
-    await expect(session.loadDiagnostics(diagnostics, pageIndexSource)).rejects.toThrow(
+    await expect(session.loadDiagnostics(diagnostics)).rejects.toThrow(
       'duplicate fileName "first.parquet"',
     );
     expect(session.files).toHaveLength(0);
@@ -147,7 +147,7 @@ describe("ParquetDatasetDownloadSession", () => {
 
   it("disposes every child session", async () => {
     const session = new ParquetDatasetDownloadSession();
-    await session.loadDiagnostics(createDiagnostics(), pageIndexSource);
+    await session.loadDiagnostics(createDiagnostics());
     const childSessions = session.files.map(({ download }) => download);
 
     session.dispose();
@@ -169,18 +169,13 @@ describe("ParquetDatasetDownloadSession", () => {
       })),
     }));
 
-    await session.loadDiagnostics(diagnostics, pageIndexSource);
+    await session.loadDiagnostics(diagnostics);
 
     expect(session.files).toHaveLength(2);
     expect(session.detailSummary?.rowCount).toBe(5);
-    expect(session.approximateBounds).toBeNull();
+    expect(session.rowGroupBounds).toBeNull();
   });
 });
-
-const pageIndexSource = {
-  getColumnIndex: vi.fn().mockResolvedValue(null),
-  getOffsetIndex: vi.fn().mockResolvedValue(null),
-};
 
 function createDiagnostics(): ParquetDiagnosticsSnapshot {
   return {

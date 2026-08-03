@@ -1,10 +1,10 @@
 import FeatureLayer from "@arcgis/core/layers/FeatureLayer";
 import Graphic from "@arcgis/core/Graphic";
 
-import type { ApproximateBound } from "../../../common/xz_bounds/approximateBounds";
+import type { RowGroupBound } from "../../../common/rowGroupBounds";
 
 export function createRowGroupBoundsLayer(
-  bounds: readonly ApproximateBound[],
+  bounds: readonly RowGroupBound[],
   labelsVisible = true,
 ): FeatureLayer {
   return new FeatureLayer({

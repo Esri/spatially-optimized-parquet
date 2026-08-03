@@ -4,12 +4,12 @@ import type {
   ColumnStatisticValue,
   FileLayout,
 } from "../../../parquet/fileLayout";
-import type { ApproximateBound } from "../../../common/xz_bounds/approximateBounds";
+import type { RowGroupBound } from "../../../common/rowGroupBounds";
 
 export interface DownloadTopologySnapshot {
   layout: FileLayout | null;
   tracks: readonly DownloadTrackLayout[];
-  rowGroupBounds: readonly ApproximateBound[] | null;
+  rowGroupBounds: readonly RowGroupBound[] | null;
   error: Error | null;
 }
 

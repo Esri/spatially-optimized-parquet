@@ -15,8 +15,8 @@ import {
 } from "../../../parquet/fileLayout";
 import {
   deriveRowGroupBounds,
-  type ApproximateBound,
-} from "../../../common/xz_bounds/approximateBounds";
+  type RowGroupBound,
+} from "../../../common/rowGroupBounds";
 import { ParquetDownloadCoverage } from "./ParquetDownloadCoverage";
 import {
   ParquetDownloadProjection,
@@ -67,7 +67,7 @@ const emptyTrackSnapshot: DownloadTrackSnapshot = {
  */
 export class ParquetDownloadSession implements DownloadSessionView {
   private _layout: FileLayout | null = null;
-  private _rowGroupBounds: ApproximateBound[] | null = null;
+  private _rowGroupBounds: RowGroupBound[] | null = null;
   private _error: Error | null = null;
   private _acceptedFileNames = new Set<string>();
   private _fileOffsets = new Map<string, number>();
@@ -144,7 +144,7 @@ export class ParquetDownloadSession implements DownloadSessionView {
 
   loadDatasetLayouts(
     layouts: readonly FileLayout[],
-    rowGroupBounds: readonly ApproximateBound[],
+    rowGroupBounds: readonly RowGroupBound[],
   ): void {
     const datasetLayout = createDatasetDownloadDisplayLayout(layouts);
     const layout: FileLayout = {
@@ -251,7 +251,7 @@ export class ParquetDownloadSession implements DownloadSessionView {
     displayLayout: DownloadDisplayLayout;
     fileOffsets: ReadonlyMap<string, number>;
     layout: FileLayout;
-    rowGroupBounds: readonly ApproximateBound[];
+    rowGroupBounds: readonly RowGroupBound[];
   }): void {
     this._acceptedFileNames = new Set(acceptedFileNames);
     this._fileOffsets = new Map(fileOffsets);

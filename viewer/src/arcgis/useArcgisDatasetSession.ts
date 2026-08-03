@@ -9,7 +9,7 @@ import {
 } from "react";
 
 import type { Dataset } from "../common/dataset/datasets";
-import { calculateDefaultXZExtent } from "../common/xz_bounds/defaultExtent";
+import { calculateDefaultRowGroupExtent } from "../common/rowGroupExtent";
 import { createParquetLayerData } from "./createParquetLayerData";
 import {
   reduceDatasetSessionState,
@@ -22,7 +22,6 @@ import {
   type ArcgisEventHandle,
 } from "./diagnostics";
 import { ParquetDatasetDownloadSession } from "./file-explorer/download/ParquetDatasetDownloadSession";
-import { resolveParquetPageIndexSource } from "./file-explorer/inspector/parquetPageIndexes";
 import type {
   DatasetEffectLayer,
   DatasetMapProfile,
@@ -254,10 +253,7 @@ function attachDatasetDiagnostics(
         return;
       }
       const snapshot = parseParquetDiagnosticsSnapshot(snapshotValue);
-      await session.download.loadDiagnostics(
-        snapshot,
-        resolveParquetPageIndexSource(diagnosticsSource),
-      );
+      await session.download.loadDiagnostics(snapshot);
       if (session.disposed) {
         return;
       }
@@ -346,9 +342,9 @@ async function navigateToDataset(
     return;
   }
 
-  const bounds = session.download.approximateBounds;
+  const bounds = session.download.rowGroupBounds;
   const focusExtent = bounds
-    ? calculateDefaultXZExtent(bounds)?.extent
+    ? calculateDefaultRowGroupExtent(bounds)?.extent
     : null;
   const navigationExtent = focusExtent
     ? new Extent({

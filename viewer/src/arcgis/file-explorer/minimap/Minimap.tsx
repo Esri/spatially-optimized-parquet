@@ -8,8 +8,8 @@ import SpatialReference from "@arcgis/core/geometry/SpatialReference";
 import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import type { Dataset } from "../../../common/dataset/datasets";
-import { calculateXZFocusExtent } from "../../../common/xz_bounds/defaultExtent";
-import type { ApproximateBound } from "../../../common/xz_bounds/approximateBounds";
+import { calculateRowGroupFocusExtent } from "../../../common/rowGroupExtent";
+import type { RowGroupBound } from "../../../common/rowGroupBounds";
 import { createRowGroupBoundsLayer } from "./rowGroupBoundsLayer";
 import styles from "./Minimap.module.css";
 
@@ -19,14 +19,12 @@ import styles from "./Minimap.module.css";
  */
 export const Minimap = memo(function Minimap({
   bounds,
-  boundsApproximate,
   dataset,
   diagnosticsReady,
   fullExtent,
   mainMapElementRef,
 }: {
-  bounds: readonly ApproximateBound[] | null;
-  boundsApproximate: boolean;
+  bounds: readonly RowGroupBound[] | null;
   dataset: Dataset;
   diagnosticsReady: boolean;
   fullExtent: Extent | null;
@@ -71,7 +69,7 @@ export const Minimap = memo(function Minimap({
           await boundsLayer.when();
         }
         const focusExtent = bounds
-          ? calculateXZFocusExtent(bounds)?.extent
+          ? calculateRowGroupFocusExtent(bounds)?.extent
           : undefined;
         const overviewExtent = focusExtent
           ? new Extent({
@@ -175,24 +173,14 @@ export const Minimap = memo(function Minimap({
             Loading row groups…
           </div>
         ) : null}
-        {overviewReady &&
-        diagnosticsReady &&
-        (boundsApproximate || !bounds) ? (
+        {overviewReady && diagnosticsReady && !bounds ? (
           <div
-            aria-label={
-              boundsApproximate
-                ? "Why row group bounds are approximate"
-                : "Why row group bounds are unavailable"
-            }
+            aria-label="Why row group bounds are unsupported"
             className={styles.rowGroupBoundsUnavailable}
             id="row-group-bounds-info"
             tabIndex={0}
           >
-            <span>
-              {boundsApproximate
-                ? "Row group bounds approximated"
-                : "Row group bounds not supported"}
-            </span>
+            <span>Row group bounds unsupported</span>
             <span className={styles.rowGroupBoundsInfo} aria-hidden="true">
               <calcite-icon icon="information" scale="s" />
             </span>
@@ -200,9 +188,8 @@ export const Minimap = memo(function Minimap({
               overlayPositioning="fixed"
               referenceElement="row-group-bounds-info"
             >
-              {boundsApproximate
-                ? "Bounds are approximated from XZ column statistics. Exact row group bounds require newly added native spatial types with geospatial statistics."
-                : "Row group bounds require newly added native spatial types with geospatial statistics."}
+              Row group bounds require native spatial types with geospatial
+              statistics. XZ code ranges are not used to approximate them.
             </calcite-tooltip>
           </div>
         ) : null}

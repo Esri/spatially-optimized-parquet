@@ -1,9 +1,9 @@
 import type {
-  ApproximateBound,
   BoundsExtent,
-} from "./approximateBounds";
+  RowGroupBound,
+} from "./rowGroupBounds";
 
-export interface DefaultXZExtent {
+export interface DefaultRowGroupExtent {
   extent: BoundsExtent;
   selectedFeatureCount: number;
 }
@@ -17,10 +17,10 @@ const targetFeatureCount = 200_000;
  * Select a representative row-group extent and scale it toward 200,000 features.
  * Preserve aspect ratio by applying the square root of the target area ratio.
  */
-export function calculateDefaultXZExtent(
-  bounds: readonly ApproximateBound[],
-): DefaultXZExtent | null {
-  const focus = calculateXZFocusExtent(bounds);
+export function calculateDefaultRowGroupExtent(
+  bounds: readonly RowGroupBound[],
+): DefaultRowGroupExtent | null {
+  const focus = calculateRowGroupFocusExtent(bounds);
   if (!focus) {
     return null;
   }
@@ -42,10 +42,9 @@ export function calculateDefaultXZExtent(
   };
 }
 
-/** Resolve the density-filtered extent before target feature scaling. */
-export function calculateXZFocusExtent(
-  bounds: readonly ApproximateBound[],
-): DefaultXZExtent | null {
+export function calculateRowGroupFocusExtent(
+  bounds: readonly RowGroupBound[],
+): DefaultRowGroupExtent | null {
   if (bounds.length === 0) {
     return null;
   }
@@ -57,8 +56,8 @@ export function calculateXZFocusExtent(
 }
 
 function selectFocusBounds(
-  bounds: readonly ApproximateBound[],
-): readonly ApproximateBound[] {
+  bounds: readonly RowGroupBound[],
+): readonly RowGroupBound[] {
   const densityEntries = bounds.flatMap((bound) => {
     const area = calculateSphericalArea(bound);
     const density = bound.featureCount / area;
@@ -92,7 +91,7 @@ function calculateSphericalArea({
   ymin,
   xmax,
   ymax,
-}: ApproximateBound): number {
+}: RowGroupBound): number {
   const longitudeSpan = Math.min(Math.abs(xmax - xmin), 360);
   const longitudeRadians = degreesToRadians(longitudeSpan);
   const southRadians = degreesToRadians(Math.max(ymin, -90));
@@ -106,7 +105,7 @@ function calculateSphericalArea({
 }
 
 function combineBounds(
-  bounds: readonly ApproximateBound[],
+  bounds: readonly RowGroupBound[],
 ): BoundsExtent {
   const longitudeExtent = combineLongitudes(bounds);
   let ymin = Number.POSITIVE_INFINITY;
@@ -120,7 +119,7 @@ function combineBounds(
 }
 
 function combineLongitudes(
-  bounds: readonly ApproximateBound[],
+  bounds: readonly RowGroupBound[],
 ): Pick<BoundsExtent, "xmin" | "xmax"> {
   const intervals = bounds
     .flatMap(({ xmin, xmax }) => splitLongitudeInterval(xmin, xmax))
@@ -187,7 +186,7 @@ function scaleExtent(
   };
 }
 
-function sumFeatureCounts(bounds: readonly ApproximateBound[]): number {
+function sumFeatureCounts(bounds: readonly RowGroupBound[]): number {
   return bounds.reduce((sum, { featureCount }) => sum + featureCount, 0);
 }
 

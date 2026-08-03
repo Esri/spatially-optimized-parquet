@@ -11,7 +11,7 @@ import {
   type FileLayout,
   rangesOverlap,
 } from "../../../parquet/fileLayout";
-import type { ApproximateBound } from "../../../common/xz_bounds/approximateBounds";
+import type { RowGroupBound } from "../../../common/rowGroupBounds";
 import type {
   DownloadBlockSnapshot,
   DownloadColumnStatistics,
@@ -41,7 +41,7 @@ export interface ProjectionChange {
 
 export interface ProjectionTopologyInput {
   layout: FileLayout | null;
-  rowGroupBounds: readonly ApproximateBound[] | null;
+  rowGroupBounds: readonly RowGroupBound[] | null;
   error: Error | null;
 }
 

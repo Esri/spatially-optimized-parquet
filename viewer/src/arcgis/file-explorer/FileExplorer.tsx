@@ -103,8 +103,7 @@ export const FileExplorer = memo(function FileExplorer({
     <>
       <div className={styles.fileExplorerOverview}>
         <Minimap
-          boundsApproximate={datasetDownload.boundsApproximate}
-          bounds={datasetDownload.approximateBounds}
+          bounds={datasetDownload.rowGroupBounds}
           dataset={dataset}
           diagnosticsReady={datasetDownload.files.length > 0}
           fullExtent={

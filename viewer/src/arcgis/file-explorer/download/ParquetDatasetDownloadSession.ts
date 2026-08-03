@@ -8,11 +8,7 @@ import {
   type DatasetDetailSummary,
 } from "../../../parquet/fileDetails";
 import type { FileLayout } from "../../../parquet/fileLayout";
-import {
-  approximateBounds,
-  type ApproximateBound,
-} from "../../../common/xz_bounds/approximateBounds";
-import type { ParquetPageIndexSource } from "../inspector/parquetPageIndexes";
+import type { RowGroupBound } from "../../../common/rowGroupBounds";
 import type { DownloadSessionView } from "./types";
 import { ParquetDownloadSession } from "./ParquetDownloadSession";
 
@@ -20,7 +16,7 @@ export interface ParquetDownloadFile {
   readonly diagnostics: ParquetFileDiagnostics;
   readonly download: ParquetDownloadSession;
   readonly layout: FileLayout;
-  readonly rowGroupBounds: readonly ApproximateBound[];
+  readonly rowGroupBounds: readonly RowGroupBound[];
 }
 
 /**
@@ -32,7 +28,7 @@ export class ParquetDatasetDownloadSession {
   private _fileByRangeId = new Map<string, ParquetDownloadFile>();
   private _pendingEvents: ArcgisParquetRangeReadEvent[] = [];
   private _detailSummary: DatasetDetailSummary | null = null;
-  private _approximateBounds: ApproximateBound[] = [];
+  private _rowGroupBounds: RowGroupBound[] = [];
   private _aggregateDownload: ParquetDownloadSession | null = null;
   private readonly _statusDownload = new ParquetDownloadSession();
 
@@ -44,12 +40,8 @@ export class ParquetDatasetDownloadSession {
     return this._detailSummary;
   }
 
-  get approximateBounds(): readonly ApproximateBound[] | null {
-    return this._approximateBounds.length > 0 ? this._approximateBounds : null;
-  }
-
-  get boundsApproximate(): boolean {
-    return this._approximateBounds.some(({ approximate }) => approximate);
+  get rowGroupBounds(): readonly RowGroupBound[] | null {
+    return this._rowGroupBounds.length > 0 ? this._rowGroupBounds : null;
   }
 
   get statusDownload(): ParquetDownloadSession {
@@ -60,10 +52,7 @@ export class ParquetDatasetDownloadSession {
     return this._aggregateDownload ?? this._statusDownload;
   }
 
-  async loadDiagnostics(
-    snapshot: ParquetDiagnosticsSnapshot,
-    pageIndexSource: ParquetPageIndexSource,
-  ): Promise<void> {
+  async loadDiagnostics(snapshot: ParquetDiagnosticsSnapshot): Promise<void> {
     if (snapshot.files.length === 0) {
       const error = new Error("The Parquet diagnostics snapshot contains no files.");
       this.reportError(error);
@@ -72,7 +61,6 @@ export class ParquetDatasetDownloadSession {
 
     const nextFiles: ParquetDownloadFile[] = [];
     const nextFileByRangeId = new Map<string, ParquetDownloadFile>();
-    let nextBounds: ApproximateBound[] = [];
     let nextAggregateDownload: ParquetDownloadSession | null = null;
     try {
       for (const diagnostics of snapshot.files) {
@@ -103,7 +91,6 @@ export class ParquetDatasetDownloadSession {
         nextFiles.push(file);
         nextFileByRangeId.set(diagnostics.fileName, file);
       }
-      nextBounds = await approximateBounds(snapshot, pageIndexSource);
       nextAggregateDownload = new ParquetDownloadSession();
       nextAggregateDownload.loadDatasetLayouts(
         nextFiles.map(({ layout }) => layout),
@@ -129,7 +116,7 @@ export class ParquetDatasetDownloadSession {
     this._detailSummary = deriveDatasetDetailSummary(
       nextFiles.map(({ layout }) => layout),
     );
-    this._approximateBounds = nextBounds;
+    this._rowGroupBounds = nextFiles.flatMap(({ rowGroupBounds }) => rowGroupBounds);
     this._aggregateDownload = nextAggregateDownload;
 
     const pendingEvents = this._pendingEvents;
@@ -171,7 +158,7 @@ export class ParquetDatasetDownloadSession {
     this._fileByRangeId.clear();
     this._pendingEvents = [];
     this._detailSummary = null;
-    this._approximateBounds = [];
+    this._rowGroupBounds = [];
     this._statusDownload.reset();
   }
 
