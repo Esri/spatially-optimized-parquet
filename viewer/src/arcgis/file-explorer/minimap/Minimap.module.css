@@ -15,7 +15,7 @@
 .rowGroupOverviewPlaceholder {
   box-sizing: border-box;
   width: 100%;
-  aspect-ratio: 1;
+  aspect-ratio: 4 / 3;
   overflow: hidden;
   background: var(--calcite-color-foreground-1);
 }
