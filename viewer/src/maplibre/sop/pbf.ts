@@ -257,25 +257,19 @@ function groupPolygonRings(rings: Ring[]): Ring[][] {
 
   for (const ring of rings) {
     const area = signedRingArea(ring);
+    // Esri uses an opposite winding order vs OGC
+    ring.reverse();
     if (area < 0) {
-      polygons.push([normalizeRingWinding(ring, false)]);
+      polygons.push([ring]);
     } else {
       const polygon = polygons.at(-1);
       if (polygon) {
-        polygon.push(normalizeRingWinding(ring, true));
+        polygon.push(ring);
       }
     }
   }
 
   return polygons;
-}
-
-/**
- * Output the RFC 7946 ring direction: counterclockwise exteriors and clockwise holes.
- */
-function normalizeRingWinding(ring: Ring, clockwise: boolean): Ring {
-  const isClockwise = signedRingArea(ring) < 0;
-  return isClockwise === clockwise ? ring : [...ring].reverse();
 }
 
 /** Return a negative area for a clockwise input ring. */
