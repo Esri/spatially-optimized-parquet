@@ -1,5 +1,4 @@
 import * as reactiveUtils from "@arcgis/core/core/reactiveUtils";
-import Extent from "@arcgis/core/geometry/Extent";
 import ParquetLayer from "@arcgis/core/layers/ParquetLayer";
 import {
   useEffect,
@@ -9,7 +8,6 @@ import {
 } from "react";
 
 import type { Dataset } from "../common/dataset/datasets";
-import { calculateDefaultRowGroupExtent } from "../common/rowGroupExtent";
 import { createParquetLayerData } from "./createParquetLayerData";
 import {
   reduceDatasetSessionState,
@@ -20,8 +18,10 @@ import {
   parseParquetRangeReadEvent,
   resolveParquetDiagnosticsSource,
   type ArcgisEventHandle,
+  type ParquetDiagnosticsSnapshot,
 } from "./diagnostics";
 import { ParquetDatasetDownloadSession } from "./file-explorer/download/ParquetDatasetDownloadSession";
+import { inferCustomExtent } from "./inferCustomExtent";
 import type {
   DatasetEffectLayer,
   DatasetMapProfile,
@@ -139,8 +139,8 @@ export function useArcgisDatasetSession({
         if (candidate.dataset.kind === "preset") {
           void navigateToDataset(candidate, mapElement);
         } else {
-          void diagnosticsReady.then(() => {
-            void navigateToDataset(candidate, mapElement);
+          void diagnosticsReady.then((snapshot) => {
+            void navigateToDataset(candidate, mapElement, snapshot);
           });
         }
       } catch (error) {
@@ -224,10 +224,10 @@ function createDatasetCandidate(
 function attachDatasetDiagnostics(
   session: LoadedDatasetSession,
   publish: () => void,
-): Promise<void> {
+): Promise<ParquetDiagnosticsSnapshot | null> {
   const layer = session.layer;
   if (!layer) {
-    return Promise.resolve();
+    return Promise.resolve(null);
   }
 
   const reportDiagnosticsError = (message: string, error: unknown) => {
@@ -250,26 +250,28 @@ function attachDatasetDiagnostics(
     });
     return diagnosticsSource.getDiagnosticsSnapshot().then(async (snapshotValue) => {
       if (session.disposed) {
-        return;
+        return null;
       }
       const snapshot = parseParquetDiagnosticsSnapshot(snapshotValue);
       await session.download.loadDiagnostics(snapshot);
       if (session.disposed) {
-        return;
+        return null;
       }
       publish();
+      return snapshot;
     }).catch((error: unknown) => {
       reportDiagnosticsError(
         "Failed to load the Parquet diagnostics snapshot.",
         error,
       );
+      return null;
     });
   } catch (error) {
     reportDiagnosticsError(
       "Parquet layer source diagnostics are unavailable.",
       error,
     );
-    return Promise.resolve();
+    return Promise.resolve(null);
   }
 }
 
@@ -331,6 +333,7 @@ async function initializeLayerView(
 async function navigateToDataset(
   session: LoadedDatasetSession,
   mapElement: HTMLArcgisMapElement,
+  diagnostics: ParquetDiagnosticsSnapshot | null = null,
 ): Promise<void> {
   if (session.disposed) {
     return;
@@ -342,21 +345,14 @@ async function navigateToDataset(
     return;
   }
 
-  const bounds = session.download.rowGroupBounds;
-  const focusExtent = bounds
-    ? calculateDefaultRowGroupExtent(bounds)?.extent
-    : null;
-  const navigationExtent = focusExtent
-    ? new Extent({
-        ...focusExtent,
-        spatialReference: { wkid: 4326 },
-      })
-    : session.layer?.fullExtent;
-  if (!navigationExtent) {
-    return;
-  }
-
   try {
+    const inferredExtent = session.layer && diagnostics
+      ? await inferCustomExtent(session.layer, diagnostics)
+      : null;
+    const navigationExtent = inferredExtent ?? session.layer?.fullExtent;
+    if (!navigationExtent) {
+      return;
+    }
     await mapElement.view.goTo(navigationExtent, { animate: false });
   } catch (error) {
     if (!session.disposed) {
