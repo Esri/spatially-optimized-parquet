@@ -1,0 +1,96 @@
+import { describe, expect, it } from "vitest";
+
+import type { ParquetFileDiagnostics } from "../../parquet/fileLayout";
+import { deriveClusterLevels } from "./clusterLevelCatalog";
+
+describe("deriveClusterLevels", () => {
+  it("maps one logical level to each file's physical column", () => {
+    const firstFile = createFile(0, [
+      { level: 2, path: ["geodisplay", "level_2"] },
+      { level: 16, path: ["geodisplay", "level_16"] },
+    ]);
+    const secondFile = createFile(1, [
+      { level: 2, path: ["geometry", "coarse"] },
+      { level: 16, path: ["geometry", "detailed"] },
+    ]);
+
+    expect(deriveClusterLevels([firstFile, secondFile])).toEqual([
+      {
+        level: 2,
+        label: "level_2",
+        columns: [
+          {
+            fileId: 0,
+            columnIndex: 0,
+            fieldName: "geodisplay.level_2",
+          },
+          {
+            fileId: 1,
+            columnIndex: 0,
+            fieldName: "geometry.coarse",
+          },
+        ],
+      },
+      {
+        level: 16,
+        label: "level_16",
+        columns: [
+          {
+            fileId: 0,
+            columnIndex: 1,
+            fieldName: "geodisplay.level_16",
+          },
+          {
+            fileId: 1,
+            columnIndex: 1,
+            fieldName: "geometry.detailed",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("excludes levels that are unavailable in any dataset file", () => {
+    const firstFile = createFile(0, [
+      { level: 2, path: ["level_2"] },
+      { level: 16, path: ["level_16"] },
+    ]);
+    const secondFile = createFile(1, [
+      { level: 16, path: ["level_16"] },
+    ]);
+
+    expect(deriveClusterLevels([firstFile, secondFile]).map(
+      ({ level }) => level,
+    )).toEqual([16]);
+  });
+});
+
+function createFile(
+  fileId: number,
+  levels: Array<{ level: number; path: string[] }>,
+): ParquetFileDiagnostics {
+  return {
+    version: 1,
+    fileId,
+    fileName: `file-${fileId}.parquet`,
+    byteLength: 1,
+    footerRange: { start: 0, end: 1 },
+    keyValueMetadata: [{
+      key: "geodisplay",
+      value: JSON.stringify({
+        levels: levels.map(({ level, path }) => ({ level, column: path })),
+      }),
+    }],
+    columns: levels.map(({ path }, index) => ({
+      index,
+      path,
+      name: path.at(-1)!,
+      physicalType: "BYTE_ARRAY",
+      logicalType: null,
+      nullable: true,
+      maxDefinitionLevel: 1,
+      maxRepetitionLevel: 0,
+    })),
+    rowGroups: [],
+  };
+}

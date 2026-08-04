@@ -1,0 +1,114 @@
+import type { ParquetFileDiagnostics } from "../../parquet/fileLayout";
+import { extractGeodisplayMetadata } from "../../parquet/keyValueMetadata";
+
+export interface ClusterLevelColumn {
+  columnIndex: number;
+  fieldName: string;
+  fileId: number;
+}
+
+export interface ClusterLevel {
+  columns: readonly ClusterLevelColumn[];
+  label: string;
+  level: number;
+}
+
+interface FileLevel {
+  column: ClusterLevelColumn;
+  level: number;
+}
+
+export function deriveClusterLevels(
+  files: readonly ParquetFileDiagnostics[],
+): ClusterLevel[] {
+  if (files.length === 0) {
+    return [];
+  }
+
+  const fileLevels = files.map(deriveFileLevels);
+  const commonLevelNumbers = [...fileLevels[0].keys()].filter((level) =>
+    fileLevels.every((levels) => levels.has(level)),
+  );
+  return commonLevelNumbers
+    .sort((left, right) => left - right)
+    .map((level) => {
+      const columns = fileLevels.map((levels) => levels.get(level)!.column);
+      return {
+        columns,
+        label: formatFieldLeafName(columns[0].fieldName),
+        level,
+      };
+    });
+}
+
+function deriveFileLevels(
+  file: ParquetFileDiagnostics,
+): Map<number, FileLevel> {
+  const metadata = extractGeodisplayMetadata(file.keyValueMetadata);
+  const levels = metadata?.value.levels;
+  const result = new Map<number, FileLevel>();
+  if (!metadata || !Array.isArray(levels)) {
+    return result;
+  }
+
+  for (const value of levels) {
+    const level = readLevelNumber(value);
+    const declaredPath = readLevelColumnPath(value);
+    if (level === null || !declaredPath || result.has(level)) {
+      continue;
+    }
+
+    const fieldPath = [...metadata.parentPath, ...declaredPath];
+    const column = file.columns.find(({ path }) => pathsEqual(path, fieldPath));
+    if (!column) {
+      continue;
+    }
+    result.set(level, {
+      level,
+      column: {
+        columnIndex: column.index,
+        fieldName: fieldPath.join("."),
+        fileId: file.fileId,
+      },
+    });
+  }
+  return result;
+}
+
+function readLevelColumnPath(value: unknown): string[] | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const column = value.column;
+  if (typeof column === "string" && column.length > 0) {
+    return column.split(".");
+  }
+  return Array.isArray(column) &&
+      column.length > 0 &&
+      column.every((part) => typeof part === "string" && part.length > 0)
+    ? column
+    : null;
+}
+
+function readLevelNumber(value: unknown): number | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  return typeof value.level === "number" && Number.isInteger(value.level)
+    ? value.level
+    : null;
+}
+
+function formatFieldLeafName(fieldName: string): string {
+  return fieldName.split(".").at(-1) ?? fieldName;
+}
+
+function pathsEqual(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length &&
+    left.every((part, index) => part === right[index]);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

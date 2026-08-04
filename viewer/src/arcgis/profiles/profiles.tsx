@@ -11,14 +11,17 @@ export interface DatasetEffectLayer {
   effect: string | null;
 }
 
-export interface DatasetMapSlotProps {
-  headerActionsElement: HTMLElement | null;
-  layer: ParquetLayer | null;
+export interface DatasetLayerPresentation {
+  featureEffect: ParquetLayer["featureEffect"];
+  renderer: ParquetLayer["renderer"];
 }
 
-export interface DatasetMapComponentContext {
-  mapElement: HTMLArcgisMapElement;
-  layer: ParquetLayer;
+export interface DatasetMapSlotProps {
+  clusterEnabled: boolean;
+  headerActionsElement: HTMLElement | null;
+  onPresentationChange(
+    presentation: Partial<DatasetLayerPresentation>,
+  ): void;
 }
 
 export type DatasetProfileCleanup = () => void;
@@ -27,9 +30,6 @@ export interface DatasetMapProfile {
   layerProperties?: Pick<ParquetLayerProperties, "popupTemplate" | "renderer">;
   mapSlotComponent?: ComponentType<DatasetMapSlotProps>;
   configureLayer?: (layer: DatasetEffectLayer) => DatasetProfileCleanup | undefined;
-  mountMapComponents?: (
-    context: DatasetMapComponentContext,
-  ) => DatasetProfileCleanup | undefined;
 }
 
 export const defaultDatasetMapProfile: DatasetMapProfile = {};

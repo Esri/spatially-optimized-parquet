@@ -16,6 +16,8 @@ import "@esri/calcite-components/components/calcite-panel";
 import "@esri/calcite-components/components/calcite-popover";
 import "@esri/calcite-components/components/calcite-segmented-control";
 import "@esri/calcite-components/components/calcite-segmented-control-item";
+import "@esri/calcite-components/components/calcite-select";
+import "@esri/calcite-components/components/calcite-option";
 import "@esri/calcite-components/components/calcite-shell";
 import "@esri/calcite-components/components/calcite-slider";
 import "@esri/calcite-components/components/calcite-switch";

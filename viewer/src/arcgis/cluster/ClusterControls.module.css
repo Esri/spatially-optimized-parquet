@@ -1,0 +1,23 @@
+.controls {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  height: 100%;
+  gap: 0.5rem;
+  margin: 0;
+  white-space: nowrap;
+  --calcite-label-margin-bottom: 0;
+}
+
+.controls calcite-select {
+  width: 9rem;
+}
+
+.error {
+  max-width: 12rem;
+  overflow: hidden;
+  color: var(--calcite-color-status-danger);
+  font-size: var(--calcite-font-size--2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

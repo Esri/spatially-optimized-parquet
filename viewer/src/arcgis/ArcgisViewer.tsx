@@ -8,6 +8,7 @@ import MapViewConstraints from "@arcgis/core/views/2d/MapViewConstraints";
 import {
   memo,
   type RefObject,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -26,8 +27,18 @@ import { formatCompactCount } from "../common/formatCompactCount";
 import { formatRatio } from "../common/formatNumber";
 import type { DatasetDetailSummary } from "../parquet/fileDetails";
 import styles from "./ArcgisViewer.module.css";
+import { ClusterControls } from "./cluster/ClusterControls";
+import {
+  deriveClusterLevels,
+  type ClusterLevel,
+} from "./cluster/clusterLevelCatalog";
+import {
+  type ClusterModeStatus,
+  useClusterMode,
+} from "./cluster/useClusterMode";
 import { FileExplorer } from "./file-explorer/FileExplorer";
 import {
+  type DatasetLayerPresentation,
   type DatasetMapProfile,
   resolveDatasetMapProfile,
 } from "./profiles/profiles";
@@ -53,22 +64,30 @@ interface ArcgisViewState {
 }
 
 interface MapPanelHeaderProps {
+  clusterEnabled: boolean;
   dataset: Dataset;
-  debugEnabled: boolean;
   detailsLayout: ResponsiveDetailsLayout;
   featureCount: number | null;
   mapElementRef: RefObject<HTMLArcgisMapElement | null>;
-  setDebugEnabled(enabled: boolean): void;
+  setClusterEnabled(enabled: boolean): void;
   setHeaderActionsElement(element: HTMLDivElement | null): void;
   viewCenter: ViewCenter | null;
 }
 
 interface MapCanvasProps {
+  clusterEnabled: boolean;
+  clusterLevels: readonly ClusterLevel[];
+  clusterStatus: ClusterModeStatus;
   dataset: Dataset;
   headerActionsElement: HTMLElement | null;
   layer: ParquetLayer | null;
   mapElementRef: RefObject<HTMLArcgisMapElement | null>;
+  onClusterLevelSelect(level: number): void;
+  onPresentationChange(
+    presentation: Partial<DatasetLayerPresentation>,
+  ): void;
   profile: DatasetMapProfile;
+  selectedClusterLevel: number | null;
 }
 
 interface ArcgisMapPanelProps {
@@ -80,16 +99,27 @@ interface ArcgisMapPanelProps {
   viewState: ArcgisViewState;
 }
 
+interface LayerPresentationState {
+  layer: ParquetLayer | null;
+  presentation: DatasetLayerPresentation;
+}
+
 const defaultCenter: [number, number] = [-98, 39];
 const defaultScale = 25_000_000;
 const detailsLayoutBreakpoint = 1024;
 
 const MapCanvas = memo(function MapCanvas({
+  clusterEnabled,
+  clusterLevels,
+  clusterStatus,
   dataset,
   headerActionsElement,
   layer,
   mapElementRef,
+  onClusterLevelSelect,
+  onPresentationChange,
   profile,
+  selectedClusterLevel,
 }: MapCanvasProps) {
   const MapSlotComponent = profile.mapSlotComponent;
   const basemap = useMemo(
@@ -117,9 +147,19 @@ const MapCanvas = memo(function MapCanvas({
     >
       {MapSlotComponent ? (
         <MapSlotComponent
-          headerActionsElement={headerActionsElement}
+          clusterEnabled={clusterEnabled}
+          headerActionsElement={clusterEnabled ? null : headerActionsElement}
           key={layer?.id ?? "empty"}
-          layer={layer}
+          onPresentationChange={onPresentationChange}
+        />
+      ) : null}
+      {clusterEnabled ? (
+        <ClusterControls
+          headerActionsElement={headerActionsElement}
+          levels={clusterLevels}
+          onLevelSelect={onClusterLevelSelect}
+          selectedLevel={selectedClusterLevel}
+          status={clusterStatus}
         />
       ) : null}
     </arcgis-map>
@@ -299,76 +339,117 @@ function ArcgisMapPanel({
   session,
   viewState,
 }: ArcgisMapPanelProps) {
-  const [debugEnabled, setDebugEnabled] = useState(false);
+  const [clusterEnabled, setClusterEnabled] = useState(false);
   const [headerActionsElement, setHeaderActionsElement] =
     useState<HTMLDivElement | null>(null);
+  const downloadFiles = session.download.files;
+  const diagnosticsFiles = useMemo(
+    () => downloadFiles.map(({ diagnostics }) => diagnostics),
+    [downloadFiles],
+  );
+  const clusterLevels = useMemo(
+    () => deriveClusterLevels(diagnosticsFiles),
+    [diagnosticsFiles],
+  );
+  const [selectedClusterLevel, setSelectedClusterLevel] =
+    useState<number | null>(null);
+  const { presentation, updatePresentation } =
+    useDatasetLayerPresentation(session.layer);
+  const selectedLevel = clusterLevels.find(
+    ({ level }) => level === selectedClusterLevel,
+  ) ?? clusterLevels.at(-1) ?? null;
+  const resolvedClusterLevel = selectedLevel?.level ?? null;
+  const clusterStatus = useClusterMode({
+    enabled: clusterEnabled,
+    files: diagnosticsFiles,
+    layer: session.layer,
+    level: selectedLevel,
+    mapElementRef,
+    normalPresentation: presentation,
+    parquetSource: session.parquetSource,
+  });
 
-  useParquetDebugLabels(session.layer, debugEnabled);
+  useEffect(() => {
+    setSelectedClusterLevel(clusterLevels.at(-1)?.level ?? null);
+  }, [session.dataset, clusterLevels]);
 
   return (
     <calcite-panel className={styles.gridMap}>
       <MapPanelHeader
+        clusterEnabled={clusterEnabled}
         dataset={dataset}
-        debugEnabled={debugEnabled}
         detailsLayout={detailsLayout}
         featureCount={session.featureCount}
         mapElementRef={mapElementRef}
-        setDebugEnabled={setDebugEnabled}
+        setClusterEnabled={setClusterEnabled}
         setHeaderActionsElement={setHeaderActionsElement}
         viewCenter={viewState.center}
       />
       <MapCanvas
+        clusterEnabled={clusterEnabled}
+        clusterLevels={clusterLevels}
+        clusterStatus={clusterStatus}
         dataset={dataset}
         headerActionsElement={headerActionsElement}
         layer={session.layer}
         mapElementRef={mapElementRef}
+        onClusterLevelSelect={setSelectedClusterLevel}
+        onPresentationChange={updatePresentation}
         profile={profile}
+        selectedClusterLevel={resolvedClusterLevel}
       />
     </calcite-panel>
   );
 }
 
-function useParquetDebugLabels(
+function useDatasetLayerPresentation(
   layer: ParquetLayer | null,
-  enabled: boolean,
-): void {
-  useEffect(() => {
-    if (!layer) {
-      return;
-    }
+): {
+  presentation: DatasetLayerPresentation;
+  updatePresentation(
+    change: Partial<DatasetLayerPresentation>,
+  ): void;
+} {
+  const [state, setState] = useState<LayerPresentationState>(() => ({
+    layer,
+    presentation: readLayerPresentation(layer),
+  }));
+  const presentation = state.layer === layer
+    ? state.presentation
+    : readLayerPresentation(layer);
+  const updatePresentation = useCallback(
+    (change: Partial<DatasetLayerPresentation>) => {
+      setState((current) => {
+        const currentPresentation = current.layer === layer
+          ? current.presentation
+          : readLayerPresentation(layer);
+        return {
+          layer,
+          presentation: { ...currentPresentation, ...change },
+        };
+      });
+    },
+    [layer],
+  );
+  return { presentation, updatePresentation };
+}
 
-    layer.labelsVisible = enabled;
-    layer.labelingInfo = enabled
-      ? [
-          {
-            minScale: 25_000,
-            labelExpressionInfo: { expression: "Text($feature.geokey)" },
-            labelPlacement: "always-horizontal",
-            symbol: {
-              type: "text",
-              color: "#ef3573",
-              haloColor: "white",
-              haloSize: 1.5,
-              font: { family: "Arial", size: 10 },
-            },
-          },
-        ]
-      : null;
-
-    return () => {
-      layer.labelsVisible = false;
-      layer.labelingInfo = null;
-    };
-  }, [enabled, layer]);
+function readLayerPresentation(
+  layer: ParquetLayer | null,
+): DatasetLayerPresentation {
+  return {
+    featureEffect: layer?.featureEffect ?? null,
+    renderer: layer?.renderer ?? null,
+  };
 }
 
 function MapPanelHeader({
+  clusterEnabled,
   dataset,
-  debugEnabled,
   detailsLayout,
   featureCount,
   mapElementRef,
-  setDebugEnabled,
+  setClusterEnabled,
   setHeaderActionsElement,
   viewCenter,
 }: MapPanelHeaderProps) {
@@ -392,6 +473,18 @@ function MapPanelHeader({
         Features
         <strong>{formatFeatureCount(featureCount)}</strong>
       </calcite-label>
+      <calcite-switch
+        className={styles.clusterSwitch}
+        slot="header-actions-start"
+        label="Cluster"
+        labelTextEnd="Cluster"
+        checked={clusterEnabled}
+        oncalciteSwitchChange={(event: Event) => {
+          setClusterEnabled(
+            (event.currentTarget as HTMLCalciteSwitchElement).checked,
+          );
+        }}
+      />
       <calcite-tooltip referenceElement="map-view-metrics">
         Current map center and feature count.
       </calcite-tooltip>
@@ -415,19 +508,6 @@ function MapPanelHeader({
           Details
         </calcite-button>
       ) : null}
-      <calcite-switch
-        className={styles.debugSwitch}
-        hidden
-        slot="header-actions-end"
-        label="Debug"
-        labelTextEnd="Debug"
-        checked={debugEnabled}
-        oncalciteSwitchChange={(event: Event) => {
-          setDebugEnabled(
-            (event.currentTarget as HTMLCalciteSwitchElement).checked,
-          );
-        }}
-      />
     </>
   );
 }

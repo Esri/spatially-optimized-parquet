@@ -1,4 +1,7 @@
 import DotDensityRenderer from "@arcgis/core/renderers/DotDensityRenderer";
+import SimpleRenderer from "@arcgis/core/renderers/SimpleRenderer";
+import FeatureEffect from "@arcgis/core/layers/support/FeatureEffect";
+import SimpleFillSymbol from "@arcgis/core/symbols/SimpleFillSymbol";
 import {
   type Dispatch,
   type SetStateAction,
@@ -6,10 +9,8 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import type {
-  DatasetMapProfile,
-  DatasetMapSlotProps,
-} from "./profiles";
+import { DatasetMapLegend } from "./DatasetMapLegend";
+import type { DatasetMapProfile, DatasetMapSlotProps } from "./profiles";
 import styles from "./CensusProfile.module.css";
 
 const colors = {
@@ -88,8 +89,9 @@ export function createCensusProfile(): DatasetMapProfile {
     },
   },
   mapSlotComponent: function CensusMapControls({
+    clusterEnabled,
     headerActionsElement,
-    layer,
+    onPresentationChange,
   }: DatasetMapSlotProps) {
     const [compactControlsButton, setCompactControlsButton] =
       useState<HTMLCalciteButtonElement | null>(null);
@@ -101,26 +103,28 @@ export function createCensusProfile(): DatasetMapProfile {
     );
 
     useEffect(() => {
-      if (!layer) {
-        return;
-      }
-
-      layer.renderer = demographicsEnabled
-        ? createDotDensityRenderer(dotValue)
-        : createBoundaryRenderer();
-      layer.featureEffect =
-        demographicsEnabled && populationThreshold > 0
-          ? {
-              filter: { where: `P005001 > ${populationThreshold}` },
-              includedEffect: "drop-shadow(2px, 2px, 12px)",
-              excludedEffect: "grayscale(80%)",
-            }
-          : null;
-    }, [demographicsEnabled, dotValue, layer, populationThreshold]);
+      onPresentationChange({
+        renderer: demographicsEnabled
+          ? createDotDensityRenderer(dotValue)
+          : createBoundaryRenderer(),
+        featureEffect: createPopulationFeatureEffect(
+          demographicsEnabled,
+          populationThreshold,
+        ),
+      });
+    }, [
+      demographicsEnabled,
+      dotValue,
+      onPresentationChange,
+      populationThreshold,
+    ]);
 
     return (
       <>
-        <arcgis-legend hidden={!demographicsEnabled} slot="bottom-left" />
+        <DatasetMapLegend
+          clusterEnabled={clusterEnabled}
+          hidden={!demographicsEnabled}
+        />
         {headerActionsElement
           ? createPortal(
               <>
@@ -292,18 +296,16 @@ function renderCensusRendererControls({
   );
 }
 
-function createBoundaryRenderer() {
-  return {
-    type: "simple" as const,
-    symbol: {
-      type: "simple-fill" as const,
+function createBoundaryRenderer(): SimpleRenderer {
+  return new SimpleRenderer({
+    symbol: new SimpleFillSymbol({
       color: "black",
       outline: {
         color: [255, 255, 255, 0.4],
         width: "1px",
       },
-    },
-  };
+    }),
+  });
 }
 
 function createDotDensityRenderer(dotValue: number): DotDensityRenderer {
@@ -314,4 +316,17 @@ function createDotDensityRenderer(dotValue: number): DotDensityRenderer {
     outline: undefined,
     attributes: demographicAttributes.map((attribute) => ({ ...attribute })),
   });
+}
+
+function createPopulationFeatureEffect(
+  demographicsEnabled: boolean,
+  populationThreshold: number,
+): FeatureEffect | null {
+  return demographicsEnabled && populationThreshold > 0
+    ? new FeatureEffect({
+        filter: { where: `P005001 > ${populationThreshold}` },
+        includedEffect: "drop-shadow(2px, 2px, 12px)",
+        excludedEffect: "grayscale(80%)",
+      })
+    : null;
 }

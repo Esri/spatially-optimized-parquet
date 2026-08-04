@@ -8,10 +8,11 @@ import type {
   ParquetNumericValue,
 } from "../parquet/fileLayout";
 import { extractGeodisplayMetadata } from "../parquet/keyValueMetadata";
-
-type ParquetFileId = number;
-type ParquetRowId = number;
-type ObjectId = number;
+import {
+  getParquetObjectId,
+  type ParquetFileId,
+  type ParquetRowId,
+} from "./parquetObjectId";
 
 interface CustomExtentLayer {
   queryFeatures(query: QueryProperties): Promise<{
@@ -29,11 +30,6 @@ interface RowGroupCandidate {
   spread: bigint;
 }
 
-const parquetRowIdBits = 32;
-const parquetFileIdBits = 16;
-const parquetRowIdRange = 2 ** parquetRowIdBits;
-const parquetFileIdRange = 2 ** parquetFileIdBits;
-
 export async function inferCustomExtent(
   layer: CustomExtentLayer,
   snapshot: ParquetDiagnosticsSnapshot,
@@ -50,21 +46,6 @@ export async function inferCustomExtent(
     returnGeometry: true,
   });
   return result.features[0]?.geometry?.extent ?? null;
-}
-
-export function getParquetFileId(objectId: number): ParquetFileId {
-  return Math.floor(objectId / parquetRowIdRange) % parquetFileIdRange;
-}
-
-export function getParquetRowId(objectId: number): ParquetRowId {
-  return objectId % parquetRowIdRange;
-}
-
-export function getParquetObjectId(
-  fileId: ParquetFileId,
-  rowId: ParquetRowId,
-): ObjectId {
-  return fileId * parquetRowIdRange + rowId;
 }
 
 function findDensestRowGroup(

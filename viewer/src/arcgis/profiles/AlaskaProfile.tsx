@@ -1,4 +1,5 @@
-import type { DatasetMapProfile } from "./profiles";
+import { DatasetMapLegend } from "./DatasetMapLegend";
+import type { DatasetMapProfile, DatasetMapSlotProps } from "./profiles";
 
 export const AlaskaProfile = {
   layerProperties: {
@@ -63,13 +64,9 @@ export const AlaskaProfile = {
       ],
     },
   },
-  mountMapComponents({ mapElement }) {
-    const legendElement = document.createElement("arcgis-legend");
-    legendElement.setAttribute("slot", "bottom-left");
-    mapElement.append(legendElement);
-
-    return () => {
-      legendElement.remove();
-    };
+  mapSlotComponent: function AlaskaMapLegend({
+    clusterEnabled,
+  }: DatasetMapSlotProps) {
+    return <DatasetMapLegend clusterEnabled={clusterEnabled} />;
   },
 } satisfies DatasetMapProfile;

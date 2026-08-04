@@ -53,8 +53,6 @@ interface LoadedDatasetSession {
   layer: ParquetLayer | null;
   layerViewWatcher?: { remove(): void };
   parquetSource: unknown | null;
-  profile: DatasetMapProfile;
-  profileComponentCleanup?: DatasetProfileCleanup;
   profileLayerCleanup?: DatasetProfileCleanup;
   rangeReadHandle?: ArcgisEventHandle;
 }
@@ -70,7 +68,7 @@ export function useArcgisDatasetSession({
 }: ArcgisDatasetSessionOptions): ArcgisDatasetSessionResult {
   const initialSessionRef = useRef<LoadedDatasetSession | null>(null);
   if (!initialSessionRef.current) {
-    initialSessionRef.current = createEmptyDatasetSession(dataset, profile);
+    initialSessionRef.current = createEmptyDatasetSession(dataset);
   }
 
   const [state, dispatch] = useReducer(
@@ -134,10 +132,6 @@ export function useArcgisDatasetSession({
 
         map.add(parquetLayer);
         committedSessionRef.current = candidate;
-        candidate.profileComponentCleanup = profile.mountMapComponents?.({
-          mapElement,
-          layer: parquetLayer,
-        });
         dispatch({
           type: "request-succeeded",
           requestVersion,
@@ -191,7 +185,6 @@ export function useArcgisDatasetSession({
 
 function createEmptyDatasetSession(
   dataset: Dataset,
-  profile: DatasetMapProfile,
 ): LoadedDatasetSession {
   return {
     dataset,
@@ -200,7 +193,6 @@ function createEmptyDatasetSession(
     featureCount: null,
     layer: null,
     parquetSource: null,
-    profile,
   };
 }
 
@@ -215,7 +207,7 @@ function createDatasetCandidate(
     maxScale: dataset.maxScale,
     ...profile.layerProperties,
   });
-  const session = createEmptyDatasetSession(dataset, profile);
+  const session = createEmptyDatasetSession(dataset);
   session.layer = layer;
   session.profileLayerCleanup = hasDatasetEffectLayer(layer)
     ? profile.configureLayer?.(layer)
@@ -379,7 +371,6 @@ function disposeDatasetSession(session: LoadedDatasetSession): void {
   session.disposed = true;
   session.rangeReadHandle?.remove();
   session.layerViewWatcher?.remove();
-  session.profileComponentCleanup?.();
   session.profileLayerCleanup?.();
   session.download.dispose();
   session.layer?.destroy();

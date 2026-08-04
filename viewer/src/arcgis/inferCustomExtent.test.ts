@@ -9,6 +9,8 @@ import {
   getParquetFileId,
   getParquetObjectId,
   getParquetRowId,
+} from "./parquetObjectId";
+import {
   inferCustomExtent,
 } from "./inferCustomExtent";
 

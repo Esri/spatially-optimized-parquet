@@ -1,9 +1,8 @@
+import SimpleRenderer from "@arcgis/core/renderers/SimpleRenderer";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type {
-  DatasetMapProfile,
-  DatasetMapSlotProps,
-} from "./profiles";
+import { DatasetMapLegend } from "./DatasetMapLegend";
+import type { DatasetMapProfile, DatasetMapSlotProps } from "./profiles";
 import styles from "./FranceProfile.module.css";
 
 const minimumConstructionYear = 1800;
@@ -56,8 +55,9 @@ export function createFranceProfile(): DatasetMapProfile {
     },
   },
   mapSlotComponent: function FranceMapControls({
+    clusterEnabled,
     headerActionsElement,
-    layer,
+    onPresentationChange,
   }: DatasetMapSlotProps) {
     const [constructionYear, setConstructionYear] = useState(
       initialConstructionYear,
@@ -66,12 +66,10 @@ export function createFranceProfile(): DatasetMapProfile {
     const animationFrameRef = useRef<number | null>(null);
 
     useEffect(() => {
-      if (!layer) {
-        return;
-      }
-
-      layer.renderer = createConstructionYearRenderer(constructionYear);
-    }, [constructionYear, layer]);
+      onPresentationChange({
+        renderer: createConstructionYearRenderer(constructionYear),
+      });
+    }, [constructionYear, onPresentationChange]);
 
     useEffect(() => {
       if (!playing) {
@@ -103,7 +101,7 @@ export function createFranceProfile(): DatasetMapProfile {
 
     return (
       <>
-        <arcgis-legend slot="bottom-left" />
+        <DatasetMapLegend clusterEnabled={clusterEnabled} />
         {headerActionsElement
           ? createPortal(
               <div className={styles.franceMapHeaderControls}>
@@ -149,8 +147,7 @@ export function createFranceProfile(): DatasetMapProfile {
 }
 
 function createConstructionYearRenderer(year: number) {
-  return {
-    type: "simple" as const,
+  return new SimpleRenderer({
     symbol: {
       type: "simple-fill" as const,
       color: [100, 116, 139, 0.22],
@@ -189,5 +186,5 @@ function createConstructionYearRenderer(year: number) {
         ],
       },
     ],
-  };
+  });
 }
