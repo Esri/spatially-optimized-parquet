@@ -11,12 +11,14 @@ export interface DatasetSelectionOption {
 
 interface DatasetSelectionMenuProps {
   activeLabel: string;
+  activeOptionId: string;
   onSelect(optionId: string): void;
   options: readonly DatasetSelectionOption[];
 }
 
 export function DatasetSelectionMenu({
   activeLabel,
+  activeOptionId,
   onSelect,
   options,
 }: DatasetSelectionMenuProps) {
@@ -58,7 +60,12 @@ export function DatasetSelectionMenu({
             {options.map((option) => (
               <div className={styles.datasetOption} key={option.id} role="none">
                 <button
-                  className={styles.datasetOptionSelect}
+                  className={[
+                    styles.datasetOptionSelect,
+                    option.id === activeOptionId
+                      ? styles.datasetOptionSelected
+                      : null,
+                  ].filter(Boolean).join(" ")}
                   onClick={() => selectDataset(option.id)}
                   role="menuitem"
                   type="button"

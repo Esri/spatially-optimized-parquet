@@ -80,8 +80,8 @@ export function DatasetSelectionPanel({
         (dataset) => dataset.id === selectionMode.datasetId,
       )?.name ?? activeDataset.name
     : selectionMode.type === "custom-url"
-      ? "Custom URL"
-      : "Parquet Feature Layer Portal Item";
+      ? "Custom"
+      : "Portal Item";
   const selectedPreset = selectionMode.type === "preset"
     ? presetDatasets.find(
         (dataset) => dataset.id === selectionMode.datasetId,
@@ -147,6 +147,7 @@ export function DatasetSelectionPanel({
       <div className={styles.datasetSelectionMain}>
         <DatasetSelectionMenu
           activeLabel={activeLabel}
+          activeOptionId={getSelectionModeId(selectionMode)}
           onSelect={selectOption}
           options={options}
         />
@@ -299,14 +300,25 @@ function createSelectionOptions(
 
   return includeCustomOptions
     ? [
+        ...presetOptions,
+        {
+          id: customUrlOptionId,
+          name: "Custom",
+          source: "Load a Parquet file from a custom URL",
+        },
         {
           id: portalItemOptionId,
-          name: "Parquet Feature Layer Portal Item",
+          name: "Portal Item",
+          source: "Load a Parquet Feature Layer portal item",
         },
-        { id: customUrlOptionId, name: "Custom URL" },
-        ...presetOptions,
       ]
     : presetOptions;
+}
+
+function getSelectionModeId(selectionMode: DatasetSelectionMode): string {
+  return selectionMode.type === "preset"
+    ? selectionMode.datasetId
+    : selectionMode.type;
 }
 
 function LabeledInput({

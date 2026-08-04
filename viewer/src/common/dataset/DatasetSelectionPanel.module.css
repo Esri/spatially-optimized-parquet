@@ -98,6 +98,12 @@
   cursor: not-allowed;
 }
 
+.datasetOptionSelected,
+.datasetOptionSelected .datasetOptionMetadata,
+.datasetOptionSelected .datasetOptionSource {
+  color: var(--calcite-color-brand);
+}
+
 .datasetOptionName {
   font-size: var(--calcite-font-size-0);
   font-weight: var(--calcite-font-weight-bold);
