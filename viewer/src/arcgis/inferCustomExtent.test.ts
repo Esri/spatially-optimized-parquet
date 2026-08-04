@@ -13,7 +13,7 @@ import {
 } from "./inferCustomExtent";
 
 describe("inferCustomExtent", () => {
-  it("queries the first row from the row group with the narrowest XZ spread", async () => {
+  it("queries the middle row from the row group with the narrowest XZ spread", async () => {
     const extent = {} as Extent;
     const queryFeatures = vi.fn().mockResolvedValue({
       features: [{ geometry: { extent } }],
@@ -34,7 +34,7 @@ describe("inferCustomExtent", () => {
       inferCustomExtent({ queryFeatures }, snapshot),
     ).resolves.toBe(extent);
     expect(queryFeatures).toHaveBeenCalledWith({
-      objectIds: [getParquetObjectId(3, 20)],
+      objectIds: [getParquetObjectId(3, 25)],
       outFields: [],
       returnGeometry: true,
     });

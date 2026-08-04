@@ -88,7 +88,7 @@ function findDensestRowGroup(
       ) {
         selectedCandidate = {
           fileId: file.fileId,
-          rowId: rowGroup.rowStart,
+          rowId: rowGroup.rowStart + Math.floor(rowGroup.rowCount / 2),
           spread,
         };
       }

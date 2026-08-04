@@ -116,13 +116,22 @@ export function useArcgisDatasetSession({
           return;
         }
 
+        const previousSession = committedSessionRef.current;
+        map.layers.removeAll();
+        disposeDatasetSession(previousSession);
         const diagnosticsReady = attachDatasetDiagnostics(
           candidate,
           publishCandidate,
         );
-        const previousSession = committedSessionRef.current;
-        map.layers.removeAll();
-        disposeDatasetSession(previousSession);
+        const diagnostics = candidate.dataset.kind === "preset"
+          ? null
+          : await diagnosticsReady;
+        await navigateToDataset(candidate, mapElement, diagnostics);
+        if (cancelled || requestVersion !== requestVersionRef.current) {
+          disposeDatasetSession(candidate);
+          return;
+        }
+
         map.add(parquetLayer);
         committedSessionRef.current = candidate;
         candidate.profileComponentCleanup = profile.mountMapComponents?.({
@@ -136,13 +145,6 @@ export function useArcgisDatasetSession({
         });
 
         void initializeLayerView(candidate, mapElement, publishCandidate);
-        if (candidate.dataset.kind === "preset") {
-          void navigateToDataset(candidate, mapElement);
-        } else {
-          void diagnosticsReady.then((snapshot) => {
-            void navigateToDataset(candidate, mapElement, snapshot);
-          });
-        }
       } catch (error) {
         disposeDatasetSession(candidate);
         if (cancelled || requestVersion !== requestVersionRef.current) {
@@ -339,16 +341,24 @@ async function navigateToDataset(
     return;
   }
 
-  if (session.dataset.kind === "preset") {
-    mapElement.center = session.dataset.center ?? defaultCenter;
-    mapElement.scale = session.dataset.scale ?? defaultScale;
-    return;
-  }
-
   try {
+    if (session.dataset.kind === "preset") {
+      await mapElement.view.goTo(
+        {
+          center: session.dataset.center ?? defaultCenter,
+          scale: session.dataset.scale ?? defaultScale,
+        },
+        { animate: false },
+      );
+      return;
+    }
+
     const inferredExtent = session.layer && diagnostics
       ? await inferCustomExtent(session.layer, diagnostics)
       : null;
+    if (session.disposed) {
+      return;
+    }
     const navigationExtent = inferredExtent ?? session.layer?.fullExtent;
     if (!navigationExtent) {
       return;
