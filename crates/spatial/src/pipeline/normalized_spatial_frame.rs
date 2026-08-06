@@ -68,7 +68,7 @@ impl NormalizedSpatialFrame {
       dataframe
         .with_column(
           COVERING_BBOX_COLUMN,
-          geometry_bbox_expr(&source.geometry.column, source.geometry_type),
+          geometry_bbox_expr(&source.geometry.column, source.geometry_family),
         )
         .map_err(|source| PipelineError::DataFusion {
           operation: "compute GeoParquet covering column",

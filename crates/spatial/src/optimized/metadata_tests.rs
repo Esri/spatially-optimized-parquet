@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use ::parquet::file::metadata::KeyValue;
 use serde_json::{Value, json};
 
-use crate::geometry::{Extent2D, GeometryKind, GeometryType};
+use crate::geometry::{Extent2D, GeometryFamily, GeometryKind};
 use crate::geoparquet::SpatialReference;
 use crate::geoparquet::{
   GeoMetadata, GeoMetadataInput, LodEncoding, LodLevel, LodMetadata, LodTransform,
@@ -282,7 +282,7 @@ fn xz_geodisplay_metadata_serializes_multiscale_clustering() {
       Some(ClusteringIndexXZInput {
         code: ColumnPath::nested("geodisplay", "xzCode"),
         encoding: GeodisplayEncoding::EsriPbf,
-        geometry_type: GeometryType::Polygon,
+        geometry_type: GeometryFamily::Polygon,
         full_extent: Extent2D {
           xmin: -10.0,
           ymin: -5.0,
@@ -344,7 +344,7 @@ fn xz_geodisplay_metadata_serializes_multiscale_clustering() {
   match serde_json::from_value::<GeodisplayMetadata>(values["geodisplay"].clone()).unwrap() {
     GeodisplayMetadata::Xz { index } => {
       assert_eq!(index.encoding, GeodisplayEncoding::EsriPbf);
-      assert_eq!(index.geometry_type, GeometryType::Polygon);
+      assert_eq!(index.geometry_type, GeometryFamily::Polygon);
     }
     GeodisplayMetadata::Z { .. } => panic!("XZ metadata decoded as Z metadata"),
   }
@@ -354,7 +354,14 @@ fn xz_geodisplay_metadata_serializes_multiscale_clustering() {
 fn geodisplay_metadata_serializes_closed_vocabulary_values() {
   for (encoding, serialized) in [
     (GeodisplayEncoding::EsriPbf, "esriPBF"),
-    (GeodisplayEncoding::QuantizedNative, "quantizedNative"),
+    (GeodisplayEncoding::WkbQuantized, "wkbQuantized"),
+    (GeodisplayEncoding::Wkb, "wkb"),
+    (GeodisplayEncoding::NativeQuantized, "nativeQuantized"),
+    (
+      GeodisplayEncoding::NativeQuantizedFloat,
+      "nativeQuantizedFloat",
+    ),
+    (GeodisplayEncoding::Native, "native"),
   ] {
     assert_eq!(serde_json::to_value(encoding).unwrap(), json!(serialized));
     assert_eq!(
@@ -364,17 +371,17 @@ fn geodisplay_metadata_serializes_closed_vocabulary_values() {
   }
 
   for (geometry_type, serialized) in [
-    (GeometryType::Point, "point"),
-    (GeometryType::MultiPoint, "multipoint"),
-    (GeometryType::Polyline, "polyline"),
-    (GeometryType::Polygon, "polygon"),
+    (GeometryFamily::Point, "point"),
+    (GeometryFamily::MultiPoint, "multipoint"),
+    (GeometryFamily::Polyline, "polyline"),
+    (GeometryFamily::Polygon, "polygon"),
   ] {
     assert_eq!(
       serde_json::to_value(geometry_type).unwrap(),
       json!(serialized)
     );
     assert_eq!(
-      serde_json::from_value::<GeometryType>(json!(serialized)).unwrap(),
+      serde_json::from_value::<GeometryFamily>(json!(serialized)).unwrap(),
       geometry_type
     );
   }

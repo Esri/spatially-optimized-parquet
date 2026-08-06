@@ -17,8 +17,6 @@ pub(crate) use layout::OptimizedLayout;
 #[cfg(test)]
 pub(crate) use multiscale::GEOKEY_COLUMN;
 pub use multiscale::MultiscaleEncoding;
-pub(crate) use multiscale::{
-  GeometryPartRole, GeometryPartSink, validate_internal_projection_columns,
-};
+pub(crate) use multiscale::{GeometryPartRole, GeometryPartSink};
 
 pub(crate) use geometry_info::{ClusteringFamily, GeometryInfo};

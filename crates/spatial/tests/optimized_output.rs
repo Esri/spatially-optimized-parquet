@@ -58,7 +58,7 @@ fn run_optimized_native(
   input: &Path,
   output: &Path,
 ) -> Result<SpatialPipelineResult, PipelineError> {
-  run_optimized_multiscale(input, output, MultiscaleEncoding::QuantizedNative)
+  run_optimized_multiscale(input, output, MultiscaleEncoding::NativeQuantized)
 }
 
 fn run_optimized_multiscale(
@@ -1215,6 +1215,179 @@ fn optimized_output_writes_native_quantized_multiscale_geometry() {
 }
 
 #[test]
+fn optimized_output_writes_wkb_and_native_float_multiscale_geometry() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("polygons.parquet");
+  let wkb_output = temp.path().join("polygons-wkb.parquet");
+  let native_output = temp.path().join("polygons-native-float.parquet");
+  let world_wkb_output = temp.path().join("polygons-world-wkb.parquet");
+  let world_native_output = temp.path().join("polygons-world-native.parquet");
+  let schema = Arc::new(Schema::new(vec![Field::new(
+    "geometry",
+    DataType::Binary,
+    true,
+  )]));
+  let polygon = wkb_polygon(&[(1.0, 2.0), (4.0, 2.0), (4.0, 5.0), (1.0, 2.0)]);
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![Arc::new(BinaryArray::from(vec![Some(polygon.as_slice())]))],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv("geometry", &["Polygon"])],
+  );
+
+  run_optimized_multiscale(&input, &wkb_output, MultiscaleEncoding::WkbQuantized).unwrap();
+  run_optimized_multiscale(
+    &input,
+    &native_output,
+    MultiscaleEncoding::NativeQuantizedFloat,
+  )
+  .unwrap();
+  run_optimized_multiscale(&input, &world_wkb_output, MultiscaleEncoding::Wkb).unwrap();
+  run_optimized_multiscale(&input, &world_native_output, MultiscaleEncoding::Native).unwrap();
+  validate(&wkb_output).unwrap().ensure_valid().unwrap();
+  validate(&native_output).unwrap().ensure_valid().unwrap();
+  validate(&world_wkb_output).unwrap().ensure_valid().unwrap();
+  validate(&world_native_output)
+    .unwrap()
+    .ensure_valid()
+    .unwrap();
+  for output in [&native_output, &world_native_output] {
+    let parquet_metadata = reader_metadata(output);
+    let coordinate_column = parquet_metadata
+      .metadata()
+      .row_group(0)
+      .columns()
+      .iter()
+      .find(|column| {
+        column
+          .column_descr()
+          .path()
+          .string()
+          .ends_with("level_16.list.element.list.element.x")
+      })
+      .expect("native float x coordinate column");
+    let encodings = coordinate_column.encodings().collect::<Vec<_>>();
+    assert!(encodings.contains(&parquet::basic::Encoding::BYTE_STREAM_SPLIT));
+  }
+
+  let wkb_metadata = kv_map(&wkb_output);
+  let wkb_geodisplay: serde_json::Value =
+    serde_json::from_str(wkb_metadata.get("geodisplay").unwrap()).unwrap();
+  assert_eq!(wkb_geodisplay["encoding"], "wkbQuantized");
+  let wkb_dataframe = runtime()
+    .block_on(scan_parquet(wkb_output.to_str().unwrap()))
+    .unwrap();
+  let wkb_batches = runtime().block_on(wkb_dataframe.collect()).unwrap();
+  let wkb_geolod = wkb_batches[0]
+    .column_by_name("geolod")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap();
+  assert!(
+    wkb_geolod
+      .column_by_name("level_16")
+      .unwrap()
+      .as_any()
+      .downcast_ref::<BinaryArray>()
+      .is_some()
+  );
+
+  let native_metadata = kv_map(&native_output);
+  let native_geodisplay: serde_json::Value =
+    serde_json::from_str(native_metadata.get("geodisplay").unwrap()).unwrap();
+  assert_eq!(native_geodisplay["encoding"], "nativeQuantizedFloat");
+  let native_dataframe = runtime()
+    .block_on(scan_parquet(native_output.to_str().unwrap()))
+    .unwrap();
+  let native_batches = runtime().block_on(native_dataframe.collect()).unwrap();
+  let native_geolod = native_batches[0]
+    .column_by_name("geolod")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap();
+  let geometries = native_geolod
+    .column_by_name("level_16")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<ListArray>()
+    .unwrap();
+  let parts = geometries
+    .value(0)
+    .as_any()
+    .downcast_ref::<ListArray>()
+    .unwrap()
+    .clone();
+  let coordinates = parts
+    .value(0)
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap()
+    .clone();
+  let quantized_x = coordinates
+    .column_by_name("x")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<Float64Array>()
+    .unwrap()
+    .value(0);
+
+  let world_wkb_metadata = kv_map(&world_wkb_output);
+  let world_wkb_geodisplay: serde_json::Value =
+    serde_json::from_str(world_wkb_metadata.get("geodisplay").unwrap()).unwrap();
+  assert_eq!(world_wkb_geodisplay["encoding"], "wkb");
+  let world_native_metadata = kv_map(&world_native_output);
+  let world_native_geodisplay: serde_json::Value =
+    serde_json::from_str(world_native_metadata.get("geodisplay").unwrap()).unwrap();
+  assert_eq!(world_native_geodisplay["encoding"], "native");
+  let world_native_dataframe = runtime()
+    .block_on(scan_parquet(world_native_output.to_str().unwrap()))
+    .unwrap();
+  let world_native_batches = runtime()
+    .block_on(world_native_dataframe.collect())
+    .unwrap();
+  let world_native_geolod = world_native_batches[0]
+    .column_by_name("geolod")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap();
+  let world_geometries = world_native_geolod
+    .column_by_name("level_16")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<ListArray>()
+    .unwrap();
+  let world_parts = world_geometries
+    .value(0)
+    .as_any()
+    .downcast_ref::<ListArray>()
+    .unwrap()
+    .clone();
+  let world_coordinates = world_parts
+    .value(0)
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap()
+    .clone();
+  let world_x = world_coordinates
+    .column_by_name("x")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<Float64Array>()
+    .unwrap()
+    .value(0);
+  assert_ne!(quantized_x, world_x);
+}
+
+#[test]
 fn optimized_native_output_writes_missing_values_as_nullable_components_zm() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("polygon-missing-zm.parquet");
@@ -1346,14 +1519,16 @@ fn optimized_output_writes_covering_bbox_for_complex_geometry() {
 }
 
 #[test]
-fn optimized_output_rejects_existing_geolod_column() {
+fn optimized_output_replaces_existing_generated_columns() {
   let temp = TempDir::new().unwrap();
-  let input = temp.path().join("polygons-with-geolod.parquet");
+  let input = temp.path().join("polygons-with-generated-columns.parquet");
   let output = temp.path().join("polygons-regenerated.parquet");
   let schema = Arc::new(Schema::new(vec![
     Field::new("id", DataType::Int32, false),
     Field::new("geometry", DataType::Binary, true),
+    Field::new("geokey", DataType::Utf8, true),
     Field::new("geolod", DataType::Utf8, true),
+    Field::new("geodisplay", DataType::Utf8, true),
   ]));
   let polygon = wkb_polygon(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 0.0)]);
   let batch = RecordBatch::try_new(
@@ -1361,7 +1536,9 @@ fn optimized_output_rejects_existing_geolod_column() {
     vec![
       Arc::new(Int32Array::from(vec![1])),
       Arc::new(BinaryArray::from(vec![Some(polygon.as_slice())])),
+      Arc::new(StringArray::from(vec![Some("stale-geokey")])),
       Arc::new(StringArray::from(vec![Some("stale-geolod")])),
+      Arc::new(StringArray::from(vec![Some("stale-geodisplay")])),
     ],
   )
   .unwrap();
@@ -1372,7 +1549,7 @@ fn optimized_output_rejects_existing_geolod_column() {
     parquet::basic::Compression::SNAPPY,
     &[geoparquet_kv("geometry", &["Polygon"])],
   );
-  let error = run_optimized(
+  run_optimized(
     &input,
     &output,
     RowRange::default(),
@@ -1381,11 +1558,30 @@ fn optimized_output_rejects_existing_geolod_column() {
     None,
     false,
   )
-  .unwrap_err();
+  .unwrap();
+
+  let dataframe = runtime()
+    .block_on(scan_parquet(output.to_str().unwrap()))
+    .unwrap();
+  let output_schema = dataframe.schema();
+  assert_eq!(
+    output_schema
+      .field_with_unqualified_name("geokey")
+      .unwrap()
+      .data_type(),
+    &DataType::UInt64
+  );
+  assert!(matches!(
+    output_schema
+      .field_with_unqualified_name("geolod")
+      .unwrap()
+      .data_type(),
+    DataType::Struct(_)
+  ));
   assert!(
-    error
-      .to_string()
-      .contains("input column 'geolod' conflicts with an internal projection column")
+    output_schema
+      .field_with_unqualified_name("geodisplay")
+      .is_err()
   );
 }
 

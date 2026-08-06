@@ -783,7 +783,7 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
         assert!(
           error
             .to_string()
-            .contains("unsupported geometry kind: GeometryCollection")
+            .contains("unsupported geometry type: GeometryCollection")
         );
         continue;
       }

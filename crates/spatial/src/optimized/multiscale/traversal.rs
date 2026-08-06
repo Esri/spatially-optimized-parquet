@@ -1,8 +1,8 @@
 //! Traverses supported geometry structures through a shared part sink.
 
 use crate::geometry::{
-  CoordinateDimensions, Extent2D, GeometryError, GeometryKind, GeometryType, PolygonRingOrder,
-  WkbCoordinate, WkbHeader, visit_wkb_geometry as decode_wkb_geometry,
+  CoordinateDimensions, Extent2D, GeometryError, GeometryFamily as GeometryType, GeometryKind,
+  PolygonRingOrder, WkbCoordinate, WkbHeader, visit_wkb_geometry as decode_wkb_geometry,
 };
 
 pub(crate) use crate::geometry::{WkbPartRole as GeometryPartRole, WkbSink as GeometryPartSink};

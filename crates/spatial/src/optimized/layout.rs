@@ -31,18 +31,18 @@ impl OptimizedLayout {
         "resolve optimized layout: XZ cluster depth must be between 1 and 31".to_string(),
       ));
     }
-    let levels = match geometry.ty {
-      crate::geometry::GeometryType::Polyline | crate::geometry::GeometryType::Polygon => {
-        MultiscaleLevel::create_all(output_options.output_wkid, geometry.ty)
+    let levels = match geometry.family {
+      crate::geometry::GeometryFamily::Polyline | crate::geometry::GeometryFamily::Polygon => {
+        MultiscaleLevel::create_all(output_options.output_wkid, geometry.family)
       }
-      crate::geometry::GeometryType::Point | crate::geometry::GeometryType::MultiPoint => {
+      crate::geometry::GeometryFamily::Point | crate::geometry::GeometryFamily::MultiPoint => {
         Vec::new()
       }
     };
     if output_options.write_extensions
       && matches!(
-        geometry.ty,
-        crate::geometry::GeometryType::Polyline | crate::geometry::GeometryType::Polygon
+        geometry.family,
+        crate::geometry::GeometryFamily::Polyline | crate::geometry::GeometryFamily::Polygon
       )
       && output_options.multiscale_encoding != MultiscaleEncoding::Pbf
     {
@@ -84,8 +84,8 @@ impl OptimizedLayout {
   /// Return whether this layout writes multiscale level-of-detail columns.
   pub(crate) fn writes_lod_columns(&self) -> bool {
     matches!(
-      self.geometry.ty,
-      crate::geometry::GeometryType::Polyline | crate::geometry::GeometryType::Polygon
+      self.geometry.family,
+      crate::geometry::GeometryFamily::Polyline | crate::geometry::GeometryFamily::Polygon
     )
   }
 
@@ -108,7 +108,17 @@ impl OptimizedLayout {
   pub(crate) fn delta_binary_packed_column_paths(&self) -> Vec<String> {
     self.multiscale_encoding.delta_binary_packed_column_paths(
       &self.levels,
-      self.geometry.ty,
+      self.geometry.family,
+      self.geometry.has_z,
+      self.geometry.has_m,
+    )
+  }
+
+  /// Return floating-point payload columns that require byte-stream-split encoding.
+  pub(crate) fn byte_stream_split_column_paths(&self) -> Vec<String> {
+    self.multiscale_encoding.byte_stream_split_column_paths(
+      &self.levels,
+      self.geometry.family,
       self.geometry.has_z,
       self.geometry.has_m,
     )

@@ -122,6 +122,24 @@ impl WriterOptions {
     self
   }
 
+  /// Apply byte-stream splitting to selected floating-point coordinate leaves.
+  pub(crate) fn with_byte_stream_split_columns(
+    mut self,
+    columns: impl IntoIterator<Item = String>,
+  ) -> Self {
+    for column in columns {
+      self.options.column_specific_options.insert(
+        column,
+        ParquetColumnOptions {
+          encoding: Some("byte_stream_split".to_string()),
+          dictionary_enabled: Some(false),
+          ..Default::default()
+        },
+      );
+    }
+    self
+  }
+
   fn parse_compression(compression: &str) -> Result<Compression, OutputError> {
     let codec = match compression.to_ascii_lowercase().as_str() {
       "snappy" => Compression::SNAPPY,
@@ -371,10 +389,11 @@ mod tests {
   }
 
   #[test]
-  fn dictionary_encoding_is_limited_to_string_columns() {
+  fn configures_encodings_by_physical_column_type() {
     let schema = Schema::new(vec![
       Field::new("name", DataType::Utf8, true),
       Field::new("geokey", DataType::UInt64, false),
+      Field::new("coordinate", DataType::Float64, false),
       Field::new("geometry", DataType::Binary, true),
       Field::new(
         "properties",
@@ -385,6 +404,7 @@ mod tests {
     let options = WriterOptions::new("snappy", &[])
       .unwrap()
       .with_delta_binary_packed_columns(["geokey".to_string()])
+      .with_byte_stream_split_columns(["coordinate".to_string()])
       .into_table_options(&schema)
       .unwrap();
 
@@ -405,6 +425,16 @@ mod tests {
     );
     assert_eq!(
       options.column_specific_options["geokey"].dictionary_enabled,
+      Some(false)
+    );
+    assert_eq!(
+      options.column_specific_options["coordinate"]
+        .encoding
+        .as_deref(),
+      Some("byte_stream_split")
+    );
+    assert_eq!(
+      options.column_specific_options["coordinate"].dictionary_enabled,
       Some(false)
     );
     assert!(!options.column_specific_options.contains_key("geometry"));

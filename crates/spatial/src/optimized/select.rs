@@ -5,8 +5,8 @@ use datafusion::logical_expr::expr_fn::ident;
 
 use crate::geoparquet::COVERING_BBOX_COLUMN;
 use crate::optimized::multiscale::{
-  GEOKEY_COLUMN, GEOLOD_COLUMN, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_COLUMN,
-  SOP_GEOMETRY_COLUMN,
+  GEODISPLAY_COLUMN, GEOKEY_COLUMN, GEOLOD_COLUMN, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN,
+  POINT_Z_COLUMN, SOP_GEOMETRY_COLUMN,
 };
 use crate::pipeline::PipelineWarnings;
 
@@ -49,7 +49,7 @@ impl OptimizedLayout {
         if self.writes_lod_columns() {
           expressions.push(GeolodUdf::expression(
             &self.geometry().geometry.column,
-            self.geometry().ty,
+            self.geometry().family,
             self.geometry().has_z,
             self.geometry().has_m,
             self.levels(),
@@ -65,20 +65,18 @@ impl OptimizedLayout {
 
 impl ClusteringFamily {
   fn is_generated_output_column(self, name: &str) -> bool {
+    if matches!(name, GEOKEY_COLUMN | GEOLOD_COLUMN | GEODISPLAY_COLUMN) {
+      return true;
+    }
+
     match self {
       Self::PointGeometry => {
         matches!(
           name,
-          GEOKEY_COLUMN
-            | SOP_GEOMETRY_COLUMN
-            | GEOLOD_COLUMN
-            | POINT_X_COLUMN
-            | POINT_Y_COLUMN
-            | POINT_Z_COLUMN
-            | POINT_M_COLUMN
+          SOP_GEOMETRY_COLUMN | POINT_X_COLUMN | POINT_Y_COLUMN | POINT_Z_COLUMN | POINT_M_COLUMN
         )
       }
-      Self::ComplexGeometry => matches!(name, GEOKEY_COLUMN | GEOLOD_COLUMN),
+      Self::ComplexGeometry => false,
     }
   }
 }

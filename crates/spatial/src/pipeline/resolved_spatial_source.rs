@@ -2,7 +2,7 @@
 
 use arrow_schema::Schema;
 
-use crate::geometry::{Extent2D, GeometryColumn, GeometryEncoding, GeometryKind, GeometryType};
+use crate::geometry::{Extent2D, GeometryColumn, GeometryEncoding, GeometryFamily, GeometryKind};
 use crate::geoparquet::SpatialReference;
 use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata};
 use crate::pipeline::{PipelineError, geometry_scan::scan_geometry_metadata};
@@ -18,8 +18,8 @@ pub(crate) struct ResolvedSpatialSource {
   pub(crate) source_extent: Extent2D,
   /// Provides the source coordinate reference system.
   pub(crate) source_spatial_reference: SpatialReference,
-  /// Defines the normalized geometry type used by plain output mechanics.
-  pub(crate) geometry_type: GeometryType,
+  /// Defines the normalized geometry family used by output mechanics.
+  pub(crate) geometry_family: GeometryFamily,
   /// Indicates whether source metadata declares Z values.
   pub(crate) has_z: bool,
   /// Indicates whether source metadata declares M values.
@@ -104,7 +104,7 @@ pub(crate) async fn resolve_source(
       })?,
     )
   };
-  let geometry_type = GeometryType::from_kinds(&geometry_types)?;
+  let geometry_family = GeometryFamily::from_types(&geometry_types)?;
   let covering = source_geometry.and_then(|source_geometry| source_geometry.covering.clone());
   let has_z = source_geometry.is_some_and(|source_geometry| source_geometry.has_z);
   let has_m = source_geometry.is_some_and(|source_geometry| source_geometry.has_m);
@@ -126,7 +126,7 @@ pub(crate) async fn resolve_source(
     geometry_types,
     source_extent,
     source_spatial_reference,
-    geometry_type,
+    geometry_family,
     has_z,
     has_m,
     source_metadata,

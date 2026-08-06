@@ -225,15 +225,31 @@ fn partitioned_output_writes_sorted_range_partitions() {
 
 #[test]
 fn partitioned_output_writes_native_multiscale_coordinate_leaves() {
-  assert_partitioned_multiscale_integer_leaves(
-    MultiscaleEncoding::QuantizedNative,
+  assert_partitioned_multiscale_coordinate_leaves(
+    MultiscaleEncoding::NativeQuantized,
     &["level_16.list.element.list.element.x"],
+    parquet::basic::Encoding::DELTA_BINARY_PACKED,
   );
 }
 
-fn assert_partitioned_multiscale_integer_leaves(
+#[test]
+fn partitioned_output_writes_native_float_multiscale_coordinate_leaves() {
+  for encoding in [
+    MultiscaleEncoding::NativeQuantizedFloat,
+    MultiscaleEncoding::Native,
+  ] {
+    assert_partitioned_multiscale_coordinate_leaves(
+      encoding,
+      &["level_16.list.element.list.element.x"],
+      parquet::basic::Encoding::BYTE_STREAM_SPLIT,
+    );
+  }
+}
+
+fn assert_partitioned_multiscale_coordinate_leaves(
   encoding: MultiscaleEncoding,
   leaf_suffixes: &[&str],
+  expected_encoding: parquet::basic::Encoding,
 ) {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("polygons.parquet");
@@ -292,15 +308,15 @@ fn assert_partitioned_multiscale_integer_leaves(
   for file in files {
     let parquet_metadata = reader_metadata(&file);
     for leaf_suffix in leaf_suffixes {
-      let integer_column = parquet_metadata
+      let coordinate_column = parquet_metadata
         .metadata()
         .row_group(0)
         .columns()
         .iter()
         .find(|column| column.column_descr().path().string().ends_with(leaf_suffix))
-        .unwrap_or_else(|| panic!("missing integer column ending in {leaf_suffix}"));
-      let encodings = integer_column.encodings().collect::<Vec<_>>();
-      assert!(encodings.contains(&parquet::basic::Encoding::DELTA_BINARY_PACKED));
+        .unwrap_or_else(|| panic!("missing coordinate column ending in {leaf_suffix}"));
+      let encodings = coordinate_column.encodings().collect::<Vec<_>>();
+      assert!(encodings.contains(&expected_encoding));
       assert!(!encodings.contains(&parquet::basic::Encoding::RLE_DICTIONARY));
       assert!(!encodings.contains(&parquet::basic::Encoding::PLAIN_DICTIONARY));
     }

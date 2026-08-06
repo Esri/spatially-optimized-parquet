@@ -1,6 +1,6 @@
 //! Owns geometry classification and validation for spatially optimized output.
 
-use crate::geometry::{GeometryColumn, GeometryType};
+use crate::geometry::{GeometryColumn, GeometryFamily};
 use crate::pipeline::ResolvedSpatialSource;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,8 +17,8 @@ pub(crate) enum ClusteringFamily {
 pub(crate) struct GeometryInfo {
   /// Identifies the selected source geometry column.
   pub(crate) geometry: GeometryColumn,
-  /// Defines the geometry type used by metadata and encoders.
-  pub(crate) ty: GeometryType,
+  /// Defines the geometry family used by metadata and encoders.
+  pub(crate) family: GeometryFamily,
   /// Defines the clustering strategy family.
   pub(crate) clustering_family: ClusteringFamily,
   /// Indicates whether source metadata declares Z values.
@@ -30,11 +30,11 @@ pub(crate) struct GeometryInfo {
 impl GeometryInfo {
   /// Resolve optimized geometry from normalized source geometry facts.
   pub(crate) fn resolve(source: &ResolvedSpatialSource) -> Self {
-    let ty = source.geometry_type;
+    let family = source.geometry_family;
     Self {
       geometry: source.geometry.clone(),
-      ty,
-      clustering_family: ClusteringFamily::from_geometry_type(ty),
+      family,
+      clustering_family: ClusteringFamily::from_geometry_family(family),
       has_z: source.has_z,
       has_m: source.has_m,
     }
@@ -42,11 +42,11 @@ impl GeometryInfo {
 }
 
 impl ClusteringFamily {
-  /// Resolve the clustering strategy from one canonical geometry type.
-  fn from_geometry_type(geometry_type: GeometryType) -> Self {
-    match geometry_type {
-      GeometryType::Point => Self::PointGeometry,
-      GeometryType::MultiPoint | GeometryType::Polyline | GeometryType::Polygon => {
+  /// Resolve the clustering strategy from one normalized geometry family.
+  fn from_geometry_family(geometry_family: GeometryFamily) -> Self {
+    match geometry_family {
+      GeometryFamily::Point => Self::PointGeometry,
+      GeometryFamily::MultiPoint | GeometryFamily::Polyline | GeometryFamily::Polygon => {
         Self::ComplexGeometry
       }
     }
@@ -56,20 +56,20 @@ impl ClusteringFamily {
 #[cfg(test)]
 mod tests {
   use super::ClusteringFamily;
-  use crate::geometry::GeometryType;
+  use crate::geometry::GeometryFamily;
 
   #[test]
   fn resolves_canonical_geometry_types_into_clustering_families() {
     assert_eq!(
-      ClusteringFamily::from_geometry_type(GeometryType::Polygon),
+      ClusteringFamily::from_geometry_family(GeometryFamily::Polygon),
       ClusteringFamily::ComplexGeometry
     );
     assert_eq!(
-      ClusteringFamily::from_geometry_type(GeometryType::Point),
+      ClusteringFamily::from_geometry_family(GeometryFamily::Point),
       ClusteringFamily::PointGeometry
     );
     assert_eq!(
-      ClusteringFamily::from_geometry_type(GeometryType::MultiPoint),
+      ClusteringFamily::from_geometry_family(GeometryFamily::MultiPoint),
       ClusteringFamily::ComplexGeometry
     );
   }

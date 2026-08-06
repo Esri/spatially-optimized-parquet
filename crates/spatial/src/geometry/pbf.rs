@@ -115,8 +115,10 @@ mod tests {
   #[test]
   fn encodes_quantized_geometry() {
     let geometry = QuantizedGeometry {
+      kind: crate::geometry::GeometryKind::LineString,
       coordinates: vec![0, 0, 1, 0, 1, 1, 0, 0],
       lengths: vec![4],
+      polygon_ring_counts: Vec::new(),
       validity: Default::default(),
       has_z: false,
       has_m: false,

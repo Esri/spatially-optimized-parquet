@@ -46,14 +46,22 @@ enum Command {
 enum MultiscaleEncodingValue {
   #[default]
   Pbf,
-  QuantizedNative,
+  WkbQuantized,
+  Wkb,
+  NativeQuantized,
+  NativeQuantizedFloat,
+  Native,
 }
 
 impl From<MultiscaleEncodingValue> for MultiscaleEncoding {
   fn from(value: MultiscaleEncodingValue) -> Self {
     match value {
       MultiscaleEncodingValue::Pbf => Self::Pbf,
-      MultiscaleEncodingValue::QuantizedNative => Self::QuantizedNative,
+      MultiscaleEncodingValue::WkbQuantized => Self::WkbQuantized,
+      MultiscaleEncodingValue::Wkb => Self::Wkb,
+      MultiscaleEncodingValue::NativeQuantized => Self::NativeQuantized,
+      MultiscaleEncodingValue::NativeQuantizedFloat => Self::NativeQuantizedFloat,
+      MultiscaleEncodingValue::Native => Self::Native,
     }
   }
 }
@@ -365,6 +373,33 @@ mod tests {
     };
     assert!(args.strip_z);
     assert!(args.strip_m);
+  }
+
+  #[test]
+  fn write_subcommand_accepts_all_multiscale_encodings() {
+    for encoding in [
+      "pbf",
+      "wkb-quantized",
+      "wkb",
+      "native-quantized",
+      "native-quantized-float",
+      "native",
+    ] {
+      let cli = Cli::try_parse_from([
+        "sop",
+        "write",
+        "input.parquet",
+        "--output",
+        "output.parquet",
+        "--multiscale-encoding",
+        encoding,
+      ])
+      .unwrap();
+      let Command::Write(args) = cli.command else {
+        panic!("expected write command");
+      };
+      let _: MultiscaleEncoding = args.multiscale_encoding.into();
+    }
   }
 
   #[test]

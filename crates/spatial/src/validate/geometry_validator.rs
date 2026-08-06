@@ -1,4 +1,6 @@
-use crate::geometry::{CoordinateDimensions, Extent2D, GeometryKind, GeometryType};
+use crate::geometry::{
+  CoordinateDimensions, Extent2D, GeometryFamily as GeometryType, GeometryKind,
+};
 use crate::geometry::{WkbCoordinate, WkbHeader};
 use crate::optimized::{GeometryPartRole, GeometryPartSink};
 use arrow_array::{Array, BinaryArray, BinaryViewArray, LargeBinaryArray};

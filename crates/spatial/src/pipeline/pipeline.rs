@@ -62,7 +62,7 @@ use datafusion::execution::context::SessionContext;
 use super::{PipelineError, SpatialWriteContext};
 use crate::geoparquet::SpatialReference;
 use crate::input::{InputOpenOptions, InputSource, RowRange, SourceFormat, open_input};
-use crate::optimized::{MultiscaleEncoding, OptimizedLayout, validate_internal_projection_columns};
+use crate::optimized::{MultiscaleEncoding, OptimizedLayout};
 use crate::output::{OutputMode, OutputPath, PlainWriter, partitioned, single};
 use crate::session::DataFusionSession;
 
@@ -288,7 +288,6 @@ impl Pipeline {
       output_options.overwrite,
     )?;
     let source_schema = input_source.schema()?;
-    validate_internal_projection_columns(source_schema.as_ref())?;
     let discovered_rows = input_source.total_rows()?;
     let total_input_rows = input_options.row_range.effective_rows(discovered_rows);
 

@@ -1,6 +1,6 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Identifies the concrete geometry shape represented by source metadata or WKB.
-pub(crate) enum GeometryKind {
+pub(crate) enum GeometryType {
   /// Represents one point.
   Point,
   /// Represents one line string.
@@ -18,6 +18,9 @@ pub(crate) enum GeometryKind {
   /// Represents a geometry whose concrete type cannot be established.
   Unknown,
 }
+
+/// Preserves the previous name while call sites migrate to `GeometryType`.
+pub(crate) type GeometryKind = GeometryType;
 
 #[derive(Debug, Clone, PartialEq)]
 /// Describes the selected geometry column and its source encoding.

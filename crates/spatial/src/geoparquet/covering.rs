@@ -13,7 +13,7 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::col;
 
-use crate::geometry::GeometryType;
+use crate::geometry::GeometryFamily;
 use crate::geometry::to_datafusion_error;
 use crate::optimized::{BoundsUdf, PointGeometryUdf};
 
@@ -119,10 +119,10 @@ impl ScalarUDFImpl for FeatureBboxUdf {
   }
 }
 
-pub(crate) fn geometry_bbox_expr(geometry_column: &str, geometry_type: GeometryType) -> Expr {
+pub(crate) fn geometry_bbox_expr(geometry_column: &str, geometry_family: GeometryFamily) -> Expr {
   let geometry = col(geometry_column);
-  match geometry_type {
-    GeometryType::Point => {
+  match geometry_family {
+    GeometryFamily::Point => {
       let coordinates = PointGeometryUdf::expression(geometry_column);
       let x = coordinates.clone().field("x");
       let y = coordinates.field("y");
@@ -130,7 +130,7 @@ pub(crate) fn geometry_bbox_expr(geometry_column: &str, geometry_type: GeometryT
         .call(vec![geometry, x.clone(), y.clone(), x, y])
         .alias(COVERING_BBOX_COLUMN)
     }
-    GeometryType::MultiPoint | GeometryType::Polyline | GeometryType::Polygon => {
+    GeometryFamily::MultiPoint | GeometryFamily::Polyline | GeometryFamily::Polygon => {
       let bounds = BoundsUdf::expression(geometry_column);
       FeatureBboxUdf::scalar_udf()
         .call(vec![

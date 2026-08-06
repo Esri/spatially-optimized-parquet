@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{Coord, Geometry, GeometryError};
+use super::{Coord, Geometry, GeometryError, GeometryKind};
 
 type Result<T> = std::result::Result<T, GeometryError>;
 
@@ -37,6 +37,28 @@ impl QuantizationTransform {
     }
     Ok(normalized as i64)
   }
+
+  /// Convert one integer grid coordinate back to its transformed floating-point value.
+  pub(crate) fn unquantize(&self, value: i64, axis: usize) -> f64 {
+    value as f64 * self.scale[axis] + self.translate[axis]
+  }
+}
+
+/// Selects whether floating-point multiscale storage uses grid or world coordinates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CoordinateSpace {
+  Quantized,
+  World,
+}
+
+impl CoordinateSpace {
+  /// Convert one retained integer coordinate for physical floating-point storage.
+  pub(crate) fn decode(self, value: i64, transform: &QuantizationTransform, axis: usize) -> f64 {
+    match self {
+      Self::Quantized => value as f64,
+      Self::World => transform.unquantize(value, axis),
+    }
+  }
 }
 
 const Z_VALID: u8 = 1;
@@ -67,14 +89,29 @@ impl ComponentValidity {
   }
 }
 
-#[derive(Default)]
 /// Represents one simplified geometry as absolute quantized coordinates before codec encoding.
 pub(crate) struct QuantizedGeometry {
+  pub(crate) kind: GeometryKind,
   pub(crate) coordinates: Vec<i64>,
   pub(crate) lengths: Vec<u32>,
+  pub(crate) polygon_ring_counts: Vec<u32>,
   pub(crate) validity: ComponentValidity,
   pub(crate) has_z: bool,
   pub(crate) has_m: bool,
+}
+
+impl Default for QuantizedGeometry {
+  fn default() -> Self {
+    Self {
+      kind: GeometryKind::Unknown,
+      coordinates: Vec::new(),
+      lengths: Vec::new(),
+      polygon_ring_counts: Vec::new(),
+      validity: ComponentValidity::default(),
+      has_z: false,
+      has_m: false,
+    }
+  }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -101,13 +138,17 @@ impl QuantizedGeometry {
   ) -> Result<()> {
     self.coordinates.clear();
     self.lengths.clear();
+    self.polygon_ring_counts.clear();
     self.validity.values.clear();
 
     let mut coordinate_offset = 0usize;
     let mut degenerated_coordinate = None::<Vec<i64>>;
     let mut degenerated_validity = None::<u8>;
+    let mut polygon_index = 0usize;
+    let mut polygon_part_end = input.polygon_ring_counts.first().copied().unwrap_or(0) as usize;
+    let mut retained_ring_count = 0u32;
 
-    for &length in &input.lengths {
+    for (part_index, &length) in input.lengths.iter().enumerate() {
       let point_count = length as usize;
       if point_count == 0 {
         continue;
@@ -133,8 +174,21 @@ impl QuantizedGeometry {
         self.coordinates.truncate(part_start);
       } else {
         self.lengths.push(output_length);
+        retained_ring_count += 1;
       }
       coordinate_offset += point_count;
+      if input.ty == super::GeometryType::Polygon && part_index + 1 == polygon_part_end {
+        if retained_ring_count > 0 {
+          self.polygon_ring_counts.push(retained_ring_count);
+        }
+        retained_ring_count = 0;
+        polygon_index += 1;
+        polygon_part_end += input
+          .polygon_ring_counts
+          .get(polygon_index)
+          .copied()
+          .unwrap_or(0) as usize;
+      }
     }
 
     if self.lengths.is_empty()
@@ -142,11 +196,20 @@ impl QuantizedGeometry {
     {
       self.coordinates.extend(coordinate);
       self.lengths.push(1);
+      if input.ty == super::GeometryType::Polygon {
+        self.polygon_ring_counts.push(1);
+      }
       if let Some(validity) = degenerated_validity {
         self.validity.values.push(validity);
       }
     }
 
+    self.kind = match input.ty {
+      super::GeometryType::Polygon if self.polygon_ring_counts.len() > 1 => {
+        GeometryKind::MultiPolygon
+      }
+      _ => input.ty,
+    };
     self.has_z = options.has_z;
     self.has_m = options.has_m;
     Ok(())
@@ -366,7 +429,7 @@ pub(crate) fn encode_deltas_xy(coordinates: &mut [i64], lengths: &[u32], has_z: 
 
 #[cfg(test)]
 mod tests {
-  use super::{QuantizationOptions, QuantizationTransform, QuantizedGeometry};
+  use super::{CoordinateSpace, QuantizationOptions, QuantizationTransform, QuantizedGeometry};
   use crate::geometry::{Coord, Geometry, GeometryType};
 
   fn coordinate(x: f64, y: f64, z: Option<f64>, m: Option<f64>) -> Coord {
@@ -387,7 +450,7 @@ mod tests {
   }
 
   fn polyline(coordinates: Vec<Coord>) -> Geometry {
-    Geometry::new(GeometryType::Polyline, coordinates, vec![2]).unwrap()
+    Geometry::new(GeometryType::LineString, coordinates, vec![2], Vec::new()).unwrap()
   }
 
   #[test]
@@ -398,6 +461,17 @@ mod tests {
     };
 
     assert_eq!(transform.quantize(11.0, 0).unwrap(), 2);
+  }
+
+  #[test]
+  fn selects_grid_or_world_coordinate_space() {
+    let transform = QuantizationTransform {
+      scale: [0.5, 1.0, 1.0, 1.0],
+      translate: [10.0, 0.0, 0.0, 0.0],
+    };
+
+    assert_eq!(CoordinateSpace::Quantized.decode(2, &transform, 0), 2.0);
+    assert_eq!(CoordinateSpace::World.decode(2, &transform, 0), 11.0);
   }
 
   #[test]
@@ -413,13 +487,14 @@ mod tests {
   #[test]
   fn snaps_and_merges_collinear_xy_vertices() {
     let geometry = Geometry::new(
-      GeometryType::Polyline,
+      GeometryType::LineString,
       vec![
         coordinate(0.1, 0.1, None, None),
         coordinate(1.0, 1.0, None, None),
         coordinate(2.0, 2.0, None, None),
       ],
       vec![3],
+      Vec::new(),
     )
     .unwrap();
     let mut quantized = QuantizedGeometry::default();
@@ -435,7 +510,7 @@ mod tests {
   #[test]
   fn drops_duplicate_snapped_vertices() {
     let geometry = Geometry::new(
-      GeometryType::Polyline,
+      GeometryType::LineString,
       vec![
         coordinate(0.1, 0.1, None, None),
         coordinate(0.2, 0.2, None, None),
@@ -443,6 +518,7 @@ mod tests {
         coordinate(1.0, 1.0, None, None),
       ],
       vec![4],
+      Vec::new(),
     )
     .unwrap();
     let mut quantized = QuantizedGeometry::default();
@@ -458,13 +534,14 @@ mod tests {
   #[test]
   fn retains_original_dimensional_components_after_xy_simplification() {
     let geometry = Geometry::new(
-      GeometryType::Polyline,
+      GeometryType::LineString,
       vec![
         coordinate(0.0, 0.0, Some(10.0), Some(100.0)),
         coordinate(1.0, 0.0, Some(999.0), Some(9999.0)),
         coordinate(2.0, 0.0, Some(20.0), Some(200.0)),
       ],
       vec![3],
+      Vec::new(),
     )
     .unwrap();
     let mut quantized = QuantizedGeometry::default();

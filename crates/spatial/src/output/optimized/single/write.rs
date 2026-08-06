@@ -34,6 +34,7 @@ pub(crate) async fn write(
   );
   let writer_options = WriterOptions::new(compression.unwrap_or("snappy"), &metadata)?
     .with_delta_binary_packed_columns(layout.delta_binary_packed_column_paths())
+    .with_byte_stream_split_columns(layout.byte_stream_split_column_paths())
     .with_geometry_column(&layout.geometry().geometry.column, geometry_crs);
   let output_path = output_path
     .paths()?

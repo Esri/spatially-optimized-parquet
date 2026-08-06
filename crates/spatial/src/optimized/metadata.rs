@@ -85,7 +85,7 @@ impl OptimizedLayout {
         self.writes_sop().then(|| ClusteringIndexXZInput {
           code: ColumnPath::Root(GEOKEY_COLUMN.to_string()),
           encoding: GeodisplayEncoding::from(self.multiscale_encoding()),
-          geometry_type: self.geometry().ty,
+          geometry_type: self.geometry().family,
           full_extent: context.target_extent(),
           max_level: self.cluster_depth(),
           wkid: context.reprojection().target_spatial_reference().wkid,
@@ -110,11 +110,11 @@ impl OptimizedLayout {
   }
 
   fn fallback_geometry_kind(&self) -> GeometryKind {
-    match self.geometry().ty {
-      crate::geometry::GeometryType::Point => GeometryKind::Point,
-      crate::geometry::GeometryType::MultiPoint => GeometryKind::MultiPoint,
-      crate::geometry::GeometryType::Polyline => GeometryKind::LineString,
-      crate::geometry::GeometryType::Polygon => GeometryKind::Polygon,
+    match self.geometry().family {
+      crate::geometry::GeometryFamily::Point => GeometryKind::Point,
+      crate::geometry::GeometryFamily::MultiPoint => GeometryKind::MultiPoint,
+      crate::geometry::GeometryFamily::Polyline => GeometryKind::LineString,
+      crate::geometry::GeometryFamily::Polygon => GeometryKind::Polygon,
     }
   }
 
@@ -149,7 +149,7 @@ impl OptimizedLayout {
     Some(LodMetadata {
       geometry_column: self.geometry().geometry.column.clone(),
       encoding: LodEncoding::Pbf,
-      orientation: (self.geometry().ty == crate::geometry::GeometryType::Polygon)
+      orientation: (self.geometry().family == crate::geometry::GeometryFamily::Polygon)
         .then(|| "clockwise".to_string()),
       levels: self
         .levels()

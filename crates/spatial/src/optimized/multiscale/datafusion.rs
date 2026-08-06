@@ -16,7 +16,7 @@ use datafusion::prelude::col;
 
 use super::MultiscaleEncoding;
 use crate::geometry::{
-  Geometry, GeometryArray, GeometryType, QuantizationOptions, QuantizedGeometry,
+  Geometry, GeometryArray, GeometryFamily as GeometryType, QuantizationOptions, QuantizedGeometry,
   to_datafusion_error,
 };
 use crate::pipeline::PipelineWarnings;
@@ -170,7 +170,7 @@ impl GeolodUdf {
       match value {
         Some(bytes) => {
           let mut geometry = Geometry::from_wkb(bytes).map_err(to_datafusion_error)?;
-          if geometry.ty != self.ty {
+          if geometry.ty.family().map_err(to_datafusion_error)? != self.ty {
             return Err(DataFusionError::Execution(format!(
               "WKB geometry type {:?} does not match expected type {:?}",
               geometry.ty, self.ty
@@ -207,7 +207,7 @@ impl GeolodUdf {
               .quantize_from(&geometry, options)
               .map_err(to_datafusion_error)?;
             writer
-              .append(&quantized_geometry)
+              .append(&quantized_geometry, &options.transform)
               .map_err(to_datafusion_error)?;
           }
         }
@@ -472,7 +472,7 @@ mod tests {
   use std::collections::hash_map::DefaultHasher;
   use std::hash::{Hash, Hasher};
 
-  use arrow_array::{BinaryArray, Int64Array, ListArray};
+  use arrow_array::{BinaryArray, Float64Array, Int64Array, ListArray, StructArray};
 
   use crate::geometry::PbfGeometry;
   use crate::optimized::multiscale::MultiscaleLevel;
@@ -614,7 +614,7 @@ mod tests {
       true,
       true,
       levels,
-      MultiscaleEncoding::QuantizedNative,
+      MultiscaleEncoding::NativeQuantized,
       warnings.clone(),
     );
     let wkb = multiline_z_wkb();
@@ -651,5 +651,136 @@ mod tests {
     assert_eq!(z.null_count(), 0);
     assert_eq!(m.null_count(), 2);
     assert!(warnings.messages()[0].contains("encoding missing Z/M values as null"));
+  }
+
+  #[test]
+  fn native_quantized_float_output_uses_grid_coordinates() {
+    let levels = MultiscaleLevel::create_all(
+      crate::geoparquet::DEFAULT_OUTPUT_WKID,
+      GeometryType::Polyline,
+    );
+    let udf = GeolodUdf::new_with_warnings(
+      GeometryType::Polyline,
+      false,
+      false,
+      levels,
+      MultiscaleEncoding::NativeQuantizedFloat,
+      PipelineWarnings::default(),
+    );
+    let wkb = multiline_z_wkb();
+    let input = BinaryArray::from(vec![Some(wkb.as_slice())]);
+    let geometry = GeometryArray::try_new(&input).expect("geometry");
+    let geolod = udf.encode_geolod(&geometry).expect("geolod");
+    let geometries = geolod
+      .column(0)
+      .as_any()
+      .downcast_ref::<ListArray>()
+      .expect("native geometries");
+    let part_values = geometries.value(0);
+    let parts = part_values
+      .as_any()
+      .downcast_ref::<ListArray>()
+      .expect("native parts");
+    let coordinate_values = parts.value(0);
+    let coordinates = coordinate_values
+      .as_any()
+      .downcast_ref::<StructArray>()
+      .expect("native coordinates");
+    let x = coordinates
+      .column_by_name("x")
+      .and_then(|column| column.as_any().downcast_ref::<Float64Array>())
+      .expect("native floating x");
+
+    assert_eq!(x.value(0), 1.0);
+  }
+
+  #[test]
+  fn wkb_quantized_output_uses_grid_coordinates() {
+    let levels = MultiscaleLevel::create_all(
+      crate::geoparquet::DEFAULT_OUTPUT_WKID,
+      GeometryType::Polyline,
+    );
+    let udf = GeolodUdf::new_with_warnings(
+      GeometryType::Polyline,
+      false,
+      false,
+      levels,
+      MultiscaleEncoding::WkbQuantized,
+      PipelineWarnings::default(),
+    );
+    let wkb = multiline_z_wkb();
+    let input = BinaryArray::from(vec![Some(wkb.as_slice())]);
+    let geometry = GeometryArray::try_new(&input).expect("geometry");
+    let geolod = udf.encode_geolod(&geometry).expect("geolod");
+    let encoded = geolod
+      .column(0)
+      .as_any()
+      .downcast_ref::<BinaryArray>()
+      .expect("WKB geometry");
+    let decoded = Geometry::from_wkb(encoded.value(0)).expect("decoded WKB");
+
+    assert_eq!(decoded.ty, crate::geometry::GeometryKind::MultiLineString);
+    assert_eq!(decoded.coordinates[0].x, 1.0);
+  }
+
+  #[test]
+  fn world_float_encodings_dequantize_coordinates() {
+    let levels = MultiscaleLevel::create_all(
+      crate::geoparquet::DEFAULT_OUTPUT_WKID,
+      GeometryType::Polyline,
+    );
+    let wkb = multiline_z_wkb();
+    let input = BinaryArray::from(vec![Some(wkb.as_slice())]);
+    let geometry = GeometryArray::try_new(&input).expect("geometry");
+
+    let native = GeolodUdf::new_with_warnings(
+      GeometryType::Polyline,
+      false,
+      false,
+      levels.clone(),
+      MultiscaleEncoding::Native,
+      PipelineWarnings::default(),
+    )
+    .encode_geolod(&geometry)
+    .expect("native geolod");
+    let native_geometry = native
+      .column(0)
+      .as_any()
+      .downcast_ref::<ListArray>()
+      .expect("native geometry");
+    let native_parts = native_geometry.value(0);
+    let native_parts = native_parts
+      .as_any()
+      .downcast_ref::<ListArray>()
+      .expect("native parts");
+    let native_coordinates = native_parts.value(0);
+    let native_coordinates = native_coordinates
+      .as_any()
+      .downcast_ref::<StructArray>()
+      .expect("native coordinates");
+    let native_x = native_coordinates
+      .column_by_name("x")
+      .and_then(|column| column.as_any().downcast_ref::<Float64Array>())
+      .expect("native x");
+
+    let wkb = GeolodUdf::new_with_warnings(
+      GeometryType::Polyline,
+      false,
+      false,
+      levels,
+      MultiscaleEncoding::Wkb,
+      PipelineWarnings::default(),
+    )
+    .encode_geolod(&geometry)
+    .expect("WKB geolod");
+    let encoded = wkb
+      .column(0)
+      .as_any()
+      .downcast_ref::<BinaryArray>()
+      .expect("WKB geometry");
+    let decoded = Geometry::from_wkb(encoded.value(0)).expect("decoded WKB");
+
+    assert_eq!(native_x.value(0), 0.703125);
+    assert_eq!(decoded.coordinates[0].x, 0.703125);
   }
 }

@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use serde::de::DeserializeOwned;
 
-use crate::geometry::{Extent2D, GeometryType};
+use crate::geometry::{Extent2D, GeometryFamily as GeometryType};
 use crate::geoparquet::GeoMetadata;
 use crate::optimized::{
   ClusteringIndexXZ, ClusteringIndexZ, GEODISPLAY_VERSION, GeodisplayMetadata,

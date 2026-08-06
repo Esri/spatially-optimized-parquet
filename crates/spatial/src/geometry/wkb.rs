@@ -1,6 +1,13 @@
 //! Reads and transforms ISO Well-Known Binary geometry.
 
-use super::{Coord, CoordinateDimensions, Geometry, GeometryError, GeometryKind, GeometryType};
+use super::{
+  Coord, CoordinateDimensions, CoordinateSpace, Geometry, GeometryError, GeometryKind,
+  GeometryType, QuantizationTransform, QuantizedGeometry,
+};
+
+use arrow_array::ArrayRef;
+use arrow_array::builder::BinaryBuilder;
+use std::sync::Arc;
 
 type Result<T> = std::result::Result<T, GeometryError>;
 
@@ -26,12 +33,24 @@ pub(crate) enum WkbPartRole {
 
 #[derive(Default)]
 struct GeometryCollector {
+  kind: Option<GeometryKind>,
   coordinates: Vec<Coord>,
   lengths: Vec<u32>,
   part_start: usize,
+  active_polygon_ring_count: Option<u32>,
+  polygon_ring_counts: Vec<u32>,
 }
 
 impl WkbSink for GeometryCollector {
+  fn start_geometry(&mut self, kind: GeometryKind) {
+    if self.kind.is_none() {
+      self.kind = Some(kind);
+    }
+    if kind == GeometryKind::Polygon {
+      self.active_polygon_ring_count = Some(0);
+    }
+  }
+
   fn start_part(&mut self, _: WkbPartRole) {
     self.part_start = self.coordinates.len();
   }
@@ -49,6 +68,20 @@ impl WkbSink for GeometryCollector {
     self
       .lengths
       .push((self.coordinates.len() - self.part_start) as u32);
+    if let Some(ring_count) = self.active_polygon_ring_count.as_mut() {
+      *ring_count += 1;
+    }
+  }
+
+  fn finish_geometry(&mut self, kind: GeometryKind) {
+    if kind == GeometryKind::Polygon {
+      self.polygon_ring_counts.push(
+        self
+          .active_polygon_ring_count
+          .take()
+          .expect("started polygon geometry"),
+      );
+    }
   }
 }
 
@@ -62,9 +95,11 @@ impl PartialEq<(f64, f64)> for WkbCoordinate {
 }
 
 pub(crate) trait WkbSink {
+  fn start_geometry(&mut self, _: GeometryKind) {}
   fn start_part(&mut self, role: WkbPartRole);
   fn push_coord(&mut self, coordinate: WkbCoordinate);
   fn finish_part(&mut self);
+  fn finish_geometry(&mut self, _: GeometryKind) {}
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,11 +146,14 @@ impl Geometry {
   /// Read supported WKB into the format-neutral geometry representation.
   pub(crate) fn from_wkb(bytes: &[u8]) -> Result<Self> {
     let mut collector = GeometryCollector::default();
-    let header = visit_wkb_geometry(bytes, PolygonRingOrder::Preserve, &mut collector)?;
+    visit_wkb_geometry(bytes, PolygonRingOrder::Preserve, &mut collector)?;
     Self::new(
-      GeometryType::from_kind(header.kind)?,
+      collector
+        .kind
+        .expect("WKB visitor starts the root geometry"),
       collector.coordinates,
       collector.lengths,
+      collector.polygon_ring_counts,
     )
   }
 }
@@ -128,6 +166,51 @@ impl WkbCoordinate {
       bail!("expected point WKB, found {:?}", header.public.kind);
     }
     reader.read_coordinate(header)
+  }
+}
+
+/// Builds a BinaryArray containing one transformed WKB value per multiscale geometry row.
+pub(crate) struct WkbArrayBuilder {
+  builder: BinaryBuilder,
+  scratch: Vec<u8>,
+  coordinate_space: CoordinateSpace,
+}
+
+impl WkbArrayBuilder {
+  /// Create a WKB level builder with capacity for the expected row count.
+  pub(crate) fn new(capacity: usize, coordinate_space: CoordinateSpace) -> Self {
+    Self {
+      builder: BinaryBuilder::with_capacity(capacity, capacity * 16),
+      scratch: Vec::new(),
+      coordinate_space,
+    }
+  }
+
+  /// Append one simplified quantized geometry as transformed ISO WKB.
+  pub(crate) fn append(
+    &mut self,
+    geometry: &QuantizedGeometry,
+    transform: &QuantizationTransform,
+  ) -> Result<()> {
+    self.scratch.clear();
+    write_quantized_geometry(
+      &mut self.scratch,
+      geometry,
+      self.coordinate_space,
+      transform,
+    )?;
+    self.builder.append_value(&self.scratch);
+    Ok(())
+  }
+
+  /// Append a null geometry row.
+  pub(crate) fn append_null(&mut self) {
+    self.builder.append_null();
+  }
+
+  /// Finish the Arrow binary array.
+  pub(crate) fn finish(mut self) -> ArrayRef {
+    Arc::new(self.builder.finish())
   }
 }
 
@@ -181,6 +264,7 @@ impl<'a> WkbReader<'a> {
       bail!("WKB nesting exceeds {MAX_NESTING_DEPTH} levels");
     }
     let header = self.read_header()?;
+    sink.start_geometry(header.public.kind);
     match header.public.kind {
       GeometryKind::Point => self.read_point_part(header, sink)?,
       GeometryKind::LineString => self.read_line_string(header, WkbPartRole::Other, sink)?,
@@ -195,6 +279,7 @@ impl<'a> WkbReader<'a> {
       }
       GeometryKind::Unknown => bail!("unsupported WKB geometry type"),
     }
+    sink.finish_geometry(header.public.kind);
     Ok(header.public)
   }
 
@@ -398,7 +483,9 @@ impl<'a> WkbReader<'a> {
         GeometryKind::Polygon,
         "MultiPolygon member",
       )?;
+      sink.start_geometry(GeometryKind::Polygon);
       self.read_polygon(header, polygon_ring_order, sink)?;
+      sink.finish_geometry(GeometryKind::Polygon);
     }
     Ok(())
   }
@@ -538,7 +625,7 @@ fn decode_type(encoded_type: u32) -> Result<(u32, bool, bool, bool)> {
   Ok((base_type, has_z, has_m, false))
 }
 
-impl GeometryKind {
+impl GeometryType {
   fn from_wkb_type(base_type: u32) -> Self {
     match base_type {
       1 => Self::Point,
@@ -624,6 +711,223 @@ fn write_selected_coordinate(
   }
 }
 
+fn write_quantized_geometry(
+  output: &mut Vec<u8>,
+  geometry: &QuantizedGeometry,
+  coordinate_space: CoordinateSpace,
+  transform: &QuantizationTransform,
+) -> Result<()> {
+  let mut part_index = 0usize;
+  match geometry.kind {
+    GeometryKind::LineString => {
+      write_iso_header(
+        output,
+        GeometryKind::LineString,
+        geometry.has_z,
+        geometry.has_m,
+      )?;
+      write_quantized_part(
+        output,
+        geometry,
+        coordinate_space,
+        transform,
+        &mut part_index,
+      )?;
+    }
+    GeometryKind::MultiLineString => {
+      write_iso_header(
+        output,
+        GeometryKind::MultiLineString,
+        geometry.has_z,
+        geometry.has_m,
+      )?;
+      write_count(output, geometry.lengths.len())?;
+      for _ in &geometry.lengths {
+        write_iso_header(
+          output,
+          GeometryKind::LineString,
+          geometry.has_z,
+          geometry.has_m,
+        )?;
+        write_quantized_part(
+          output,
+          geometry,
+          coordinate_space,
+          transform,
+          &mut part_index,
+        )?;
+      }
+    }
+    GeometryKind::Polygon => {
+      write_iso_header(
+        output,
+        GeometryKind::Polygon,
+        geometry.has_z,
+        geometry.has_m,
+      )?;
+      write_quantized_polygon(
+        output,
+        geometry,
+        coordinate_space,
+        transform,
+        &mut part_index,
+        geometry.polygon_ring_counts.first().copied().unwrap_or(0) as usize,
+      )?;
+    }
+    GeometryKind::MultiPolygon => {
+      write_iso_header(
+        output,
+        GeometryKind::MultiPolygon,
+        geometry.has_z,
+        geometry.has_m,
+      )?;
+      write_count(output, geometry.polygon_ring_counts.len())?;
+      for &ring_count in &geometry.polygon_ring_counts {
+        write_iso_header(
+          output,
+          GeometryKind::Polygon,
+          geometry.has_z,
+          geometry.has_m,
+        )?;
+        write_quantized_polygon(
+          output,
+          geometry,
+          coordinate_space,
+          transform,
+          &mut part_index,
+          ring_count as usize,
+        )?;
+      }
+    }
+    GeometryKind::MultiPoint => {
+      write_iso_header(
+        output,
+        GeometryKind::MultiPoint,
+        geometry.has_z,
+        geometry.has_m,
+      )?;
+      let stride = coordinate_stride(geometry.has_z, geometry.has_m);
+      write_count(output, geometry.coordinates.len() / stride)?;
+      for coordinate_index in 0..geometry.coordinates.len() / stride {
+        write_iso_header(output, GeometryKind::Point, geometry.has_z, geometry.has_m)?;
+        write_quantized_coordinate(
+          output,
+          geometry,
+          coordinate_space,
+          transform,
+          coordinate_index,
+        )?;
+      }
+    }
+    GeometryKind::Point => {
+      write_iso_header(output, GeometryKind::Point, geometry.has_z, geometry.has_m)?;
+      write_quantized_coordinate(output, geometry, coordinate_space, transform, 0)?;
+    }
+    GeometryKind::GeometryCollection | GeometryKind::Unknown => {
+      bail!(
+        "unsupported quantized WKB geometry type {:?}",
+        geometry.kind
+      )
+    }
+  }
+  Ok(())
+}
+
+fn write_quantized_polygon(
+  output: &mut Vec<u8>,
+  geometry: &QuantizedGeometry,
+  coordinate_space: CoordinateSpace,
+  transform: &QuantizationTransform,
+  part_index: &mut usize,
+  ring_count: usize,
+) -> Result<()> {
+  write_count(output, ring_count)?;
+  for _ in 0..ring_count {
+    write_quantized_part(output, geometry, coordinate_space, transform, part_index)?;
+  }
+  Ok(())
+}
+
+fn write_quantized_part(
+  output: &mut Vec<u8>,
+  geometry: &QuantizedGeometry,
+  coordinate_space: CoordinateSpace,
+  transform: &QuantizationTransform,
+  part_index: &mut usize,
+) -> Result<()> {
+  let point_count = *geometry.lengths.get(*part_index).ok_or_else(|| {
+    GeometryError::Wkb("quantized geometry part count does not match topology".to_string())
+  })? as usize;
+  write_count(output, point_count)?;
+  let coordinate_start = geometry.lengths[..*part_index]
+    .iter()
+    .map(|length| *length as usize)
+    .sum();
+  for coordinate_index in coordinate_start..coordinate_start + point_count {
+    write_quantized_coordinate(
+      output,
+      geometry,
+      coordinate_space,
+      transform,
+      coordinate_index,
+    )?;
+  }
+  *part_index += 1;
+  Ok(())
+}
+
+fn write_quantized_coordinate(
+  output: &mut Vec<u8>,
+  geometry: &QuantizedGeometry,
+  coordinate_space: CoordinateSpace,
+  transform: &QuantizationTransform,
+  coordinate_index: usize,
+) -> Result<()> {
+  let stride = coordinate_stride(geometry.has_z, geometry.has_m);
+  let offset = coordinate_index
+    .checked_mul(stride)
+    .ok_or_else(|| GeometryError::Wkb("quantized coordinate offset overflows usize".to_string()))?;
+  let coordinate = geometry
+    .coordinates
+    .get(offset..offset + stride)
+    .ok_or_else(|| {
+      GeometryError::Wkb("quantized coordinate does not match part lengths".to_string())
+    })?;
+  output.extend_from_slice(
+    &coordinate_space
+      .decode(coordinate[0], transform, 0)
+      .to_le_bytes(),
+  );
+  output.extend_from_slice(
+    &coordinate_space
+      .decode(coordinate[1], transform, 1)
+      .to_le_bytes(),
+  );
+  let mut component_index = 2;
+  if geometry.has_z {
+    let value = if geometry.validity.z_is_valid(coordinate_index) {
+      coordinate_space.decode(coordinate[component_index], transform, 2)
+    } else {
+      0.0
+    };
+    output.extend_from_slice(&value.to_le_bytes());
+    component_index += 1;
+  }
+  if geometry.has_m {
+    let value = if geometry.validity.m_is_valid(coordinate_index) {
+      coordinate_space.decode(coordinate[component_index], transform, 3)
+    } else {
+      0.0
+    };
+    output.extend_from_slice(&value.to_le_bytes());
+  }
+  Ok(())
+}
+
+fn coordinate_stride(has_z: bool, has_m: bool) -> usize {
+  2 + usize::from(has_z) + usize::from(has_m)
+}
+
 fn require_kind(actual: GeometryKind, expected: GeometryKind, context: &str) -> Result<()> {
   if actual != expected {
     bail!("{context} must be {expected:?}, found {actual:?}");
@@ -690,6 +994,7 @@ fn write_coordinate(output: &mut Vec<u8>, x: f64, y: f64) {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::geometry::GeometryType;
 
   #[derive(Default)]
   struct CoordinateSink {
@@ -876,7 +1181,7 @@ mod tests {
 
     let geometry = Geometry::from_wkb(&bytes).unwrap();
 
-    assert_eq!(geometry.ty, GeometryType::Polyline);
+    assert_eq!(geometry.ty, GeometryType::LineString);
     assert_eq!(geometry.lengths, [2]);
     assert_eq!(geometry.coordinates[1].x, 2.0);
     assert_eq!(geometry.coordinates[1].y, 3.0);
@@ -902,6 +1207,39 @@ mod tests {
       error
         .to_string()
         .contains("MultiPoint member must be Point")
+    );
+  }
+
+  #[test]
+  fn writes_transformed_multipolygon_wkb_with_ring_groups() {
+    let geometry = QuantizedGeometry {
+      kind: GeometryKind::MultiPolygon,
+      coordinates: vec![0, 0, 2, 0, 2, 2, 0, 0, 4, 4, 6, 4, 6, 6, 4, 4],
+      lengths: vec![4, 4],
+      polygon_ring_counts: vec![1, 1],
+      validity: Default::default(),
+      has_z: false,
+      has_m: false,
+    };
+    let transform = QuantizationTransform {
+      scale: [0.5, 0.5, 1.0, 1.0],
+      translate: [10.0, 20.0, 0.0, 0.0],
+    };
+    let mut bytes = Vec::new();
+
+    write_quantized_geometry(&mut bytes, &geometry, CoordinateSpace::World, &transform).unwrap();
+    let decoded = Geometry::from_wkb(&bytes).unwrap();
+
+    assert_eq!(decoded.ty, GeometryKind::MultiPolygon);
+    assert_eq!(decoded.polygon_ring_counts, [1, 1]);
+    assert_eq!(
+      decoded.coordinates[0],
+      Coord {
+        x: 10.0,
+        y: 20.0,
+        z: None,
+        m: None,
+      }
     );
   }
 

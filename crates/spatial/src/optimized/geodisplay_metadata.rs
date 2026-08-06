@@ -4,7 +4,7 @@ use ::parquet::file::metadata::KeyValue;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::geometry::{Extent2D, GeometryType, QuantizationTransform};
+use crate::geometry::{Extent2D, GeometryFamily, QuantizationTransform};
 
 use super::multiscale::MultiscaleEncoding;
 
@@ -64,15 +64,27 @@ pub(crate) enum GeodisplayMetadata {
 pub(crate) enum GeodisplayEncoding {
   #[serde(rename = "esriPBF")]
   EsriPbf,
-  #[serde(rename = "quantizedNative")]
-  QuantizedNative,
+  #[serde(rename = "wkbQuantized")]
+  WkbQuantized,
+  #[serde(rename = "wkb")]
+  Wkb,
+  #[serde(rename = "nativeQuantized")]
+  NativeQuantized,
+  #[serde(rename = "nativeQuantizedFloat")]
+  NativeQuantizedFloat,
+  #[serde(rename = "native")]
+  Native,
 }
 
 impl GeodisplayEncoding {
   pub(crate) const fn as_str(self) -> &'static str {
     match self {
       Self::EsriPbf => "esriPBF",
-      Self::QuantizedNative => "quantizedNative",
+      Self::WkbQuantized => "wkbQuantized",
+      Self::Wkb => "wkb",
+      Self::NativeQuantized => "nativeQuantized",
+      Self::NativeQuantizedFloat => "nativeQuantizedFloat",
+      Self::Native => "native",
     }
   }
 }
@@ -81,7 +93,11 @@ impl From<MultiscaleEncoding> for GeodisplayEncoding {
   fn from(encoding: MultiscaleEncoding) -> Self {
     match encoding {
       MultiscaleEncoding::Pbf => Self::EsriPbf,
-      MultiscaleEncoding::QuantizedNative => Self::QuantizedNative,
+      MultiscaleEncoding::WkbQuantized => Self::WkbQuantized,
+      MultiscaleEncoding::Wkb => Self::Wkb,
+      MultiscaleEncoding::NativeQuantized => Self::NativeQuantized,
+      MultiscaleEncoding::NativeQuantizedFloat => Self::NativeQuantizedFloat,
+      MultiscaleEncoding::Native => Self::Native,
     }
   }
 }
@@ -109,7 +125,7 @@ pub(crate) struct ClusteringIndexZ {
   #[serde(rename = "fullExtent")]
   pub(crate) full_extent: Extent2D,
   #[serde(rename = "geometryType")]
-  pub(crate) geometry_type: GeometryType,
+  pub(crate) geometry_type: GeometryFamily,
   #[serde(rename = "hasZ")]
   pub(crate) has_z: bool,
   #[serde(rename = "hasM")]
@@ -128,7 +144,7 @@ pub(crate) struct ClusteringIndexXZ {
   pub(crate) wkt: Option<String>,
   pub(crate) encoding: GeodisplayEncoding,
   #[serde(rename = "geometryType")]
-  pub(crate) geometry_type: GeometryType,
+  pub(crate) geometry_type: GeometryFamily,
   #[serde(rename = "fullExtent")]
   pub(crate) full_extent: Extent2D,
   #[serde(rename = "maxLevel")]
@@ -179,7 +195,7 @@ pub(crate) struct ClusteringIndexXZInput {
   /// Defines the geometry payload encoding.
   pub(crate) encoding: GeodisplayEncoding,
   /// Defines the Geodisplay geometry category.
-  pub(crate) geometry_type: GeometryType,
+  pub(crate) geometry_type: GeometryFamily,
   /// Defines the indexed dataset extent.
   pub(crate) full_extent: Extent2D,
   /// Limits the XZ hierarchy depth.
@@ -260,7 +276,7 @@ impl ClusteringIndexZ {
       m_column: input.m_column,
       coordinate_precision: input.coordinate_precision,
       full_extent: input.full_extent,
-      geometry_type: GeometryType::Point,
+      geometry_type: GeometryFamily::Point,
       has_z: input.has_z,
       has_m: input.has_m,
     }
