@@ -173,6 +173,48 @@ describe("ParquetFileStructureStore", () => {
       expect(store.getState().detailColumnId).toBe(secondColumn.id);
     });
   });
+
+  it("preserves selection while refreshing download coverage", () => {
+    const firstColumn = createColumn("first", 0, { start: 0, end: 100 });
+    const secondColumn = createColumn("second", 1, { start: 100, end: 200 });
+    const layout = {
+      fileId: 0,
+      fileName: "file.parquet",
+      byteLength: 300,
+      footer: { start: 280, end: 300 },
+      keyValueMetadata: [],
+      rowGroups: [{
+        index: 0,
+        byteRange: { start: 0, end: 200 },
+        columns: [firstColumn, secondColumn],
+      }],
+      pageIndexes: [],
+    };
+    const source = {
+      getColumnIndex: vi.fn().mockResolvedValue(null),
+      getOffsetIndex: vi.fn().mockResolvedValue(null),
+    };
+    const store = new ParquetFileStructureStore({
+      coverage: new ParquetByteCoverage(),
+      layout,
+    }, source);
+    const refreshedCoverage = new ParquetByteCoverage([
+      secondColumn.byteRange,
+    ]);
+
+    store.updateSnapshot({ coverage: refreshedCoverage, layout });
+    store.selectRowGroup(0);
+    expect(store.getState().selectedRowGroupIndex).toBe(0);
+    expect(store.getState().expandedColumnIds).toEqual(
+      new Set([secondColumn.id]),
+    );
+
+    store.updateSnapshot({
+      coverage: refreshedCoverage.clone(),
+      layout,
+    });
+    expect(store.getState().selectedRowGroupIndex).toBe(0);
+  });
 });
 
 function createColumn(

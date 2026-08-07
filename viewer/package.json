@@ -5,16 +5,16 @@
   "packageManager": "pnpm@10.28.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/vite.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "vitest run",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@arcgis/core": "5.1.0",
-    "@arcgis/map-components": "5.1.0",
-    "@esri/calcite-components": "5.1.1",
+    "@arcgis/core": "5.2.0-next.69",
+    "@arcgis/map-components": "5.2.0-next.65",
+    "@esri/calcite-components": "5.2.0-next.42",
     "hyparquet": "1.27.1",
     "hyparquet-compressors": "1.1.1",
     "maplibre-gl": "5.16.0",

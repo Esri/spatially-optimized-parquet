@@ -1,16 +1,32 @@
 /**
- * The XZ range builder creates XZ ranges for one query extent.
- * The builder follows `spec/display-optimization.md#xz-clustering` and `spec/display-optimization.md#encoding-extents`.
- * The hierarchy math matches `crates/spatial/src/optimized/clustering/xz.rs`.
- * XZ cells cover extra space, so `Query` still tests exact geometry extents.
+ * Builds query ranges for XZ-order keys.
+ *
+ * This follows Böhm, Klump, and Kriegel, “XZ-Ordering: A Space-Filling Curve
+ * for Objects with Spatial Extension” (1999). The paper enlarges each Z-order
+ * element to twice its width and height toward the upper-right corner.
+ *
+ * Paper terms map to this implementation as follows:
+ *
+ * - A hierarchy cell is the paper's Z-order element.
+ * - `expandExtent` applies the enlarged-element rule from definition 1.
+ * - `maxLevel` is the paper's resolution `g`.
+ * - `getCodeForLevel` implements one term from definition 2.
+ * - `getElementCount` implements lemma 3.
+ * - `getQueryXZRanges` implements query processing from section 4.2.
+ *
+ * Rust code generation lives in
+ * `crates/spatial/src/optimized/clustering/xz.rs`. These ranges provide a
+ * conservative filter, so `Query` still checks exact feature extents.
  */
 import type { Bounds } from "./metadata";
 
+/** Holds an inclusive interval of XZ codes selected by a query. */
 export interface XZRange {
   start: number;
   end: number;
 }
 
+/** Tracks one hierarchy element while building query ranges. */
 interface XZStackItem {
   extent: Bounds;
   codeSum: number;
@@ -18,8 +34,31 @@ interface XZStackItem {
 }
 
 /**
- * Build merged XZ intervals for hierarchy cells that intersect a query extent clipped to `fullExtent`.
- * Keep `maxLevel` at 20 or less for exact JavaScript integer values.
+ * Find the XZ-code ranges that may contain features intersecting a query.
+ *
+ * This implements section 4.2 of the paper. Start at `fullExtent` and walk
+ * down the four Z-order quadrants:
+ *
+ * 1. Skip an enlarged element when it does not intersect `queryExtent`.
+ * 2. Add a whole descendant interval when the query contains the element.
+ * 3. Otherwise add the element's own code and continue into its children.
+ *
+ * The search stops four levels below the query's estimated level. This returns
+ * broader ranges and fewer index predicates. Adjacent and overlapping ranges
+ * are merged before returning.
+ *
+ * Keep `maxLevel` at 20 or less so every code remains an exact JavaScript
+ * integer. It must match the depth used by the Rust writer.
+ *
+ * @example
+ * ```ts
+ * getQueryXZRanges(
+ *   { xmin: 0, ymin: 0, xmax: 10, ymax: 10 },
+ *   { xmin: 0, ymin: 0, xmax: 5, ymax: 5 },
+ *   1,
+ * );
+ * // [{ start: 0, end: 1 }]
+ * ```
  */
 export function getQueryXZRanges(
   fullExtent: Bounds,
@@ -72,7 +111,12 @@ export function getQueryXZRanges(
   return mergeXZRanges(ranges);
 }
 
-/** Estimate the XZ level from the query extent size relative to `fullExtent`. */
+/**
+ * Calculate the finer candidate sequence length from lemma 1.
+ *
+ * The query traversal uses this size estimate only to choose a practical
+ * stopping depth. It does not assign a stored feature code.
+ */
 export function getExtentXZLevel(
   fullExtent: Bounds,
   queryExtent: Bounds,
@@ -90,9 +134,7 @@ export function getExtentXZLevel(
   return Math.min(Math.floor(Math.min(xLevel, yLevel)) + 1, maxLevel);
 }
 
-/**
- * Use binary search to test one XZ code against sorted, disjoint inclusive ranges.
- */
+/** Test one code against sorted, disjoint XZ ranges with binary search. */
 export function xzCodeMatches(code: number, ranges: XZRange[]): boolean {
   let left = 0;
   let right = ranges.length - 1;
@@ -112,10 +154,7 @@ export function xzCodeMatches(code: number, ranges: XZRange[]): boolean {
   return false;
 }
 
-/**
- * Sort inclusive XZ intervals.
- * Merge intervals that overlap or touch.
- */
+/** Sort XZ ranges and merge intervals that overlap or touch. */
 export function mergeXZRanges(ranges: XZRange[]): XZRange[] {
   const sortedRanges = [...ranges].sort(
     (left, right) => left.start - right.start || left.end - right.end,
@@ -134,7 +173,7 @@ export function mergeXZRanges(ranges: XZRange[]): XZRange[] {
   return mergedRanges;
 }
 
-/** Convert a quadrant and depth to an XZ sequence offset. */
+/** Add one quadrant term from definition 2's sequence-code formula. */
 function getCodeForLevel(
   quadrant: number,
   depth: number,
@@ -143,14 +182,12 @@ function getCodeForLevel(
   return quadrant * getElementCount(maxLevel, depth) + 1;
 }
 
-/** Count nodes below the current depth for XZ sequence math. */
+/** Count an element and all descendants through `maxLevel`, following lemma 3. */
 function getElementCount(maxLevel: number, sequenceIndex: number): number {
   return (4 ** (maxLevel - sequenceIndex) - 1) / 3;
 }
 
-/**
- * Expand one cell toward the upper right because writers encode the feature lower-left point.
- */
+/** Apply the enlarged-element rule from definition 1. */
 function expandExtent(extent: Bounds): Bounds {
   return {
     xmin: extent.xmin,
@@ -160,6 +197,7 @@ function expandExtent(extent: Bounds): Bounds {
   };
 }
 
+/** Split an element into quadrants 0, 1, 2, and 3 from figure 1. */
 function subdivideExtent(extent: Bounds): Bounds[] {
   const xmid = (extent.xmin + extent.xmax) / 2;
   const ymid = (extent.ymin + extent.ymax) / 2;
@@ -172,6 +210,7 @@ function subdivideExtent(extent: Bounds): Bounds[] {
   ];
 }
 
+/** Test whether two extents overlap with positive area. */
 function intersectsExtent(first: Bounds, second: Bounds): boolean {
   return !(
     first.xmax <= second.xmin ||
@@ -181,6 +220,7 @@ function intersectsExtent(first: Bounds, second: Bounds): boolean {
   );
 }
 
+/** Test whether `container` completely contains `contained`. */
 function containsExtent(container: Bounds, contained: Bounds): boolean {
   return (
     contained.xmin >= container.xmin &&

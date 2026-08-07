@@ -54,6 +54,7 @@ export interface FileStructureState {
  * It provides one external-store boundary so the dialog can react to navigation and loading without duplicating request state.
  */
 export class ParquetFileStructureStore {
+  private _snapshot: FileStructureSnapshot;
   private _selectedRowGroupIndex: number | null = null;
   private _expandedColumnIds = new Set<string>();
   private _detailColumnId: string | null = null;
@@ -63,9 +64,11 @@ export class ParquetFileStructureStore {
   private _state = this._createState();
 
   constructor(
-    readonly snapshot: FileStructureSnapshot,
+    snapshot: FileStructureSnapshot,
     private readonly _source: ParquetPageIndexSource,
-  ) {}
+  ) {
+    this._snapshot = snapshot;
+  }
 
   subscribe = (listener: () => void): (() => void) => {
     this._listeners.add(listener);
@@ -73,6 +76,10 @@ export class ParquetFileStructureStore {
   };
 
   getState = (): FileStructureState => this._state;
+
+  updateSnapshot(snapshot: FileStructureSnapshot): void {
+    this._snapshot = snapshot;
+  }
 
   close(): void {
     this._generation += 1;
@@ -111,7 +118,9 @@ export class ParquetFileStructureStore {
   }
 
   rowGroup(index: number): RowGroupLayout | undefined {
-    return this.snapshot.layout.rowGroups.find((rowGroup) => rowGroup.index === index);
+    return this._snapshot.layout.rowGroups.find(
+      (rowGroup) => rowGroup.index === index,
+    );
   }
 
   private _selectColumn(column: ColumnLayout): boolean {
@@ -131,11 +140,11 @@ export class ParquetFileStructureStore {
   ): ColumnLayout | undefined {
     let selectedColumn = rowGroup?.columns[0];
     let selectedLoadedByteLength = selectedColumn
-      ? this.snapshot.coverage.coveredByteLength(selectedColumn.byteRange)
+      ? this._snapshot.coverage.coveredByteLength(selectedColumn.byteRange)
       : 0;
 
     for (const column of rowGroup?.columns.slice(1) ?? []) {
-      const loadedByteLength = this.snapshot.coverage.coveredByteLength(
+      const loadedByteLength = this._snapshot.coverage.coveredByteLength(
         column.byteRange,
       );
       if (loadedByteLength > selectedLoadedByteLength) {
@@ -150,7 +159,7 @@ export class ParquetFileStructureStore {
   private async _loadColumn(column: ColumnLayout): Promise<void> {
     const generation = this._generation;
     const target: ParquetPageIndexTarget = {
-      fileId: this.snapshot.layout.fileId,
+      fileId: this._snapshot.layout.fileId,
       rowGroupIndex: column.rowGroupIndex,
       columnIndex: column.columnIndex,
     };
@@ -200,13 +209,13 @@ export class ParquetFileStructureStore {
     if (chunkIndex === undefined || chunkIndex < 0) {
       return;
     }
-    const pageIndexes = this.snapshot.layout.pageIndexes.filter(
+    const pageIndexes = this._snapshot.layout.pageIndexes.filter(
       (index) =>
         index.rowGroupIndex === column.rowGroupIndex &&
         index.fieldName === column.fieldName,
     );
     for (const index of pageIndexes) {
-      this.snapshot.coverage.add(index.byteRange);
+      this._snapshot.coverage.add(index.byteRange);
     }
   }
 

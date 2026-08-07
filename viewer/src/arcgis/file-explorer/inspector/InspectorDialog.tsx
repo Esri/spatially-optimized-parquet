@@ -64,6 +64,12 @@ interface FileColumnDistributionProps {
   snapshot: FileStructureSnapshot;
 }
 
+interface FileStructureStoreOwner {
+  layout: FileLayout;
+  source: ParquetPageIndexSource;
+  store: ParquetFileStructureStore;
+}
+
 /**
  * Presents an interactive breakdown of Parquet row groups, columns, pages, and downloaded coverage.
  * It owns the inspector store lifecycle so closing or replacing the dialog also retires pending detail loads.
@@ -85,10 +91,19 @@ export function InspectorDialog({
   source: ParquetPageIndexSource;
   onClose(): void;
 }) {
-  const store = useMemo(
-    () => new ParquetFileStructureStore(snapshot, source),
-    [snapshot, source],
-  );
+  const storeOwnerRef = useRef<FileStructureStoreOwner | null>(null);
+  if (
+    storeOwnerRef.current?.layout !== snapshot.layout ||
+    storeOwnerRef.current.source !== source
+  ) {
+    storeOwnerRef.current = {
+      layout: snapshot.layout,
+      source,
+      store: new ParquetFileStructureStore(snapshot, source),
+    };
+  }
+  const store = storeOwnerRef.current.store;
+  store.updateSnapshot(snapshot);
   const state = useSyncExternalStore(store.subscribe, store.getState);
   const [downloadedOnly, setDownloadedOnly] = useState(false);
   const [orderBySize, setOrderBySize] = useState(true);
