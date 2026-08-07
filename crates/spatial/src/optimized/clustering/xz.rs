@@ -1,4 +1,20 @@
-//! Computes XZ hierarchy codes and DataFusion expressions for complex geometry clustering.
+//! Generates XZ-order keys for spatially extended objects.
+//!
+//! This follows Böhm, Klump, and Kriegel, “XZ-Ordering: A Space-Filling Curve for Objects
+//! with Spatial Extension” (1999). The paper enlarges every Z-order element to twice its
+//! width and height toward the upper-right corner. A feature can then use one integer key
+//! for the smallest enlarged element containing its bounding extent.
+//!
+//! Paper terms map to this implementation as follows:
+//!
+//! - An **element** is an [`Extent2D`] at one level of the Z-order hierarchy.
+//! - The paper's resolution `g` is `max_depth` or `cluster_depth`.
+//! - The quadrant-sequence length is `level` or `depth`.
+//! - [`ClusterKey::from_xz_extent`] implements insertion from section 4.1.
+//! - `code_for_xz_level` implements one term of the sequence code from definition 2.
+//! - `xz_element_count` implements the element count from lemma 3.
+//!
+//! Query-side interval generation lives in `viewer/src/maplibre/sop/xz.ts`.
 
 #![allow(dead_code)]
 
@@ -20,7 +36,36 @@ use crate::optimized::multiscale::GEOKEY_COLUMN;
 use super::ClusterKey;
 
 impl ClusterKey {
-  /// Encode a feature extent at an XZ hierarchy level that preserves containment.
+  /// Assign one XZ key to a feature's bounding extent.
+  ///
+  /// This implements the insertion algorithm from section 4.1 of the paper. It chooses the
+  /// smallest enlarged element that contains `feature_extent`, then encodes that element's
+  /// Z-order quadrant sequence with the sequence code from definition 2.
+  ///
+  /// First, estimate the finer candidate level allowed by lemma 1:
+  ///
+  /// ```text
+  /// floor(min(log2(W / w), log2(H / h))) + 1
+  /// ```
+  ///
+  /// `W` and `H` are the full extent dimensions. `w` and `h` are the feature dimensions.
+  /// Grid alignment decides whether that level fits. If the feature touches more than two
+  /// cells along either axis, use the parent level instead.
+  ///
+  /// Finally, locate the feature's lower-left corner in the selected Z-order grid and encode
+  /// its quadrant sequence. The key identifies the containing enlarged element, not the exact
+  /// feature bounds.
+  ///
+  /// # Example
+  ///
+  /// ```ignore
+  /// let full_extent = Extent2D { xmin: 0.0, ymin: 0.0, xmax: 8.0, ymax: 8.0 };
+  /// let feature_extent = Extent2D { xmin: 6.8, ymin: 0.0, xmax: 7.9, ymax: 0.1 };
+  ///
+  /// let key = ClusterKey::from_xz_extent(full_extent, feature_extent, 3);
+  ///
+  /// assert_eq!(key, ClusterKey::new(29));
+  /// ```
   pub(crate) fn from_xz_extent(
     full_extent: Extent2D,
     feature_extent: Extent2D,
@@ -54,6 +99,7 @@ impl ClusterKey {
     )
   }
 
+  /// Calculate the finer candidate sequence length from lemma 1.
   fn xz_level(full_extent: Extent2D, feature_extent: Extent2D, max_depth: u32) -> u32 {
     let full_extent_width = full_extent.xmax - full_extent.xmin;
     let full_extent_height = full_extent.ymax - full_extent.ymin;
@@ -69,6 +115,7 @@ impl ClusterKey {
     ((x_level.min(y_level).floor() as u32) + 1).min(max_depth)
   }
 
+  /// Encode the Z-order quadrant sequence for an element's lower-left corner.
   fn from_xz_point(
     full_extent: Extent2D,
     point_x: f64,
@@ -111,10 +158,12 @@ impl ClusterKey {
     Self::new(sequence_code)
   }
 
+  /// Add one quadrant term from definition 2's sequence-code formula.
   fn code_for_xz_level(quadrant_code: u32, depth: u32, max_depth: u32) -> u64 {
     (quadrant_code as u64) * Self::xz_element_count(max_depth, depth) + 1
   }
 
+  /// Count an element and all descendants through `max_depth`, following lemma 3.
   fn xz_element_count(max_depth: u32, sequence_index: u32) -> u64 {
     (4u64.pow(max_depth - sequence_index) - 1) / 3
   }
@@ -129,10 +178,12 @@ impl BoundsUdf {
     Self::udf().call(vec![col(geometry_column)])
   }
 
+  /// Create the DataFusion scalar function used by the bounds expression.
   fn udf() -> ScalarUDF {
     ScalarUDF::new_from_impl(Self)
   }
 
+  /// Decode geometry bounds into an Arrow struct array.
   fn bounds_struct(geometry: &GeometryArray<'_>) -> DataFusionResult<StructArray> {
     let mut xmin_values = Vec::with_capacity(geometry.len());
     let mut ymin_values = Vec::with_capacity(geometry.len());
@@ -172,6 +223,7 @@ impl BoundsUdf {
     .map_err(to_datafusion_error)
   }
 
+  /// Return the shared Arrow fields for the bounds struct.
   fn fields() -> Fields {
     static FIELDS: OnceLock<Fields> = OnceLock::new();
     FIELDS
@@ -188,18 +240,22 @@ impl BoundsUdf {
 }
 
 impl ScalarUDFImpl for BoundsUdf {
+  /// Return the SQL-visible function name.
   fn name(&self) -> &str {
     "clustering_bounds"
   }
 
+  /// Accept the supported geometry binary types.
   fn signature(&self) -> &Signature {
     geometry_signature()
   }
 
+  /// Return the bounds struct type.
   fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
     Ok(DataType::Struct(Self::fields()))
   }
 
+  /// Decode each geometry into its bounding extent.
   fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
     let arrays = ColumnarValue::values_to_arrays(&args.args)?;
     let geometry = arrays
@@ -217,10 +273,12 @@ struct ComplexGeometryClusterKeyUdf {
 }
 
 impl ComplexGeometryClusterKeyUdf {
+  /// Create the geometry-based XZ key scalar function.
   fn udf(cluster_depth: u32) -> ScalarUDF {
     ScalarUDF::new_from_impl(Self { cluster_depth })
   }
 
+  /// Return the accepted geometry and full-extent argument types.
   fn signature() -> &'static Signature {
     static SIGNATURE: OnceLock<Signature> = OnceLock::new();
     SIGNATURE.get_or_init(|| {
@@ -246,6 +304,7 @@ impl ComplexGeometryClusterKeyUdf {
     })
   }
 
+  /// Read one extent from four scalar function arguments.
   fn extent_from_args(arrays: &[ArrayRef], start: usize) -> DataFusionResult<Extent2D> {
     Ok(Extent2D {
       xmin: Self::first_f64(&arrays[start])?,
@@ -255,6 +314,7 @@ impl ComplexGeometryClusterKeyUdf {
     })
   }
 
+  /// Read the first non-null floating-point scalar from an argument array.
   fn first_f64(array: &ArrayRef) -> DataFusionResult<f64> {
     let array = as_float64_array(array.as_ref())?;
     if array.is_empty() || array.is_null(0) {
@@ -267,22 +327,27 @@ impl ComplexGeometryClusterKeyUdf {
 }
 
 impl ScalarUDFImpl for ComplexGeometryClusterKeyUdf {
+  /// Return the SQL-visible function name.
   fn name(&self) -> &str {
     "clustering_complex_geometry_xzcode"
   }
 
+  /// Return the geometry-based XZ function signature.
   fn signature(&self) -> &Signature {
     Self::signature()
   }
 
+  /// Return the unsigned XZ key type.
   fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
     Ok(DataType::UInt64)
   }
 
+  /// Return the non-nullable XZ key field.
   fn return_field_from_args(&self, _: ReturnFieldArgs) -> DataFusionResult<Arc<Field>> {
     Ok(Arc::new(Field::new(self.name(), DataType::UInt64, false)))
   }
 
+  /// Decode geometries and assign one XZ key to each bounding extent.
   fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
     let arrays = ColumnarValue::values_to_arrays(&args.args)?;
     let geometry = arrays
@@ -338,15 +403,18 @@ impl ComplexGeometryBoundsClusterKeyUdf {
       .alias(GEOKEY_COLUMN)
   }
 
+  /// Create the bounds-based XZ key scalar function.
   fn udf(cluster_depth: u32) -> ScalarUDF {
     ScalarUDF::new_from_impl(Self { cluster_depth })
   }
 
+  /// Return the eight floating-point bounds argument types.
   fn signature() -> &'static Signature {
     static SIGNATURE: OnceLock<Signature> = OnceLock::new();
     SIGNATURE.get_or_init(|| Signature::exact(vec![DataType::Float64; 8], Volatility::Immutable))
   }
 
+  /// Read one extent from four scalar function arguments.
   fn extent_from_args(arrays: &[ArrayRef], start: usize) -> DataFusionResult<Extent2D> {
     Ok(Extent2D {
       xmin: Self::first_f64(&arrays[start])?,
@@ -356,6 +424,7 @@ impl ComplexGeometryBoundsClusterKeyUdf {
     })
   }
 
+  /// Read the first non-null floating-point scalar from an argument array.
   fn first_f64(array: &ArrayRef) -> DataFusionResult<f64> {
     let array = as_float64_array(array.as_ref())?;
     if array.is_empty() || array.is_null(0) {
@@ -368,22 +437,27 @@ impl ComplexGeometryBoundsClusterKeyUdf {
 }
 
 impl ScalarUDFImpl for ComplexGeometryBoundsClusterKeyUdf {
+  /// Return the SQL-visible function name.
   fn name(&self) -> &str {
     "clustering_complex_geometry_xzcode_from_bounds"
   }
 
+  /// Return the bounds-based XZ function signature.
   fn signature(&self) -> &Signature {
     Self::signature()
   }
 
+  /// Return the unsigned XZ key type.
   fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
     Ok(DataType::UInt64)
   }
 
+  /// Return the non-nullable XZ key field.
   fn return_field_from_args(&self, _: ReturnFieldArgs) -> DataFusionResult<Arc<Field>> {
     Ok(Arc::new(Field::new(self.name(), DataType::UInt64, false)))
   }
 
+  /// Assign one XZ key to each supplied feature extent.
   fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
     let arrays = ColumnarValue::values_to_arrays(&args.args)?;
     let xmin = as_float64_array(arrays[0].as_ref())?;
