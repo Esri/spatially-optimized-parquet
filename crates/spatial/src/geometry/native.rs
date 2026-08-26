@@ -1,106 +1,29 @@
-//! Encodes quantized geometry as nested Arrow arrays with integer or floating-point coordinates.
+//! Encodes simplified geometry as nested Arrow arrays with floating-point coordinates.
 //!
-//! Quantized native geometry keeps absolute integer coordinates in nested Arrow lists and
-//! structs. Multipoints use `list<struct<x, y, z?, m?>>`, while polylines and polygons add an
-//! outer list for parts. x and y remain non-null. z and m preserve their source validity through
-//! nullable integer fields.
+//! Native geometry stores snapped world coordinates in nested Arrow lists and structs.
+//! Multipoints use `list<struct<x, y, z?, m?>>`, while polylines and polygons add an outer list
+//! for parts. x and y remain non-null. z and m preserve their source validity through nullable
+//! floating-point fields.
 
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use arrow_array::ArrayRef;
-use arrow_array::builder::{Float64Builder, Int64Builder, ListBuilder, StructBuilder};
-use arrow_array::types::{Float64Type, Int64Type};
+use arrow_array::builder::{Float64Builder, ListBuilder, StructBuilder};
 use arrow_schema::{DataType, Field, Fields};
 
-use super::{
-  ComponentValidity, CoordinateSpace, GeometryFamily, QuantizationTransform, QuantizedGeometry,
-};
+use super::{ComponentValidity, GeometryFamily, QuantizationTransform, QuantizedGeometry};
 
 type CoordinateBuilder = StructBuilder;
 type PointListBuilder = ListBuilder<CoordinateBuilder>;
 type PartListBuilder = ListBuilder<CoordinateBuilder>;
 type MultipartBuilder = ListBuilder<PartListBuilder>;
 
-/// Defines Arrow leaf behavior for integer and floating-point native coordinate storage.
-pub(crate) trait NativeCoordinateType {
-  /// Return the Arrow type used for one coordinate component.
-  fn data_type() -> DataType;
-
-  /// Append one coordinate through this storage representation.
-  fn append(
-    builder: &mut CoordinateBuilder,
-    field_index: usize,
-    value: i64,
-    coordinate_space: CoordinateSpace,
-    transform: &QuantizationTransform,
-    axis: usize,
-  );
-
-  /// Append a null optional coordinate component.
-  fn append_null(builder: &mut CoordinateBuilder, field_index: usize);
+pub(crate) enum NativeGeometryArrayBuilder {
+  MultiPoint(PointListBuilder),
+  Multipart(MultipartBuilder),
 }
 
-impl NativeCoordinateType for Int64Type {
-  fn data_type() -> DataType {
-    DataType::Int64
-  }
-
-  fn append(
-    builder: &mut CoordinateBuilder,
-    field_index: usize,
-    value: i64,
-    _: CoordinateSpace,
-    _: &QuantizationTransform,
-    _: usize,
-  ) {
-    builder
-      .field_builder::<Int64Builder>(field_index)
-      .expect("integer coordinate builder")
-      .append_value(value);
-  }
-
-  fn append_null(builder: &mut CoordinateBuilder, field_index: usize) {
-    builder
-      .field_builder::<Int64Builder>(field_index)
-      .expect("integer coordinate builder")
-      .append_null();
-  }
-}
-
-impl NativeCoordinateType for Float64Type {
-  fn data_type() -> DataType {
-    DataType::Float64
-  }
-
-  fn append(
-    builder: &mut CoordinateBuilder,
-    field_index: usize,
-    value: i64,
-    coordinate_space: CoordinateSpace,
-    transform: &QuantizationTransform,
-    axis: usize,
-  ) {
-    builder
-      .field_builder::<Float64Builder>(field_index)
-      .expect("floating-point coordinate builder")
-      .append_value(coordinate_space.decode(value, transform, axis));
-  }
-
-  fn append_null(builder: &mut CoordinateBuilder, field_index: usize) {
-    builder
-      .field_builder::<Float64Builder>(field_index)
-      .expect("floating-point coordinate builder")
-      .append_null();
-  }
-}
-
-pub(crate) enum NativeGeometryArrayBuilder<T: NativeCoordinateType> {
-  MultiPoint(PointListBuilder, CoordinateSpace, PhantomData<T>),
-  Multipart(MultipartBuilder, CoordinateSpace, PhantomData<T>),
-}
-
-impl<T: NativeCoordinateType> NativeGeometryArrayBuilder<T> {
+impl NativeGeometryArrayBuilder {
   pub(crate) fn data_type(geometry_family: GeometryFamily, has_z: bool, has_m: bool) -> DataType {
     let coordinate_type = Self::coordinate_data_type(has_z, has_m);
     let coordinate_list = DataType::List(Arc::new(Field::new("element", coordinate_type, false)));
@@ -147,7 +70,6 @@ impl<T: NativeCoordinateType> NativeGeometryArrayBuilder<T> {
     has_z: bool,
     has_m: bool,
     capacity: usize,
-    coordinate_space: CoordinateSpace,
   ) -> Self {
     let coordinate_type = Self::coordinate_data_type(has_z, has_m);
     let coordinate_builder =
@@ -156,14 +78,12 @@ impl<T: NativeCoordinateType> NativeGeometryArrayBuilder<T> {
       Arc::new(Field::new("element", coordinate_type.clone(), false)),
     );
     match geometry_family {
-      GeometryFamily::MultiPoint => Self::MultiPoint(point_builder, coordinate_space, PhantomData),
+      GeometryFamily::MultiPoint => Self::MultiPoint(point_builder),
       GeometryFamily::Polyline | GeometryFamily::Polygon => {
         let part_type = DataType::List(Arc::new(Field::new("element", coordinate_type, false)));
         Self::Multipart(
           ListBuilder::with_capacity(point_builder, capacity)
             .with_field(Arc::new(Field::new("element", part_type, false))),
-          coordinate_space,
-          PhantomData,
         )
       }
       GeometryFamily::Point => unreachable!("points do not use multiscale geometry"),
@@ -181,21 +101,20 @@ impl<T: NativeCoordinateType> NativeGeometryArrayBuilder<T> {
   ) {
     let stride = coordinate_stride(has_z, has_m);
     match self {
-      Self::MultiPoint(builder, coordinate_space, _) => {
+      Self::MultiPoint(builder) => {
         Self::append_coordinates(
           builder.values(),
           coordinates,
           has_z,
           has_m,
           validity,
-          *coordinate_space,
           transform,
           0,
         );
         builder.append(true);
       }
 
-      Self::Multipart(builder, coordinate_space, _) => {
+      Self::Multipart(builder) => {
         let mut coordinate_offset = 0usize;
         for &length in lengths {
           let value_count = length as usize * stride;
@@ -205,7 +124,6 @@ impl<T: NativeCoordinateType> NativeGeometryArrayBuilder<T> {
             has_z,
             has_m,
             validity,
-            *coordinate_space,
             transform,
             coordinate_offset / stride,
           );
@@ -223,14 +141,14 @@ impl<T: NativeCoordinateType> NativeGeometryArrayBuilder<T> {
 
   fn coordinate_fields(has_z: bool, has_m: bool) -> Fields {
     let mut fields = vec![
-      Arc::new(Field::new("x", T::data_type(), false)),
-      Arc::new(Field::new("y", T::data_type(), false)),
+      Arc::new(Field::new("x", DataType::Float64, false)),
+      Arc::new(Field::new("y", DataType::Float64, false)),
     ];
     if has_z {
-      fields.push(Arc::new(Field::new("z", T::data_type(), true)));
+      fields.push(Arc::new(Field::new("z", DataType::Float64, true)));
     }
     if has_m {
-      fields.push(Arc::new(Field::new("m", T::data_type(), true)));
+      fields.push(Arc::new(Field::new("m", DataType::Float64, true)));
     }
     Fields::from(fields)
   }
@@ -252,15 +170,15 @@ impl<T: NativeCoordinateType> NativeGeometryArrayBuilder<T> {
 
   pub(crate) fn append_null(&mut self) {
     match self {
-      Self::MultiPoint(builder, _, _) => builder.append(false),
-      Self::Multipart(builder, _, _) => builder.append(false),
+      Self::MultiPoint(builder) => builder.append(false),
+      Self::Multipart(builder) => builder.append(false),
     }
   }
 
   pub(crate) fn finish(&mut self) -> ArrayRef {
     match self {
-      Self::MultiPoint(builder, _, _) => Arc::new(builder.finish()),
-      Self::Multipart(builder, _, _) => Arc::new(builder.finish()),
+      Self::MultiPoint(builder) => Arc::new(builder.finish()),
+      Self::Multipart(builder) => Arc::new(builder.finish()),
     }
   }
 
@@ -270,48 +188,65 @@ impl<T: NativeCoordinateType> NativeGeometryArrayBuilder<T> {
     has_z: bool,
     has_m: bool,
     validity: &ComponentValidity,
-    coordinate_space: CoordinateSpace,
     transform: &QuantizationTransform,
     coordinate_index_offset: usize,
   ) {
     let stride = coordinate_stride(has_z, has_m);
     for (local_coordinate_index, coordinate) in coordinates.chunks_exact(stride).enumerate() {
       let coordinate_index = coordinate_index_offset + local_coordinate_index;
-      T::append(builder, 0, coordinate[0], coordinate_space, transform, 0);
-      T::append(builder, 1, coordinate[1], coordinate_space, transform, 1);
+      append_value(builder, 0, coordinate[0], transform, 0);
+      append_value(builder, 1, coordinate[1], transform, 1);
       let mut component_index = 2;
       if has_z {
         if validity.z_is_valid(coordinate_index) {
-          T::append(
+          append_value(
             builder,
             component_index,
             coordinate[component_index],
-            coordinate_space,
             transform,
             2,
           );
         } else {
-          T::append_null(builder, component_index);
+          append_null(builder, component_index);
         }
         component_index += 1;
       }
       if has_m {
         if validity.m_is_valid(coordinate_index) {
-          T::append(
+          append_value(
             builder,
             component_index,
             coordinate[component_index],
-            coordinate_space,
             transform,
             3,
           );
         } else {
-          T::append_null(builder, component_index);
+          append_null(builder, component_index);
         }
       }
       builder.append(true);
     }
   }
+}
+
+fn append_value(
+  builder: &mut CoordinateBuilder,
+  field_index: usize,
+  value: i64,
+  transform: &QuantizationTransform,
+  axis: usize,
+) {
+  builder
+    .field_builder::<Float64Builder>(field_index)
+    .expect("floating-point coordinate builder")
+    .append_value(transform.unquantize(value, axis));
+}
+
+fn append_null(builder: &mut CoordinateBuilder, field_index: usize) {
+  builder
+    .field_builder::<Float64Builder>(field_index)
+    .expect("floating-point coordinate builder")
+    .append_null();
 }
 
 fn coordinate_stride(has_z: bool, has_m: bool) -> usize {
@@ -320,20 +255,14 @@ fn coordinate_stride(has_z: bool, has_m: bool) -> usize {
 
 #[cfg(test)]
 mod tests {
-  use arrow_array::{Array, Int64Array, ListArray, StructArray};
+  use arrow_array::{Array, Float64Array, ListArray, StructArray};
 
   use super::*;
   use crate::geometry::GeometryFamily;
 
   #[test]
-  fn builds_multipart_geometry_with_absolute_integer_coordinates() {
-    let mut builder = NativeGeometryArrayBuilder::<Int64Type>::new(
-      GeometryFamily::Polygon,
-      false,
-      false,
-      1,
-      CoordinateSpace::Quantized,
-    );
+  fn builds_multipart_geometry_with_world_coordinates() {
+    let mut builder = NativeGeometryArrayBuilder::new(GeometryFamily::Polygon, false, false, 1);
     builder.append_geometry(
       &[1, 2, 4, 6, 7, 8],
       &[2, 1],
@@ -341,8 +270,8 @@ mod tests {
       false,
       &ComponentValidity::default(),
       &QuantizationTransform {
-        scale: [1.0; 4],
-        translate: [0.0; 4],
+        scale: [0.5; 4],
+        translate: [10.0; 4],
       },
     );
     let array = builder.finish();
@@ -355,10 +284,10 @@ mod tests {
       .column_by_name("x")
       .unwrap()
       .as_any()
-      .downcast_ref::<Int64Array>()
+      .downcast_ref::<Float64Array>()
       .unwrap();
 
-    assert_eq!(x.values(), &[1, 4]);
+    assert_eq!(x.values(), &[10.5, 12.0]);
     assert_eq!(parts.len(), 2);
   }
 }

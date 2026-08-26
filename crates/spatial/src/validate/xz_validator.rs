@@ -1,4 +1,3 @@
-use arrow_array::types::{Float64Type, Int64Type};
 use arrow_array::{Array, Float64Array};
 use arrow_schema::DataType;
 
@@ -35,33 +34,15 @@ impl XzValidator {
         ValidationLocation::file(file.file.relative_path.clone()).with_column(level_path.clone());
       match FileValidator::field_at_path(file.metadata.schema().as_ref(), &level_path) {
         Some(field)
-          if index.encoding == GeodisplayEncoding::NativeQuantized
+          if index.encoding == GeodisplayEncoding::Native
             && native_geometry_type.is_some_and(|geometry_type| {
               field.data_type()
-                == &NativeGeometryArrayBuilder::<Int64Type>::data_type(
-                  geometry_type,
-                  index.has_z,
-                  index.has_m,
-                )
+                == &NativeGeometryArrayBuilder::data_type(geometry_type, index.has_z, index.has_m)
             }) => {}
         Some(field)
           if matches!(
             index.encoding,
-            GeodisplayEncoding::NativeQuantizedFloat | GeodisplayEncoding::Native
-          ) && native_geometry_type.is_some_and(|geometry_type| {
-            field.data_type()
-              == &NativeGeometryArrayBuilder::<Float64Type>::data_type(
-                geometry_type,
-                index.has_z,
-                index.has_m,
-              )
-          }) => {}
-        Some(field)
-          if matches!(
-            index.encoding,
-            GeodisplayEncoding::EsriPbf
-              | GeodisplayEncoding::WkbQuantized
-              | GeodisplayEncoding::Wkb
+            GeodisplayEncoding::EsriPbf | GeodisplayEncoding::Wkb
           ) && matches!(
             field.data_type(),
             DataType::Binary | DataType::LargeBinary | DataType::BinaryView
@@ -145,12 +126,7 @@ impl XzValidator {
       .geometry_types()
       .iter()
       .all(|geometry_type| MetadataValidator::geometry_base_type(geometry_type) == "Polygon");
-    let native_geometry = matches!(
-      index.encoding,
-      GeodisplayEncoding::NativeQuantized
-        | GeodisplayEncoding::NativeQuantizedFloat
-        | GeodisplayEncoding::Native
-    );
+    let native_geometry = index.encoding == GeodisplayEncoding::Native;
 
     let read_result = file.read_row_groups(&projected_columns, |row_group, row_offset, batch| {
       let geometry = FileValidator::array_at_path(batch, contract.geometry_column())?;
@@ -252,10 +228,7 @@ impl XzValidator {
             ),
             (true, None) => {}
             (source_is_null, Some(payload)) => {
-              if matches!(
-                index.encoding,
-                GeodisplayEncoding::WkbQuantized | GeodisplayEncoding::Wkb
-              ) {
+              if index.encoding == GeodisplayEncoding::Wkb {
                 match GeometryValidator::inspect(&payload) {
                   Ok(_) => {
                     level_found_payload[level_index] = true;

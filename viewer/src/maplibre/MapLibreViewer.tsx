@@ -17,6 +17,7 @@ import {
   type PresetDataset,
   datasets,
 } from "../common/dataset/datasets";
+import { useDatasetRoute } from "../common/dataset/useDatasetRoute";
 import { formatCompactCount } from "../common/formatCompactCount";
 import {
   MapLibreParquetLayer,
@@ -33,8 +34,10 @@ const mapScaleAtZoomZero = 295_829_355.4545656;
  */
 export default function MaplibreViewer() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [datasetIndex, setDatasetIndex] = useState(0);
-  const activeDataset = datasets[datasetIndex];
+  const { dataset: routedDataset, selectDataset } = useDatasetRoute();
+  const activeDataset = routedDataset.kind === "preset"
+    ? routedDataset
+    : datasets[0];
   const map = useMapLibreMap(containerRef, datasets[0]);
   const status = useDatasetLayer(map, activeDataset);
 
@@ -48,12 +51,7 @@ export default function MaplibreViewer() {
           featureCount: activeDataset.count,
         }}
         onDatasetSelect={(dataset) => {
-          const index = datasets.findIndex(
-            (candidate) => candidate.id === dataset.id,
-          );
-          if (index >= 0) {
-            setDatasetIndex(index);
-          }
+          selectDataset(dataset);
         }}
       />
       <calcite-panel className={styles.maplibrePanel}>

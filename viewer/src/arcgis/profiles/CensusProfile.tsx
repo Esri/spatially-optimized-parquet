@@ -56,159 +56,150 @@ const defaultPopulationThreshold = 300;
 export function createCensusProfile(): DatasetMapProfile {
   return {
     layerProperties: {
-    renderer: createDotDensityRenderer(10),
-    popupTemplate: {
-      title: "Census block {GEOID}",
-      content: [
-        {
-          type: "fields",
-          fieldInfos: [
-            {
-              fieldName: "POP100",
-              label: "Population",
-              format: { digitSeparator: true, places: 0 },
-            },
-            {
-              fieldName: "HU100",
-              label: "Housing units",
-              format: { digitSeparator: true, places: 0 },
-            },
-            {
-              fieldName: "AREALAND",
-              label: "Land area (m²)",
-              format: { digitSeparator: true, places: 0 },
-            },
-            ...demographicAttributes.map(({ field, label }) => ({
-              fieldName: field,
-              label,
-              format: { digitSeparator: true, places: 0 },
-            })),
-          ],
-        },
-      ],
+      popupTemplate: {
+        title: "Census block {GEOID}",
+        content: [
+          {
+            type: "fields",
+            fieldInfos: [
+              {
+                fieldName: "POP100",
+                label: "Population",
+                format: { digitSeparator: true, places: 0 },
+              },
+              {
+                fieldName: "HU100",
+                label: "Housing units",
+                format: { digitSeparator: true, places: 0 },
+              },
+              {
+                fieldName: "AREALAND",
+                label: "Land area (m²)",
+                format: { digitSeparator: true, places: 0 },
+              },
+              ...demographicAttributes.map(({ field, label }) => ({
+                fieldName: field,
+                label,
+                format: { digitSeparator: true, places: 0 },
+              })),
+            ],
+          },
+        ],
+      },
     },
-  },
-  mapSlotComponent: function CensusMapControls({
-    clusterEnabled,
-    headerActionsElement,
-    onPresentationChange,
-  }: DatasetMapSlotProps) {
-    const [compactControlsButton, setCompactControlsButton] =
-      useState<HTMLCalciteButtonElement | null>(null);
-    const [compactControlsOpen, setCompactControlsOpen] = useState(false);
-    const [demographicsEnabled, setDemographicsEnabled] = useState(true);
-    const [dotValue, setDotValue] = useState(10);
-    const [populationThreshold, setPopulationThreshold] = useState(
-      defaultPopulationThreshold,
-    );
-
-    useEffect(() => {
-      onPresentationChange({
-        renderer: demographicsEnabled
-          ? createDotDensityRenderer(dotValue)
-          : createBoundaryRenderer(),
-        featureEffect: createPopulationFeatureEffect(
-          demographicsEnabled,
-          populationThreshold,
-        ),
-      });
-    }, [
-      demographicsEnabled,
-      dotValue,
+    initialPresentation: {
+      effect: "drop-shadow(3px, 3px, 8px) bloom(0.15, .25px, .1)",
+      renderer: createDotDensityRenderer(10),
+    },
+    mapSlotComponent: function CensusMapControls({
+      clusterEnabled,
+      headerActionsElement,
       onPresentationChange,
-      populationThreshold,
-    ]);
+    }: DatasetMapSlotProps) {
+      const [compactControlsButton, setCompactControlsButton] =
+        useState<HTMLCalciteButtonElement | null>(null);
+      const [compactControlsOpen, setCompactControlsOpen] = useState(false);
+      const [demographicsEnabled, setDemographicsEnabled] = useState(true);
+      const [dotValue, setDotValue] = useState(10);
+      const [populationThreshold, setPopulationThreshold] = useState(
+        defaultPopulationThreshold,
+      );
 
-    return (
-      <>
-        <DatasetMapLegend
-          clusterEnabled={clusterEnabled}
-          hidden={!demographicsEnabled}
-        />
-        {headerActionsElement
-          ? createPortal(
-              <>
-                <div className={styles.censusMapHeaderControls}>
-                  {renderCensusRendererControls({
-                    demographicsEnabled,
-                    dotValue,
-                    populationThreshold,
-                    setDemographicsEnabled,
-                    setDotValue,
-                    setPopulationThreshold,
-                    controlIdPrefix: "census-inline",
-                    showModeLabel: false,
-                  })}
-                  <span
-                    className={styles.mapHeaderActionDivider}
-                    aria-hidden="true"
-                  >
-                    |
-                  </span>
-                </div>
-                <div className={styles.censusMapCompactControls}>
-                  <calcite-button
-                    ref={setCompactControlsButton}
-                    appearance="transparent"
-                    iconStart="sliders-horizontal"
-                    kind="neutral"
-                    label="Census renderer controls"
-                    onClick={() => {
-                      requestAnimationFrame(() =>
-                        setCompactControlsOpen((open) => !open),
-                      );
-                    }}
-                  />
-                  {compactControlsButton ? (
-                    <calcite-popover
-                      label="Census renderer controls"
-                      open={compactControlsOpen}
-                      overlayPositioning="fixed"
-                      placement="bottom-end"
-                      referenceElement={compactControlsButton}
-                      oncalcitePopoverClose={() =>
-                        setCompactControlsOpen(false)
-                      }
+      useEffect(() => {
+        onPresentationChange({
+          renderer: demographicsEnabled
+            ? createDotDensityRenderer(dotValue)
+            : createBoundaryRenderer(),
+          featureEffect: createPopulationFeatureEffect(
+            demographicsEnabled,
+            populationThreshold,
+          ),
+        });
+      }, [
+        demographicsEnabled,
+        dotValue,
+        onPresentationChange,
+        populationThreshold,
+      ]);
+
+      return (
+        <>
+          <DatasetMapLegend
+            clusterEnabled={clusterEnabled}
+            hidden={!demographicsEnabled}
+          />
+          {headerActionsElement
+            ? createPortal(
+                <>
+                  <div className={styles.censusMapHeaderControls}>
+                    {renderCensusRendererControls({
+                      demographicsEnabled,
+                      dotValue,
+                      populationThreshold,
+                      setDemographicsEnabled,
+                      setDotValue,
+                      setPopulationThreshold,
+                      controlIdPrefix: "census-inline",
+                      showModeLabel: false,
+                    })}
+                    <span
+                      className={styles.mapHeaderActionDivider}
+                      aria-hidden="true"
                     >
-                      <div className={styles.censusMapPopoverControls}>
-                        {renderCensusRendererControls({
-                          demographicsEnabled,
-                          dotValue,
-                          populationThreshold,
-                          setDemographicsEnabled,
-                          setDotValue,
-                          setPopulationThreshold,
-                          controlIdPrefix: "census-popover",
-                          showModeLabel: true,
-                        })}
-                      </div>
-                    </calcite-popover>
-                  ) : null}
-                  <span
-                    className={styles.mapHeaderActionDivider}
-                    aria-hidden="true"
-                  >
-                    |
-                  </span>
-                </div>
-              </>,
-              headerActionsElement,
-            )
-          : null}
-      </>
-    );
-  },
-  configureLayer(layer) {
-    const censusLayerEffect =
-      "drop-shadow(3px, 3px, 8px) bloom(0.15, .25px, .1)";
-
-    layer.effect = censusLayerEffect;
-
-    return () => {
-      if (layer.effect === censusLayerEffect) {
-        layer.effect = null;
-      }
-    };
+                      |
+                    </span>
+                  </div>
+                  <div className={styles.censusMapCompactControls}>
+                    <calcite-button
+                      ref={setCompactControlsButton}
+                      appearance="transparent"
+                      iconStart="sliders-horizontal"
+                      kind="neutral"
+                      label="Census renderer controls"
+                      onClick={() => {
+                        requestAnimationFrame(() =>
+                          setCompactControlsOpen((open) => !open),
+                        );
+                      }}
+                    />
+                    {compactControlsButton ? (
+                      <calcite-popover
+                        label="Census renderer controls"
+                        open={compactControlsOpen}
+                        overlayPositioning="fixed"
+                        placement="bottom-end"
+                        referenceElement={compactControlsButton}
+                        oncalcitePopoverClose={() =>
+                          setCompactControlsOpen(false)
+                        }
+                      >
+                        <div className={styles.censusMapPopoverControls}>
+                          {renderCensusRendererControls({
+                            demographicsEnabled,
+                            dotValue,
+                            populationThreshold,
+                            setDemographicsEnabled,
+                            setDotValue,
+                            setPopulationThreshold,
+                            controlIdPrefix: "census-popover",
+                            showModeLabel: true,
+                          })}
+                        </div>
+                      </calcite-popover>
+                    ) : null}
+                    <span
+                      className={styles.mapHeaderActionDivider}
+                      aria-hidden="true"
+                    >
+                      |
+                    </span>
+                  </div>
+                </>,
+                headerActionsElement,
+              )
+            : null}
+        </>
+      );
     },
   };
 }

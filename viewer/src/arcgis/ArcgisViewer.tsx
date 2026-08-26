@@ -21,8 +21,8 @@ import {
   createCustomUrlDataset,
   createPortalItemDataset,
   type Dataset,
-  datasets,
 } from "../common/dataset/datasets";
+import { useDatasetRoute } from "../common/dataset/useDatasetRoute";
 import { formatCompactCount } from "../common/formatCompactCount";
 import { formatRatio } from "../common/formatNumber";
 import type { DatasetDetailSummary } from "../parquet/fileDetails";
@@ -38,7 +38,10 @@ import {
 } from "./cluster/useClusterMode";
 import { FileExplorer } from "./file-explorer/FileExplorer";
 import {
-  type DatasetLayerPresentation,
+  type LayerPresentation,
+  type LayerPresentationChange,
+} from "./layerPresentation";
+import {
   type DatasetMapProfile,
   resolveDatasetMapProfile,
 } from "./profiles/profiles";
@@ -61,6 +64,7 @@ interface ResponsiveDetailsLayout {
 interface ArcgisViewState {
   center: ViewCenter | null;
   ready: boolean;
+  scale: number | null;
 }
 
 interface MapPanelHeaderProps {
@@ -83,25 +87,25 @@ interface MapCanvasProps {
   layer: ParquetLayer | null;
   mapElementRef: RefObject<HTMLArcgisMapElement | null>;
   onClusterLevelSelect(level: number): void;
-  onPresentationChange(
-    presentation: Partial<DatasetLayerPresentation>,
-  ): void;
+  onPresentationChange(presentation: LayerPresentationChange): void;
   profile: DatasetMapProfile;
   selectedClusterLevel: number | null;
 }
 
 interface ArcgisMapPanelProps {
+  clusterEnabled: boolean;
   dataset: Dataset;
   detailsLayout: ResponsiveDetailsLayout;
   mapElementRef: RefObject<HTMLArcgisMapElement | null>;
   profile: DatasetMapProfile;
   session: ArcgisDatasetSessionResult;
+  setClusterEnabled(enabled: boolean): void;
   viewState: ArcgisViewState;
 }
 
 interface LayerPresentationState {
   layer: ParquetLayer | null;
-  presentation: DatasetLayerPresentation;
+  presentation: LayerPresentation;
 }
 
 const defaultCenter: [number, number] = [-98, 39];
@@ -171,28 +175,55 @@ const MapCanvas = memo(function MapCanvas({
  * This component owns viewer-level state so map integration and file diagnostics stay synchronized when the active dataset changes.
  */
 export function ArcgisViewer() {
-  const [requestedDataset, setRequestedDataset] = useState<Dataset>(datasets[0]);
+  const {
+    dataset: requestedDataset,
+    selectDataset,
+    setViewpoint,
+    viewpoint,
+  } = useDatasetRoute();
+  const [clusterEnabled, setClusterEnabled] = useState(false);
   const mapElementRef = useRef<HTMLArcgisMapElement>(null);
   const gridContainerRef = useRef<HTMLElement>(null);
   const detailsLayout = useResponsiveDetailsLayout(gridContainerRef);
-  const viewState = useArcgisViewState(mapElementRef);
+  const viewState = useArcgisViewState(mapElementRef, setViewpoint);
   const requestedProfile = resolveDatasetMapProfile(
     requestedDataset.kind === "preset" ? requestedDataset.id : undefined,
   );
   const datasetSession = useArcgisDatasetSession({
+    clusterEnabled,
     dataset: requestedDataset,
     mapElementRef,
     mapReady: viewState.ready,
     profile: requestedProfile,
+    viewpoint,
   });
   const activeDataset = datasetSession.dataset;
   const activeProfile = resolveDatasetMapProfile(
     activeDataset.kind === "preset" ? activeDataset.id : undefined,
   );
   const detailSummary = datasetSession.download.detailSummary;
+
+  useEffect(() => {
+    const view = mapElementRef.current?.view;
+    if (
+      !viewpoint ||
+      !view ||
+      datasetSession.dataset.id !== requestedDataset.id ||
+      datasetSession.loading
+    ) {
+      return;
+    }
+    void view.goTo(viewpoint, { animate: false });
+  }, [
+    datasetSession.dataset.id,
+    datasetSession.loading,
+    mapElementRef,
+    requestedDataset.id,
+    viewpoint,
+  ]);
   const requestDataset = (dataset: Dataset) => {
     detailsLayout.setOpen(false);
-    setRequestedDataset(dataset);
+    selectDataset(dataset);
   };
 
   return (
@@ -227,11 +258,13 @@ export function ArcgisViewer() {
         showPresetMetadata={false}
       />
       <ArcgisMapPanel
+        clusterEnabled={clusterEnabled}
         dataset={activeDataset}
         detailsLayout={detailsLayout}
         mapElementRef={mapElementRef}
         profile={activeProfile}
         session={datasetSession}
+        setClusterEnabled={setClusterEnabled}
         viewState={viewState}
       />
       <FileExplorer
@@ -282,9 +315,14 @@ function useResponsiveDetailsLayout(
 
 function useArcgisViewState(
   mapElementRef: RefObject<HTMLArcgisMapElement | null>,
+  onViewpointChange: (viewpoint: {
+    center: [number, number];
+    scale: number;
+  }) => void,
 ): ArcgisViewState {
   const [ready, setReady] = useState(false);
   const [center, setCenter] = useState<ViewCenter | null>(null);
+  const [scale, setScale] = useState<number | null>(null);
 
   useEffect(() => {
     const mapElement = mapElementRef.current;
@@ -312,34 +350,43 @@ function useArcgisViewState(
 
     return reactiveUtils
       .watch(
-        () => view.center,
-        (nextCenter) => {
+        () => [view.center, view.scale, view.stationary] as const,
+        ([nextCenter, nextScale, stationary]) => {
           if (nextCenter.latitude == null || nextCenter.longitude == null) {
             setCenter(null);
+            setScale(null);
             return;
           }
           setCenter({
             latitude: nextCenter.latitude,
             longitude: nextCenter.longitude,
           });
+          setScale(nextScale);
+          if (stationary && Number.isFinite(nextScale) && nextScale > 0) {
+            onViewpointChange({
+              center: [nextCenter.longitude, nextCenter.latitude],
+              scale: nextScale,
+            });
+          }
         },
         { initial: true },
       )
       .remove;
-  }, [mapElementRef, ready]);
+  }, [mapElementRef, onViewpointChange, ready]);
 
-  return { center, ready };
+  return { center, ready, scale };
 }
 
 function ArcgisMapPanel({
+  clusterEnabled,
   dataset,
   detailsLayout,
   mapElementRef,
   profile,
   session,
+  setClusterEnabled,
   viewState,
 }: ArcgisMapPanelProps) {
-  const [clusterEnabled, setClusterEnabled] = useState(false);
   const [headerActionsElement, setHeaderActionsElement] =
     useState<HTMLDivElement | null>(null);
   const downloadFiles = session.download.files;
@@ -354,7 +401,10 @@ function ArcgisMapPanel({
   const [selectedClusterLevel, setSelectedClusterLevel] =
     useState<number | null>(null);
   const { presentation, updatePresentation } =
-    useDatasetLayerPresentation(session.layer);
+    useDatasetLayerPresentation(
+      session.layer,
+      session.normalPresentation,
+    );
   const selectedLevel = clusterLevels.find(
     ({ level }) => level === selectedClusterLevel,
   ) ?? clusterLevels.at(-1) ?? null;
@@ -367,6 +417,7 @@ function ArcgisMapPanel({
     mapElementRef,
     normalPresentation: presentation,
     parquetSource: session.parquetSource,
+    preparedRenderer: session.preparedClusterRenderer,
   });
 
   useEffect(() => {
@@ -404,43 +455,33 @@ function ArcgisMapPanel({
 
 function useDatasetLayerPresentation(
   layer: ParquetLayer | null,
+  initialPresentation: LayerPresentation,
 ): {
-  presentation: DatasetLayerPresentation;
-  updatePresentation(
-    change: Partial<DatasetLayerPresentation>,
-  ): void;
+  presentation: LayerPresentation;
+  updatePresentation(change: LayerPresentationChange): void;
 } {
   const [state, setState] = useState<LayerPresentationState>(() => ({
     layer,
-    presentation: readLayerPresentation(layer),
+    presentation: initialPresentation,
   }));
   const presentation = state.layer === layer
     ? state.presentation
-    : readLayerPresentation(layer);
+    : initialPresentation;
   const updatePresentation = useCallback(
-    (change: Partial<DatasetLayerPresentation>) => {
+    (change: LayerPresentationChange) => {
       setState((current) => {
         const currentPresentation = current.layer === layer
           ? current.presentation
-          : readLayerPresentation(layer);
+          : initialPresentation;
         return {
           layer,
           presentation: { ...currentPresentation, ...change },
         };
       });
     },
-    [layer],
+    [initialPresentation, layer],
   );
   return { presentation, updatePresentation };
-}
-
-function readLayerPresentation(
-  layer: ParquetLayer | null,
-): DatasetLayerPresentation {
-  return {
-    featureEffect: layer?.featureEffect ?? null,
-    renderer: layer?.renderer ?? null,
-  };
 }
 
 function MapPanelHeader({

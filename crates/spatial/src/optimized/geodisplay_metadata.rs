@@ -64,14 +64,8 @@ pub(crate) enum GeodisplayMetadata {
 pub(crate) enum GeodisplayEncoding {
   #[serde(rename = "esriPBF")]
   EsriPbf,
-  #[serde(rename = "wkbQuantized")]
-  WkbQuantized,
   #[serde(rename = "wkb")]
   Wkb,
-  #[serde(rename = "nativeQuantized")]
-  NativeQuantized,
-  #[serde(rename = "nativeQuantizedFloat")]
-  NativeQuantizedFloat,
   #[serde(rename = "native")]
   Native,
 }
@@ -80,10 +74,7 @@ impl GeodisplayEncoding {
   pub(crate) const fn as_str(self) -> &'static str {
     match self {
       Self::EsriPbf => "esriPBF",
-      Self::WkbQuantized => "wkbQuantized",
       Self::Wkb => "wkb",
-      Self::NativeQuantized => "nativeQuantized",
-      Self::NativeQuantizedFloat => "nativeQuantizedFloat",
       Self::Native => "native",
     }
   }
@@ -93,10 +84,7 @@ impl From<MultiscaleEncoding> for GeodisplayEncoding {
   fn from(encoding: MultiscaleEncoding) -> Self {
     match encoding {
       MultiscaleEncoding::Pbf => Self::EsriPbf,
-      MultiscaleEncoding::WkbQuantized => Self::WkbQuantized,
       MultiscaleEncoding::Wkb => Self::Wkb,
-      MultiscaleEncoding::NativeQuantized => Self::NativeQuantized,
-      MultiscaleEncoding::NativeQuantizedFloat => Self::NativeQuantizedFloat,
       MultiscaleEncoding::Native => Self::Native,
     }
   }

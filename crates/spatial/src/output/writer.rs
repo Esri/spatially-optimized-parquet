@@ -104,24 +104,6 @@ impl WriterOptions {
     }
   }
 
-  /// Apply integer delta packing to selected physical coordinate leaves.
-  pub(crate) fn with_delta_binary_packed_columns(
-    mut self,
-    columns: impl IntoIterator<Item = String>,
-  ) -> Self {
-    for column in columns {
-      self.options.column_specific_options.insert(
-        column,
-        ParquetColumnOptions {
-          encoding: Some("delta_binary_packed".to_string()),
-          dictionary_enabled: Some(false),
-          ..Default::default()
-        },
-      );
-    }
-    self
-  }
-
   /// Apply byte-stream splitting to selected floating-point coordinate leaves.
   pub(crate) fn with_byte_stream_split_columns(
     mut self,
@@ -389,7 +371,7 @@ mod tests {
   }
 
   #[test]
-  fn configures_encodings_by_physical_column_type() {
+  fn configures_byte_stream_split_by_physical_column_type() {
     let schema = Schema::new(vec![
       Field::new("name", DataType::Utf8, true),
       Field::new("geokey", DataType::UInt64, false),
@@ -403,7 +385,6 @@ mod tests {
     ]);
     let options = WriterOptions::new("snappy", &[])
       .unwrap()
-      .with_delta_binary_packed_columns(["geokey".to_string()])
       .with_byte_stream_split_columns(["coordinate".to_string()])
       .into_table_options(&schema)
       .unwrap();
@@ -417,16 +398,7 @@ mod tests {
       options.column_specific_options["properties.category"].dictionary_enabled,
       Some(true)
     );
-    assert_eq!(
-      options.column_specific_options["geokey"]
-        .encoding
-        .as_deref(),
-      Some("delta_binary_packed")
-    );
-    assert_eq!(
-      options.column_specific_options["geokey"].dictionary_enabled,
-      Some(false)
-    );
+    assert!(!options.column_specific_options.contains_key("geokey"));
     assert_eq!(
       options.column_specific_options["coordinate"]
         .encoding

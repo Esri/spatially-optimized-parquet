@@ -22,8 +22,8 @@ pub(crate) use geometry::{Coord, Geometry, GeometryFamily};
 pub(crate) use native::NativeGeometryArrayBuilder;
 pub(crate) use pbf::{PbfArrayBuilder, PbfGeometry};
 pub(crate) use quantization::{
-  ComponentValidity, CoordinateSpace, QuantizationOptions, QuantizationTransform,
-  QuantizedGeometry, encode_deltas_xy,
+  ComponentValidity, QuantizationOptions, QuantizationTransform, QuantizedGeometry,
+  encode_deltas_xy,
 };
 pub(crate) use types::{
   CoordinateDimensions, GeometryColumn, GeometryEncoding, GeometryKind, GeometryType,

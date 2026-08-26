@@ -5,6 +5,7 @@ export interface ClusterLevelColumn {
   columnIndex: number;
   fieldName: string;
   fileId: number;
+  repeated: boolean;
 }
 
 export interface ClusterLevel {
@@ -15,6 +16,7 @@ export interface ClusterLevel {
 
 interface FileLevel {
   column: ClusterLevelColumn;
+  label: string;
   level: number;
 }
 
@@ -32,10 +34,11 @@ export function deriveClusterLevels(
   return commonLevelNumbers
     .sort((left, right) => left - right)
     .map((level) => {
+      const fileLevel = fileLevels[0].get(level)!;
       const columns = fileLevels.map((levels) => levels.get(level)!.column);
       return {
         columns,
-        label: formatFieldLeafName(columns[0].fieldName),
+        label: fileLevel.label,
         level,
       };
     });
@@ -59,20 +62,40 @@ function deriveFileLevels(
     }
 
     const fieldPath = [...metadata.parentPath, ...declaredPath];
-    const column = file.columns.find(({ path }) => pathsEqual(path, fieldPath));
+    const column = resolveLevelColumn(file, fieldPath);
     if (!column) {
       continue;
     }
     result.set(level, {
       level,
+      label: formatFieldLeafName(fieldPath.join(".")),
       column: {
         columnIndex: column.index,
-        fieldName: fieldPath.join("."),
+        fieldName: column.path.join("."),
         fileId: file.fileId,
+        repeated: column.maxRepetitionLevel > 0,
       },
     });
   }
   return result;
+}
+
+function resolveLevelColumn(
+  file: ParquetFileDiagnostics,
+  fieldPath: readonly string[],
+) {
+  const exactColumn = file.columns.find(({ path }) =>
+    pathsEqual(path, fieldPath)
+  );
+  if (exactColumn) {
+    return exactColumn;
+  }
+
+  return file.columns.find(({ path }) =>
+    path.length > fieldPath.length &&
+    path.at(-1) === "x" &&
+    fieldPath.every((part, index) => path[index] === part)
+  );
 }
 
 function readLevelColumnPath(value: unknown): string[] | null {

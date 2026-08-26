@@ -23,11 +23,13 @@ describe("deriveClusterLevels", () => {
             fileId: 0,
             columnIndex: 0,
             fieldName: "geodisplay.level_2",
+            repeated: false,
           },
           {
             fileId: 1,
             columnIndex: 0,
             fieldName: "geometry.coarse",
+            repeated: false,
           },
         ],
       },
@@ -39,11 +41,13 @@ describe("deriveClusterLevels", () => {
             fileId: 0,
             columnIndex: 1,
             fieldName: "geodisplay.level_16",
+            repeated: false,
           },
           {
             fileId: 1,
             columnIndex: 1,
             fieldName: "geometry.detailed",
+            repeated: false,
           },
         ],
       },
@@ -63,6 +67,54 @@ describe("deriveClusterLevels", () => {
       ({ level }) => level,
     )).toEqual([16]);
   });
+
+  it("uses the physical X column for native quantized levels", () => {
+    const file = createFile(0, [
+      { level: 16, path: ["geodisplay", "level_16"] },
+    ]);
+    file.columns = [
+      createColumn(
+        0,
+        [
+          "geodisplay",
+          "level_16",
+          "list",
+          "element",
+          "list",
+          "element",
+          "x",
+        ],
+      ),
+      createColumn(
+        1,
+        [
+          "geodisplay",
+          "level_16",
+          "list",
+          "element",
+          "list",
+          "element",
+          "y",
+        ],
+      ),
+    ];
+
+    expect(deriveClusterLevels([file])).toEqual([
+      {
+        level: 16,
+        label: "level_16",
+        columns: [
+          {
+            fileId: 0,
+            columnIndex: 0,
+            fieldName:
+              "geodisplay.level_16.list.element.list.element.x",
+            repeated: true,
+          },
+        ],
+      },
+    ]);
+  });
 });
 
 function createFile(
@@ -81,16 +133,20 @@ function createFile(
         levels: levels.map(({ level, path }) => ({ level, column: path })),
       }),
     }],
-    columns: levels.map(({ path }, index) => ({
-      index,
-      path,
-      name: path.at(-1)!,
-      physicalType: "BYTE_ARRAY",
-      logicalType: null,
-      nullable: true,
-      maxDefinitionLevel: 1,
-      maxRepetitionLevel: 0,
-    })),
+    columns: levels.map(({ path }, index) => createColumn(index, path)),
     rowGroups: [],
+  };
+}
+
+function createColumn(index: number, path: string[]) {
+  return {
+    index,
+    path,
+    name: path.at(-1)!,
+    physicalType: "BYTE_ARRAY",
+    logicalType: null,
+    nullable: true,
+    maxDefinitionLevel: 1,
+    maxRepetitionLevel: path.at(-1) === "x" || path.at(-1) === "y" ? 2 : 0,
   };
 }

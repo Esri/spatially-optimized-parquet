@@ -4,8 +4,8 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use arrow_array::{
-  Array, BinaryArray, Float64Array, Int32Array, Int64Array, ListArray, RecordBatch, StringArray,
-  StructArray, UInt64Array,
+  Array, BinaryArray, Float64Array, Int32Array, ListArray, RecordBatch, StringArray, StructArray,
+  UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema};
 use gdal_sys::OGRwkbGeometryType;
@@ -58,7 +58,7 @@ fn run_optimized_native(
   input: &Path,
   output: &Path,
 ) -> Result<SpatialPipelineResult, PipelineError> {
-  run_optimized_multiscale(input, output, MultiscaleEncoding::NativeQuantized)
+  run_optimized_multiscale(input, output, MultiscaleEncoding::Native)
 }
 
 fn run_optimized_multiscale(
@@ -1127,101 +1127,11 @@ fn optimized_output_writes_complex_geometry_display_struct_and_metadata() {
 }
 
 #[test]
-fn optimized_output_writes_native_quantized_multiscale_geometry() {
-  let temp = TempDir::new().unwrap();
-  let input = temp.path().join("polygons.parquet");
-  let output = temp.path().join("polygons-native.parquet");
-  let schema = Arc::new(Schema::new(vec![
-    Field::new("id", DataType::Int32, false),
-    Field::new("geometry", DataType::Binary, true),
-  ]));
-  let polygon = wkb_polygon(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 0.0)]);
-  let batch = RecordBatch::try_new(
-    schema.clone(),
-    vec![
-      Arc::new(Int32Array::from(vec![1])),
-      Arc::new(BinaryArray::from(vec![Some(polygon.as_slice())])),
-    ],
-  )
-  .unwrap();
-  write_parquet(
-    &input,
-    &schema,
-    &[batch],
-    parquet::basic::Compression::SNAPPY,
-    &[geoparquet_kv("geometry", &["Polygon"])],
-  );
-
-  run_optimized_native(&input, &output).unwrap();
-  validate(&output).unwrap().ensure_valid().unwrap();
-
-  let dataframe = runtime()
-    .block_on(scan_parquet(output.to_str().unwrap()))
-    .unwrap();
-  let batches = runtime().block_on(dataframe.collect()).unwrap();
-  let geolod = batches[0]
-    .column_by_name("geolod")
-    .unwrap()
-    .as_any()
-    .downcast_ref::<StructArray>()
-    .unwrap();
-  let geometries = geolod
-    .column_by_name("level_16")
-    .unwrap()
-    .as_any()
-    .downcast_ref::<ListArray>()
-    .unwrap();
-  let parts = geometries
-    .value(0)
-    .as_any()
-    .downcast_ref::<ListArray>()
-    .unwrap()
-    .clone();
-  let coordinates = parts
-    .value(0)
-    .as_any()
-    .downcast_ref::<StructArray>()
-    .unwrap()
-    .clone();
-  let x = coordinates
-    .column_by_name("x")
-    .unwrap()
-    .as_any()
-    .downcast_ref::<Int64Array>()
-    .unwrap();
-  assert_eq!(x.value(0), 0);
-  assert!(x.value(1) > 0);
-  assert_eq!(x.value(1), x.value(2));
-  assert_eq!(x.value(3), 0);
-
-  let parquet_metadata = reader_metadata(&output);
-  let coordinate_column = parquet_metadata
-    .metadata()
-    .row_group(0)
-    .columns()
-    .iter()
-    .find(|column| {
-      column
-        .column_descr()
-        .path()
-        .string()
-        .ends_with("level_16.list.element.list.element.x")
-    })
-    .expect("native x coordinate column");
-  let encodings = coordinate_column.encodings().collect::<Vec<_>>();
-  assert!(encodings.contains(&parquet::basic::Encoding::DELTA_BINARY_PACKED));
-  assert!(!encodings.contains(&parquet::basic::Encoding::RLE_DICTIONARY));
-  assert!(!encodings.contains(&parquet::basic::Encoding::PLAIN_DICTIONARY));
-}
-
-#[test]
-fn optimized_output_writes_wkb_and_native_float_multiscale_geometry() {
+fn optimized_output_writes_wkb_and_native_multiscale_geometry() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("polygons.parquet");
   let wkb_output = temp.path().join("polygons-wkb.parquet");
-  let native_output = temp.path().join("polygons-native-float.parquet");
-  let world_wkb_output = temp.path().join("polygons-world-wkb.parquet");
-  let world_native_output = temp.path().join("polygons-world-native.parquet");
+  let native_output = temp.path().join("polygons-native.parquet");
   let schema = Arc::new(Schema::new(vec![Field::new(
     "geometry",
     DataType::Binary,
@@ -1241,45 +1151,31 @@ fn optimized_output_writes_wkb_and_native_float_multiscale_geometry() {
     &[geoparquet_kv("geometry", &["Polygon"])],
   );
 
-  run_optimized_multiscale(&input, &wkb_output, MultiscaleEncoding::WkbQuantized).unwrap();
-  run_optimized_multiscale(
-    &input,
-    &native_output,
-    MultiscaleEncoding::NativeQuantizedFloat,
-  )
-  .unwrap();
-  run_optimized_multiscale(&input, &world_wkb_output, MultiscaleEncoding::Wkb).unwrap();
-  run_optimized_multiscale(&input, &world_native_output, MultiscaleEncoding::Native).unwrap();
+  run_optimized_multiscale(&input, &wkb_output, MultiscaleEncoding::Wkb).unwrap();
+  run_optimized_multiscale(&input, &native_output, MultiscaleEncoding::Native).unwrap();
   validate(&wkb_output).unwrap().ensure_valid().unwrap();
   validate(&native_output).unwrap().ensure_valid().unwrap();
-  validate(&world_wkb_output).unwrap().ensure_valid().unwrap();
-  validate(&world_native_output)
-    .unwrap()
-    .ensure_valid()
-    .unwrap();
-  for output in [&native_output, &world_native_output] {
-    let parquet_metadata = reader_metadata(output);
-    let coordinate_column = parquet_metadata
-      .metadata()
-      .row_group(0)
-      .columns()
-      .iter()
-      .find(|column| {
-        column
-          .column_descr()
-          .path()
-          .string()
-          .ends_with("level_16.list.element.list.element.x")
-      })
-      .expect("native float x coordinate column");
-    let encodings = coordinate_column.encodings().collect::<Vec<_>>();
-    assert!(encodings.contains(&parquet::basic::Encoding::BYTE_STREAM_SPLIT));
-  }
+  let parquet_metadata = reader_metadata(&native_output);
+  let coordinate_column = parquet_metadata
+    .metadata()
+    .row_group(0)
+    .columns()
+    .iter()
+    .find(|column| {
+      column
+        .column_descr()
+        .path()
+        .string()
+        .ends_with("level_16.list.element.list.element.x")
+    })
+    .expect("native x coordinate column");
+  let encodings = coordinate_column.encodings().collect::<Vec<_>>();
+  assert!(encodings.contains(&parquet::basic::Encoding::BYTE_STREAM_SPLIT));
 
   let wkb_metadata = kv_map(&wkb_output);
   let wkb_geodisplay: serde_json::Value =
     serde_json::from_str(wkb_metadata.get("geodisplay").unwrap()).unwrap();
-  assert_eq!(wkb_geodisplay["encoding"], "wkbQuantized");
+  assert_eq!(wkb_geodisplay["encoding"], "wkb");
   let wkb_dataframe = runtime()
     .block_on(scan_parquet(wkb_output.to_str().unwrap()))
     .unwrap();
@@ -1302,7 +1198,7 @@ fn optimized_output_writes_wkb_and_native_float_multiscale_geometry() {
   let native_metadata = kv_map(&native_output);
   let native_geodisplay: serde_json::Value =
     serde_json::from_str(native_metadata.get("geodisplay").unwrap()).unwrap();
-  assert_eq!(native_geodisplay["encoding"], "nativeQuantizedFloat");
+  assert_eq!(native_geodisplay["encoding"], "native");
   let native_dataframe = runtime()
     .block_on(scan_parquet(native_output.to_str().unwrap()))
     .unwrap();
@@ -1331,60 +1227,14 @@ fn optimized_output_writes_wkb_and_native_float_multiscale_geometry() {
     .downcast_ref::<StructArray>()
     .unwrap()
     .clone();
-  let quantized_x = coordinates
+  let x = coordinates
     .column_by_name("x")
     .unwrap()
     .as_any()
     .downcast_ref::<Float64Array>()
     .unwrap()
     .value(0);
-
-  let world_wkb_metadata = kv_map(&world_wkb_output);
-  let world_wkb_geodisplay: serde_json::Value =
-    serde_json::from_str(world_wkb_metadata.get("geodisplay").unwrap()).unwrap();
-  assert_eq!(world_wkb_geodisplay["encoding"], "wkb");
-  let world_native_metadata = kv_map(&world_native_output);
-  let world_native_geodisplay: serde_json::Value =
-    serde_json::from_str(world_native_metadata.get("geodisplay").unwrap()).unwrap();
-  assert_eq!(world_native_geodisplay["encoding"], "native");
-  let world_native_dataframe = runtime()
-    .block_on(scan_parquet(world_native_output.to_str().unwrap()))
-    .unwrap();
-  let world_native_batches = runtime()
-    .block_on(world_native_dataframe.collect())
-    .unwrap();
-  let world_native_geolod = world_native_batches[0]
-    .column_by_name("geolod")
-    .unwrap()
-    .as_any()
-    .downcast_ref::<StructArray>()
-    .unwrap();
-  let world_geometries = world_native_geolod
-    .column_by_name("level_16")
-    .unwrap()
-    .as_any()
-    .downcast_ref::<ListArray>()
-    .unwrap();
-  let world_parts = world_geometries
-    .value(0)
-    .as_any()
-    .downcast_ref::<ListArray>()
-    .unwrap()
-    .clone();
-  let world_coordinates = world_parts
-    .value(0)
-    .as_any()
-    .downcast_ref::<StructArray>()
-    .unwrap()
-    .clone();
-  let world_x = world_coordinates
-    .column_by_name("x")
-    .unwrap()
-    .as_any()
-    .downcast_ref::<Float64Array>()
-    .unwrap()
-    .value(0);
-  assert_ne!(quantized_x, world_x);
+  assert_close(x, 1.0);
 }
 
 #[test]
@@ -1452,13 +1302,13 @@ fn optimized_native_output_writes_missing_values_as_nullable_components_zm() {
     .column_by_name("z")
     .unwrap()
     .as_any()
-    .downcast_ref::<Int64Array>()
+    .downcast_ref::<Float64Array>()
     .unwrap();
   let m = coordinates
     .column_by_name("m")
     .unwrap()
     .as_any()
-    .downcast_ref::<Int64Array>()
+    .downcast_ref::<Float64Array>()
     .unwrap();
 
   assert_eq!(z.null_count(), coordinates.len());

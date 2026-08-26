@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createCustomUrlDataset,
   createPortalItemDataset,
+  getPortalDomain,
   validateNetworkUrl,
 } from "./datasets";
 
@@ -39,7 +40,7 @@ describe("dataset factories", () => {
 
   it("creates a Portal Item dataset with portal and item identity", () => {
     const dataset = createPortalItemDataset(
-      "https://example.maps.arcgis.com",
+      "example.maps.arcgis.com",
       "item-id",
     );
 
@@ -57,7 +58,7 @@ describe("dataset factories", () => {
 
   it("creates the default portal item page source URL", () => {
     const dataset = createPortalItemDataset(
-      "https://jsapi.maps.arcgis.com/",
+      "jsapi.maps.arcgis.com",
       "5efaf71a6e064e9ea4e67821166c61cd",
     );
 
@@ -66,14 +67,19 @@ describe("dataset factories", () => {
     );
   });
 
-  it("preserves hosted portal paths in the item page source URL", () => {
-    const dataset = createPortalItemDataset(
-      "https://example.com/portal/",
-      "item-id",
-    );
+  it("normalizes portal domains to canonical HTTPS URLs", () => {
+    const dataset = createPortalItemDataset("example.com", "item-id");
 
-    expect(dataset.sourceUrl).toBe(
-      "https://example.com/portal/home/item.html?id=item-id",
-    );
+    expect(dataset.parquet.portalUrl).toBe("https://example.com");
+    expect(getPortalDomain(dataset.parquet.portalUrl)).toBe("example.com");
+  });
+
+  it("rejects portal paths and credentials", () => {
+    expect(() =>
+      createPortalItemDataset("example.com/portal", "item-id")
+    ).toThrow("only a domain name");
+    expect(() =>
+      createPortalItemDataset("user@example.com", "item-id")
+    ).toThrow("only a domain name");
   });
 });

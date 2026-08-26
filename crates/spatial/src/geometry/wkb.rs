@@ -1,8 +1,8 @@
 //! Reads and transforms ISO Well-Known Binary geometry.
 
 use super::{
-  Coord, CoordinateDimensions, CoordinateSpace, Geometry, GeometryError, GeometryKind,
-  GeometryType, QuantizationTransform, QuantizedGeometry,
+  Coord, CoordinateDimensions, Geometry, GeometryError, GeometryKind, GeometryType,
+  QuantizationTransform, QuantizedGeometry,
 };
 
 use arrow_array::ArrayRef;
@@ -173,16 +173,14 @@ impl WkbCoordinate {
 pub(crate) struct WkbArrayBuilder {
   builder: BinaryBuilder,
   scratch: Vec<u8>,
-  coordinate_space: CoordinateSpace,
 }
 
 impl WkbArrayBuilder {
   /// Create a WKB level builder with capacity for the expected row count.
-  pub(crate) fn new(capacity: usize, coordinate_space: CoordinateSpace) -> Self {
+  pub(crate) fn new(capacity: usize) -> Self {
     Self {
       builder: BinaryBuilder::with_capacity(capacity, capacity * 16),
       scratch: Vec::new(),
-      coordinate_space,
     }
   }
 
@@ -193,12 +191,7 @@ impl WkbArrayBuilder {
     transform: &QuantizationTransform,
   ) -> Result<()> {
     self.scratch.clear();
-    write_quantized_geometry(
-      &mut self.scratch,
-      geometry,
-      self.coordinate_space,
-      transform,
-    )?;
+    write_quantized_geometry(&mut self.scratch, geometry, transform)?;
     self.builder.append_value(&self.scratch);
     Ok(())
   }
@@ -714,7 +707,6 @@ fn write_selected_coordinate(
 fn write_quantized_geometry(
   output: &mut Vec<u8>,
   geometry: &QuantizedGeometry,
-  coordinate_space: CoordinateSpace,
   transform: &QuantizationTransform,
 ) -> Result<()> {
   let mut part_index = 0usize;
@@ -726,13 +718,7 @@ fn write_quantized_geometry(
         geometry.has_z,
         geometry.has_m,
       )?;
-      write_quantized_part(
-        output,
-        geometry,
-        coordinate_space,
-        transform,
-        &mut part_index,
-      )?;
+      write_quantized_part(output, geometry, transform, &mut part_index)?;
     }
     GeometryKind::MultiLineString => {
       write_iso_header(
@@ -749,13 +735,7 @@ fn write_quantized_geometry(
           geometry.has_z,
           geometry.has_m,
         )?;
-        write_quantized_part(
-          output,
-          geometry,
-          coordinate_space,
-          transform,
-          &mut part_index,
-        )?;
+        write_quantized_part(output, geometry, transform, &mut part_index)?;
       }
     }
     GeometryKind::Polygon => {
@@ -768,7 +748,6 @@ fn write_quantized_geometry(
       write_quantized_polygon(
         output,
         geometry,
-        coordinate_space,
         transform,
         &mut part_index,
         geometry.polygon_ring_counts.first().copied().unwrap_or(0) as usize,
@@ -792,7 +771,6 @@ fn write_quantized_geometry(
         write_quantized_polygon(
           output,
           geometry,
-          coordinate_space,
           transform,
           &mut part_index,
           ring_count as usize,
@@ -810,18 +788,12 @@ fn write_quantized_geometry(
       write_count(output, geometry.coordinates.len() / stride)?;
       for coordinate_index in 0..geometry.coordinates.len() / stride {
         write_iso_header(output, GeometryKind::Point, geometry.has_z, geometry.has_m)?;
-        write_quantized_coordinate(
-          output,
-          geometry,
-          coordinate_space,
-          transform,
-          coordinate_index,
-        )?;
+        write_quantized_coordinate(output, geometry, transform, coordinate_index)?;
       }
     }
     GeometryKind::Point => {
       write_iso_header(output, GeometryKind::Point, geometry.has_z, geometry.has_m)?;
-      write_quantized_coordinate(output, geometry, coordinate_space, transform, 0)?;
+      write_quantized_coordinate(output, geometry, transform, 0)?;
     }
     GeometryKind::GeometryCollection | GeometryKind::Unknown => {
       bail!(
@@ -836,14 +808,13 @@ fn write_quantized_geometry(
 fn write_quantized_polygon(
   output: &mut Vec<u8>,
   geometry: &QuantizedGeometry,
-  coordinate_space: CoordinateSpace,
   transform: &QuantizationTransform,
   part_index: &mut usize,
   ring_count: usize,
 ) -> Result<()> {
   write_count(output, ring_count)?;
   for _ in 0..ring_count {
-    write_quantized_part(output, geometry, coordinate_space, transform, part_index)?;
+    write_quantized_part(output, geometry, transform, part_index)?;
   }
   Ok(())
 }
@@ -851,7 +822,6 @@ fn write_quantized_polygon(
 fn write_quantized_part(
   output: &mut Vec<u8>,
   geometry: &QuantizedGeometry,
-  coordinate_space: CoordinateSpace,
   transform: &QuantizationTransform,
   part_index: &mut usize,
 ) -> Result<()> {
@@ -864,13 +834,7 @@ fn write_quantized_part(
     .map(|length| *length as usize)
     .sum();
   for coordinate_index in coordinate_start..coordinate_start + point_count {
-    write_quantized_coordinate(
-      output,
-      geometry,
-      coordinate_space,
-      transform,
-      coordinate_index,
-    )?;
+    write_quantized_coordinate(output, geometry, transform, coordinate_index)?;
   }
   *part_index += 1;
   Ok(())
@@ -879,7 +843,6 @@ fn write_quantized_part(
 fn write_quantized_coordinate(
   output: &mut Vec<u8>,
   geometry: &QuantizedGeometry,
-  coordinate_space: CoordinateSpace,
   transform: &QuantizationTransform,
   coordinate_index: usize,
 ) -> Result<()> {
@@ -893,20 +856,12 @@ fn write_quantized_coordinate(
     .ok_or_else(|| {
       GeometryError::Wkb("quantized coordinate does not match part lengths".to_string())
     })?;
-  output.extend_from_slice(
-    &coordinate_space
-      .decode(coordinate[0], transform, 0)
-      .to_le_bytes(),
-  );
-  output.extend_from_slice(
-    &coordinate_space
-      .decode(coordinate[1], transform, 1)
-      .to_le_bytes(),
-  );
+  output.extend_from_slice(&transform.unquantize(coordinate[0], 0).to_le_bytes());
+  output.extend_from_slice(&transform.unquantize(coordinate[1], 1).to_le_bytes());
   let mut component_index = 2;
   if geometry.has_z {
     let value = if geometry.validity.z_is_valid(coordinate_index) {
-      coordinate_space.decode(coordinate[component_index], transform, 2)
+      transform.unquantize(coordinate[component_index], 2)
     } else {
       0.0
     };
@@ -915,7 +870,7 @@ fn write_quantized_coordinate(
   }
   if geometry.has_m {
     let value = if geometry.validity.m_is_valid(coordinate_index) {
-      coordinate_space.decode(coordinate[component_index], transform, 3)
+      transform.unquantize(coordinate[component_index], 3)
     } else {
       0.0
     };
@@ -1227,7 +1182,7 @@ mod tests {
     };
     let mut bytes = Vec::new();
 
-    write_quantized_geometry(&mut bytes, &geometry, CoordinateSpace::World, &transform).unwrap();
+    write_quantized_geometry(&mut bytes, &geometry, &transform).unwrap();
     let decoded = Geometry::from_wkb(&bytes).unwrap();
 
     assert_eq!(decoded.ty, GeometryKind::MultiPolygon);

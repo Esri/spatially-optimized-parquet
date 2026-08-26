@@ -54,9 +54,18 @@ async function loadFilePageIndex(
       );
     }
     const offsetIndex = offsetIndexes[rowGroupIndex];
-    validateOffsetIndex(file, rowGroup.index, rowGroup.rowCount, offsetIndex);
-    for (const page of offsetIndex.pages) {
-      pageStarts.push(rowGroup.rowStart + page.rowStart);
+    validateOffsetIndex(
+      file,
+      rowGroup.index,
+      rowGroup.rowCount,
+      offsetIndex,
+      column.repeated,
+    );
+    for (const pageStart of getFeaturePageStarts(
+      offsetIndex,
+      column.repeated,
+    )) {
+      pageStarts.push(rowGroup.rowStart + pageStart);
     }
     rowEnd = rowGroup.rowStart + rowGroup.rowCount;
   }
@@ -74,11 +83,17 @@ function validateOffsetIndex(
   rowGroupIndex: number,
   rowCount: number,
   offsetIndex: ParquetOffsetIndex | null,
+  repeated: boolean,
 ): asserts offsetIndex is ParquetOffsetIndex {
   if (!offsetIndex || offsetIndex.pages.length === 0) {
     throw new Error(
       `Level page offsets are unavailable for row group ${rowGroupIndex} in "${file.fileName}".`,
     );
+  }
+
+  if (repeated) {
+    validateRepeatedOffsetIndex(file, rowGroupIndex, rowCount, offsetIndex);
+    return;
   }
 
   let expectedRowStart = 0;
@@ -95,6 +110,47 @@ function validateOffsetIndex(
       `Level page offsets do not cover row group ${rowGroupIndex} in "${file.fileName}".`,
     );
   }
+}
+
+function validateRepeatedOffsetIndex(
+  file: ParquetFileDiagnostics,
+  rowGroupIndex: number,
+  rowCount: number,
+  offsetIndex: ParquetOffsetIndex,
+): void {
+  let previousRowStart = -1;
+  for (const page of offsetIndex.pages) {
+    if (
+      page.rowStart < previousRowStart ||
+      page.rowStart < 0 ||
+      page.rowStart >= rowCount
+    ) {
+      throw new Error(
+        `Level page offsets are invalid for repeated row group ${rowGroupIndex} in "${file.fileName}".`,
+      );
+    }
+    previousRowStart = page.rowStart;
+  }
+  if (offsetIndex.pages[0].rowStart !== 0) {
+    throw new Error(
+      `Level page offsets do not start with row group ${rowGroupIndex} in "${file.fileName}".`,
+    );
+  }
+}
+
+function getFeaturePageStarts(
+  offsetIndex: ParquetOffsetIndex,
+  repeated: boolean,
+): number[] {
+  if (!repeated) {
+    return offsetIndex.pages.map(({ rowStart }) => rowStart);
+  }
+
+  return offsetIndex.pages
+    .map(({ rowStart }) => rowStart)
+    .filter((rowStart, index, values) =>
+      index === 0 || rowStart !== values[index - 1]
+    );
 }
 
 async function mapWithConcurrency<Input, Output>(

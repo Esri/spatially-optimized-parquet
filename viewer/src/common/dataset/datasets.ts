@@ -79,7 +79,7 @@ const customDatasetCenter: [number, number] = [-98, 39];
 const customDatasetScale = 25_000_000;
 export const defaultCustomDatasetUrl =
   "https://stgeadlsv278968f2d.blob.core.windows.net/parquet/sop/0.1/us_schools.parquet";
-export const defaultPortalUrl = "https://jsapi.maps.arcgis.com/";
+export const defaultPortalUrl = "jsapi.maps.arcgis.com";
 export const defaultPortalItemId = "5efaf71a6e064e9ea4e67821166c61cd";
 
 export const datasets: PresetDataset[] = [
@@ -219,14 +219,15 @@ export function createCustomUrlDataset(url: string): CustomUrlDataset {
 }
 
 export function createPortalItemDataset(
-  portalUrl: string,
+  portalDomain: string,
   itemId: string,
 ): PortalItemDataset {
-  const validatedPortalUrl = validateNetworkUrl(portalUrl, "Portal URL");
+  const validatedPortalUrl = createPortalUrl(portalDomain);
   const validatedItemId = itemId.trim();
   if (!validatedItemId) {
     throw new Error("Portal item ID is required.");
   }
+
   const itemPageUrl = new URL(validatedPortalUrl);
   itemPageUrl.pathname = `${itemPageUrl.pathname.replace(/\/?$/, "/")}home/item.html`;
   itemPageUrl.search = "";
@@ -249,6 +250,10 @@ export function createPortalItemDataset(
   };
 }
 
+export function getPortalDomain(portalUrl: string): string {
+  return new URL(portalUrl).host;
+}
+
 export function validateNetworkUrl(value: string, label = "URL"): string {
   const trimmedValue = value.trim();
   if (!trimmedValue) {
@@ -267,4 +272,35 @@ export function validateNetworkUrl(value: string, label = "URL"): string {
   }
 
   return trimmedValue;
+}
+
+function createPortalUrl(value: string): string {
+  const trimmedValue = value.trim();
+  if (!trimmedValue) {
+    throw new Error("Portal domain is required.");
+  }
+
+  let url: URL;
+  try {
+    url = new URL(
+      trimmedValue.includes("://") ? trimmedValue : `https://${trimmedValue}`,
+    );
+  } catch {
+    throw new Error("Portal domain must be a valid domain.");
+  }
+
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
+    !url.hostname ||
+    url.username ||
+    url.password ||
+    (url.pathname !== "/" && url.pathname !== "") ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error("Portal domain must contain only a domain name.");
+  }
+
+  url.protocol = "https:";
+  return url.origin;
 }

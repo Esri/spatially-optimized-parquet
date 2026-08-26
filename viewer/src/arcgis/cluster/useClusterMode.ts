@@ -9,9 +9,20 @@ import {
 } from "react";
 
 import type { ParquetFileDiagnostics } from "../../parquet/fileLayout";
-import type { DatasetLayerPresentation } from "../profiles/profiles";
+import {
+  applyLayerPresentation,
+  areLayerPresentationsEqual,
+  type LayerPresentation,
+  readLayerPresentation,
+} from "../layerPresentation";
 import type { ClusterLevel } from "./clusterLevelCatalog";
 import { ClusterPageRendererStore } from "./clusterPageRenderer";
+import {
+  type ActiveClusterRenderer,
+  getActiveClusterRenderer,
+  resolveClusterPresentation,
+  type ClusterRendererState,
+} from "./clusterPresentation";
 import {
   resolveClusterRowGroup,
   type ClusterRowGroupSelection,
@@ -29,12 +40,15 @@ interface ClusterModeOptions {
   layer: ParquetLayer | null;
   level: ClusterLevel | null;
   mapElementRef: RefObject<HTMLArcgisMapElement | null>;
-  normalPresentation: DatasetLayerPresentation;
+  normalPresentation: LayerPresentation;
   parquetSource: unknown | null;
+  preparedRenderer: ActiveClusterRenderer | null;
 }
 
-const clusterIncludedEffect = "drop-shadow(3px, 3px, 10px)";
-const clusterExcludedEffect = "grayscale(100%) brightness(35%)";
+interface AppliedPresentation {
+  layer: ParquetLayer;
+  presentation: LayerPresentation;
+}
 
 export function useClusterMode({
   enabled,
@@ -44,13 +58,14 @@ export function useClusterMode({
   mapElementRef,
   normalPresentation,
   parquetSource,
+  preparedRenderer,
 }: ClusterModeOptions): ClusterModeStatus {
-  const [status, setStatus] = useState<ClusterModeStatus>({ type: "idle" });
+  const [rendererState, setRendererState] = useState<ClusterRendererState>({
+    type: "inactive",
+  });
   const [rowGroup, setRowGroup] =
     useState<ClusterRowGroupSelection | null>(null);
-  const activeRendererLayerRef = useRef<ParquetLayer | null>(null);
-  const normalPresentationRef = useRef(normalPresentation);
-  normalPresentationRef.current = normalPresentation;
+  const appliedPresentationRef = useRef<AppliedPresentation | null>(null);
   const rendererStore = useMemo(
     () =>
       layer && parquetSource
@@ -62,67 +77,73 @@ export function useClusterMode({
         : null,
     [files, layer, parquetSource],
   );
+  const resolvedRendererState = useMemo<ClusterRendererState>(() => {
+    const preparedRendererForLayer =
+      preparedRenderer?.layer === layer ? preparedRenderer : null;
+    return layer &&
+        !getActiveClusterRenderer(rendererState, layer) &&
+        preparedRendererForLayer
+      ? { type: "ready", active: preparedRendererForLayer }
+      : rendererState;
+  }, [layer, preparedRenderer, rendererState]);
+  const resolvedPresentation = useMemo(
+    () =>
+      layer
+        ? resolveClusterPresentation({
+            enabled,
+            layer,
+            normalPresentation,
+            rendererState: resolvedRendererState,
+            rowGroup,
+          })
+        : null,
+    [
+      enabled,
+      layer,
+      normalPresentation,
+      resolvedRendererState,
+      rowGroup,
+    ],
+  );
+  const activeRenderer = layer
+    ? getActiveClusterRenderer(resolvedRendererState, layer)
+    : null;
 
   useLayoutEffect(() => {
-    if (!layer || !enabled) {
+    if (!layer || !resolvedPresentation) {
+      appliedPresentationRef.current = null;
       return;
     }
 
-    const popupEnabled = layer.popupEnabled;
-    const visible = layer.visible;
-    layer.popupEnabled = false;
-    layer.featureEffect = null;
-    if (activeRendererLayerRef.current !== layer) {
-      layer.visible = false;
+    const applied = appliedPresentationRef.current;
+    const currentPresentation = applied?.layer === layer
+      ? applied.presentation
+      : readLayerPresentation(layer);
+    if (areLayerPresentationsEqual(currentPresentation, resolvedPresentation)) {
+      appliedPresentationRef.current = {
+        layer,
+        presentation: resolvedPresentation,
+      };
+      return;
     }
 
-    return () => {
-      layer.popupEnabled = popupEnabled;
-      layer.visible = visible;
-      if (activeRendererLayerRef.current === layer) {
-        activeRendererLayerRef.current = null;
-      }
+    applyLayerPresentation(layer, resolvedPresentation);
+    appliedPresentationRef.current = {
+      layer,
+      presentation: resolvedPresentation,
     };
-  }, [enabled, layer]);
-
-  useLayoutEffect(() => {
-    if (!layer || enabled) {
-      return;
-    }
-    layer.renderer = normalPresentation.renderer;
-    layer.featureEffect = normalPresentation.featureEffect;
-  }, [enabled, layer, normalPresentation]);
-
-  useLayoutEffect(() => {
-    if (!layer) {
-      return;
-    }
-    layer.featureEffect = enabled && rowGroup
-      ? {
-          filter: {
-            where: [
-              `${layer.objectIdField} >= ${rowGroup.objectIdStart}`,
-              `${layer.objectIdField} < ${rowGroup.objectIdEnd}`,
-            ].join(" AND "),
-          },
-          includedEffect: clusterIncludedEffect,
-          excludedEffect: clusterExcludedEffect,
-        }
-      : enabled
-        ? null
-        : normalPresentation.featureEffect;
-  }, [enabled, layer, normalPresentation.featureEffect, rowGroup]);
+  }, [layer, resolvedPresentation]);
 
   useEffect(() => {
     setRowGroup(null);
     if (!enabled) {
-      setStatus({ type: "idle" });
+      setRendererState({ type: "inactive" });
     }
   }, [enabled, layer]);
 
   useEffect(() => {
     const view = mapElementRef.current?.view;
-    if (!enabled || !layer || !view) {
+    if (!enabled || !layer || !view || !activeRenderer) {
       return;
     }
 
@@ -151,7 +172,7 @@ export function useClusterMode({
       requestVersion += 1;
       clickHandle.remove();
     };
-  }, [enabled, files, layer, mapElementRef]);
+  }, [activeRenderer, enabled, files, layer, mapElementRef]);
 
   useEffect(() => {
     if (!enabled || !layer) {
@@ -161,47 +182,57 @@ export function useClusterMode({
       if (files.length === 0) {
         return;
       }
-      layer.renderer = normalPresentationRef.current.renderer;
-      layer.visible = true;
-      setStatus({
+      const error = new Error(
+        level
+          ? "The Parquet diagnostics source is unavailable."
+          : "The dataset has no multiscale level shared by every file.",
+      );
+      setRendererState((current) => ({
         type: "error",
-        error: new Error(
-          level
-            ? "The Parquet diagnostics source is unavailable."
-            : "The dataset has no multiscale level shared by every file.",
-        ),
-      });
+        active: getActiveClusterRenderer(current, layer),
+        error,
+        requestedLevel: level?.level ?? null,
+      }));
+      return;
+    }
+    if (activeRenderer?.level === level.level) {
+      setRendererState({ type: "ready", active: activeRenderer });
       return;
     }
 
     let cancelled = false;
-    setStatus({ type: "loading" });
+    setRendererState((current) => ({
+      type: "loading",
+      active: getActiveClusterRenderer(current, layer),
+      requestedLevel: level.level,
+    }));
     void rendererStore.load(level).then((renderer) => {
       if (cancelled) {
         return;
       }
-      layer.renderer = renderer;
-      layer.visible = true;
-      activeRendererLayerRef.current = layer;
-      setStatus({ type: "ready" });
+      setRendererState({
+        type: "ready",
+        active: { layer, level: level.level, renderer },
+      });
     }).catch((error: unknown) => {
       if (cancelled) {
         return;
       }
-      layer.renderer = normalPresentationRef.current.renderer;
-      layer.visible = true;
-      setStatus({
+      setRendererState((current) => ({
         type: "error",
+        active: getActiveClusterRenderer(current, layer),
         error: error instanceof Error
           ? error
           : new Error("Failed to load the Cluster renderer."),
-      });
+        requestedLevel: level.level,
+      }));
     });
 
     return () => {
       cancelled = true;
     };
   }, [
+    activeRenderer,
     enabled,
     files.length,
     layer,
@@ -209,5 +240,14 @@ export function useClusterMode({
     rendererStore,
   ]);
 
-  return status;
+  if (!enabled) {
+    return { type: "idle" };
+  }
+  if (rendererState.type === "error") {
+    return { type: "error", error: rendererState.error };
+  }
+  if (rendererState.type === "ready") {
+    return { type: "ready" };
+  }
+  return { type: "loading" };
 }

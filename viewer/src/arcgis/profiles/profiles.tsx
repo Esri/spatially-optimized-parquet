@@ -1,35 +1,27 @@
-import type ParquetLayer from "@arcgis/core/layers/ParquetLayer";
 import type { ParquetLayerProperties } from "@arcgis/core/layers/ParquetLayer";
 import type { ComponentType } from "react";
+import type {
+  LayerPresentationChange,
+  LayerPresentationProperties,
+} from "../layerPresentation";
 import { AlaskaProfile } from "./AlaskaProfile";
 import { createCensusProfile } from "./CensusProfile";
 import type { DatasetId } from "../../common/dataset/datasets";
 import { createFranceProfile } from "./FranceProfile";
 import { JapanProfile } from "./JapanProfile";
 
-export interface DatasetEffectLayer {
-  effect: string | null;
-}
-
-export interface DatasetLayerPresentation {
-  featureEffect: ParquetLayer["featureEffect"];
-  renderer: ParquetLayer["renderer"];
-}
-
 export interface DatasetMapSlotProps {
   clusterEnabled: boolean;
   headerActionsElement: HTMLElement | null;
   onPresentationChange(
-    presentation: Partial<DatasetLayerPresentation>,
+    presentation: LayerPresentationChange,
   ): void;
 }
 
-export type DatasetProfileCleanup = () => void;
-
 export interface DatasetMapProfile {
-  layerProperties?: Pick<ParquetLayerProperties, "popupTemplate" | "renderer">;
+  initialPresentation?: Partial<LayerPresentationProperties>;
+  layerProperties?: Pick<ParquetLayerProperties, "popupTemplate">;
   mapSlotComponent?: ComponentType<DatasetMapSlotProps>;
-  configureLayer?: (layer: DatasetEffectLayer) => DatasetProfileCleanup | undefined;
 }
 
 export const defaultDatasetMapProfile: DatasetMapProfile = {};

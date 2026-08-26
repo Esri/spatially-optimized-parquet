@@ -46,10 +46,7 @@ enum Command {
 enum MultiscaleEncodingValue {
   #[default]
   Pbf,
-  WkbQuantized,
   Wkb,
-  NativeQuantized,
-  NativeQuantizedFloat,
   Native,
 }
 
@@ -57,10 +54,7 @@ impl From<MultiscaleEncodingValue> for MultiscaleEncoding {
   fn from(value: MultiscaleEncodingValue) -> Self {
     match value {
       MultiscaleEncodingValue::Pbf => Self::Pbf,
-      MultiscaleEncodingValue::WkbQuantized => Self::WkbQuantized,
       MultiscaleEncodingValue::Wkb => Self::Wkb,
-      MultiscaleEncodingValue::NativeQuantized => Self::NativeQuantized,
-      MultiscaleEncodingValue::NativeQuantizedFloat => Self::NativeQuantizedFloat,
       MultiscaleEncodingValue::Native => Self::Native,
     }
   }
@@ -376,15 +370,8 @@ mod tests {
   }
 
   #[test]
-  fn write_subcommand_accepts_all_multiscale_encodings() {
-    for encoding in [
-      "pbf",
-      "wkb-quantized",
-      "wkb",
-      "native-quantized",
-      "native-quantized-float",
-      "native",
-    ] {
+  fn write_subcommand_accepts_supported_multiscale_encodings() {
+    for encoding in ["pbf", "wkb", "native"] {
       let cli = Cli::try_parse_from([
         "sop",
         "write",
@@ -399,6 +386,28 @@ mod tests {
         panic!("expected write command");
       };
       let _: MultiscaleEncoding = args.multiscale_encoding.into();
+    }
+  }
+
+  #[test]
+  fn write_subcommand_rejects_removed_multiscale_encodings() {
+    for encoding in [
+      "wkb-quantized",
+      "native-quantized",
+      "native-quantized-float",
+    ] {
+      assert!(
+        Cli::try_parse_from([
+          "sop",
+          "write",
+          "input.parquet",
+          "--output",
+          "output.parquet",
+          "--multiscale-encoding",
+          encoding,
+        ])
+        .is_err()
+      );
     }
   }
 

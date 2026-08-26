@@ -104,16 +104,6 @@ impl OptimizedLayout {
     self.write_extensions
   }
 
-  /// Return payload columns that require delta-binary-packed Parquet encoding.
-  pub(crate) fn delta_binary_packed_column_paths(&self) -> Vec<String> {
-    self.multiscale_encoding.delta_binary_packed_column_paths(
-      &self.levels,
-      self.geometry.family,
-      self.geometry.has_z,
-      self.geometry.has_m,
-    )
-  }
-
   /// Return floating-point payload columns that require byte-stream-split encoding.
   pub(crate) fn byte_stream_split_column_paths(&self) -> Vec<String> {
     self.multiscale_encoding.byte_stream_split_column_paths(

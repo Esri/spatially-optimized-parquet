@@ -226,24 +226,10 @@ fn partitioned_output_writes_sorted_range_partitions() {
 #[test]
 fn partitioned_output_writes_native_multiscale_coordinate_leaves() {
   assert_partitioned_multiscale_coordinate_leaves(
-    MultiscaleEncoding::NativeQuantized,
-    &["level_16.list.element.list.element.x"],
-    parquet::basic::Encoding::DELTA_BINARY_PACKED,
-  );
-}
-
-#[test]
-fn partitioned_output_writes_native_float_multiscale_coordinate_leaves() {
-  for encoding in [
-    MultiscaleEncoding::NativeQuantizedFloat,
     MultiscaleEncoding::Native,
-  ] {
-    assert_partitioned_multiscale_coordinate_leaves(
-      encoding,
-      &["level_16.list.element.list.element.x"],
-      parquet::basic::Encoding::BYTE_STREAM_SPLIT,
-    );
-  }
+    &["level_16.list.element.list.element.x"],
+    parquet::basic::Encoding::BYTE_STREAM_SPLIT,
+  );
 }
 
 fn assert_partitioned_multiscale_coordinate_leaves(

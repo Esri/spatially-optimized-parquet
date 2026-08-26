@@ -3,6 +3,27 @@ import type { DatasetMapProfile, DatasetMapSlotProps } from "./profiles";
 
 export const AlaskaProfile = {
   layerProperties: {
+    popupTemplate: {
+      title: "{featuretypelabel}",
+      content: [
+        {
+          type: "fields",
+          fieldInfos: [
+            {
+              fieldName: "lengthkm",
+              label: "Length (km)",
+              format: { digitSeparator: true, places: 2 },
+            },
+            {
+              fieldName: "featuredate",
+              label: "Feature date",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  initialPresentation: {
     renderer: {
       type: "simple",
       symbol: {
@@ -39,25 +60,6 @@ export const AlaskaProfile = {
               value: 3.73,
               color: [224, 251, 252, 0.9],
               label: "3.73 km or longer",
-            },
-          ],
-        },
-      ],
-    },
-    popupTemplate: {
-      title: "{featuretypelabel}",
-      content: [
-        {
-          type: "fields",
-          fieldInfos: [
-            {
-              fieldName: "lengthkm",
-              label: "Length (km)",
-              format: { digitSeparator: true, places: 2 },
-            },
-            {
-              fieldName: "featuredate",
-              label: "Feature date",
             },
           ],
         },

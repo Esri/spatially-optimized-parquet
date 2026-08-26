@@ -53,6 +53,39 @@ describe("loadClusterPageTopology", () => {
       loadClusterPageTopology(source, [file], createLevel()),
     ).rejects.toThrow("Row groups are not contiguous");
   });
+
+  it("collapses repeated X pages that begin within the same feature row", async () => {
+    const file = createFile();
+    file.rowGroups = [file.rowGroups[0]];
+    const source = createSource([
+      {
+        pages: [
+          createPage(0, 0, 0),
+          createPage(1, 0, 8),
+          createPage(2, 8, 8),
+          createPage(3, 8, 20),
+        ],
+      },
+    ]);
+    const scalarLevel = createLevel();
+    const level = {
+      ...scalarLevel,
+      columns: scalarLevel.columns.map((column) => ({
+        ...column,
+        repeated: true,
+      })),
+    };
+
+    await expect(
+      loadClusterPageTopology(source, [file], level),
+    ).resolves.toEqual([
+      {
+        fileId: 0,
+        pageStarts: [0, 8],
+        rowEnd: 20,
+      },
+    ]);
+  });
 });
 
 function createFile(): ParquetFileDiagnostics {
@@ -94,6 +127,7 @@ function createLevel(): ClusterLevel {
         fileId: 0,
         columnIndex: 3,
         fieldName: "geodisplay.level_16",
+        repeated: false,
       },
     ],
   };

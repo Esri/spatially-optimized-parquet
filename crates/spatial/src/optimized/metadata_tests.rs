@@ -354,13 +354,7 @@ fn xz_geodisplay_metadata_serializes_multiscale_clustering() {
 fn geodisplay_metadata_serializes_closed_vocabulary_values() {
   for (encoding, serialized) in [
     (GeodisplayEncoding::EsriPbf, "esriPBF"),
-    (GeodisplayEncoding::WkbQuantized, "wkbQuantized"),
     (GeodisplayEncoding::Wkb, "wkb"),
-    (GeodisplayEncoding::NativeQuantized, "nativeQuantized"),
-    (
-      GeodisplayEncoding::NativeQuantizedFloat,
-      "nativeQuantizedFloat",
-    ),
     (GeodisplayEncoding::Native, "native"),
   ] {
     assert_eq!(serde_json::to_value(encoding).unwrap(), json!(serialized));

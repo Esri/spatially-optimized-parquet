@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   defaultCustomDatasetUrl,
   defaultPortalItemId,
   defaultPortalUrl,
   datasets,
+  getPortalDomain,
   type Dataset,
   type DatasetId,
   type PresetDataset,
@@ -90,6 +91,21 @@ export function DatasetSelectionPanel({
   const [compressionCodec, compressionRatio] =
     metrics.compression?.split(" ") ?? [];
   const error = validationError ?? customAction?.error ?? null;
+
+  useEffect(() => {
+    setSelectionMode(
+      activeDataset.kind === "preset"
+        ? { type: "preset", datasetId: activeDataset.id }
+        : { type: activeDataset.kind },
+    );
+    if (activeDataset.kind === "custom-url") {
+      setCustomUrl(activeDataset.parquet.url);
+    } else if (activeDataset.kind === "portal-item") {
+      setPortalUrl(getPortalDomain(activeDataset.parquet.portalUrl));
+      setPortalItemId(activeDataset.parquet.itemId);
+    }
+    setValidationError(null);
+  }, [activeDataset]);
 
   const submitCustomUrl = () => {
     if (!customAction) {
@@ -190,7 +206,7 @@ export function DatasetSelectionPanel({
             <LabeledInput label="Portal">
               <calcite-input
                 className={styles.datasetUrlInput}
-                label="Portal URL"
+                label="Portal domain"
                 value={portalUrl}
                 oncalciteInputInput={(event: Event) => {
                   setPortalUrl(

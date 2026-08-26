@@ -44,23 +44,6 @@ impl QuantizationTransform {
   }
 }
 
-/// Selects whether floating-point multiscale storage uses grid or world coordinates.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CoordinateSpace {
-  Quantized,
-  World,
-}
-
-impl CoordinateSpace {
-  /// Convert one retained integer coordinate for physical floating-point storage.
-  pub(crate) fn decode(self, value: i64, transform: &QuantizationTransform, axis: usize) -> f64 {
-    match self {
-      Self::Quantized => value as f64,
-      Self::World => transform.unquantize(value, axis),
-    }
-  }
-}
-
 const Z_VALID: u8 = 1;
 const M_VALID: u8 = 2;
 
@@ -144,6 +127,10 @@ impl QuantizedGeometry {
     let mut coordinate_offset = 0usize;
     let mut degenerated_coordinate = None::<Vec<i64>>;
     let mut degenerated_validity = None::<u8>;
+    let is_polygon = matches!(
+      input.ty,
+      super::GeometryType::Polygon | super::GeometryType::MultiPolygon
+    );
     let mut polygon_index = 0usize;
     let mut polygon_part_end = input.polygon_ring_counts.first().copied().unwrap_or(0) as usize;
     let mut retained_ring_count = 0u32;
@@ -177,7 +164,7 @@ impl QuantizedGeometry {
         retained_ring_count += 1;
       }
       coordinate_offset += point_count;
-      if input.ty == super::GeometryType::Polygon && part_index + 1 == polygon_part_end {
+      if is_polygon && part_index + 1 == polygon_part_end {
         if retained_ring_count > 0 {
           self.polygon_ring_counts.push(retained_ring_count);
         }
@@ -196,7 +183,7 @@ impl QuantizedGeometry {
     {
       self.coordinates.extend(coordinate);
       self.lengths.push(1);
-      if input.ty == super::GeometryType::Polygon {
+      if is_polygon {
         self.polygon_ring_counts.push(1);
       }
       if let Some(validity) = degenerated_validity {
@@ -429,7 +416,7 @@ pub(crate) fn encode_deltas_xy(coordinates: &mut [i64], lengths: &[u32], has_z: 
 
 #[cfg(test)]
 mod tests {
-  use super::{CoordinateSpace, QuantizationOptions, QuantizationTransform, QuantizedGeometry};
+  use super::{QuantizationOptions, QuantizationTransform, QuantizedGeometry};
   use crate::geometry::{Coord, Geometry, GeometryType};
 
   fn coordinate(x: f64, y: f64, z: Option<f64>, m: Option<f64>) -> Coord {
@@ -461,17 +448,6 @@ mod tests {
     };
 
     assert_eq!(transform.quantize(11.0, 0).unwrap(), 2);
-  }
-
-  #[test]
-  fn selects_grid_or_world_coordinate_space() {
-    let transform = QuantizationTransform {
-      scale: [0.5, 1.0, 1.0, 1.0],
-      translate: [10.0, 0.0, 0.0, 0.0],
-    };
-
-    assert_eq!(CoordinateSpace::Quantized.decode(2, &transform, 0), 2.0);
-    assert_eq!(CoordinateSpace::World.decode(2, &transform, 0), 11.0);
   }
 
   #[test]
@@ -568,6 +544,37 @@ mod tests {
 
     assert_eq!(quantized.lengths, [1]);
     assert_eq!(quantized.coordinates, [0, 0]);
+  }
+
+  #[test]
+  fn preserves_multipolygon_ring_grouping() {
+    let geometry = Geometry::new(
+      GeometryType::MultiPolygon,
+      vec![
+        coordinate(0.0, 0.0, None, None),
+        coordinate(4.0, 0.0, None, None),
+        coordinate(4.0, 4.0, None, None),
+        coordinate(0.0, 4.0, None, None),
+        coordinate(0.0, 0.0, None, None),
+        coordinate(10.0, 10.0, None, None),
+        coordinate(14.0, 10.0, None, None),
+        coordinate(14.0, 14.0, None, None),
+        coordinate(10.0, 14.0, None, None),
+        coordinate(10.0, 10.0, None, None),
+      ],
+      vec![5, 5],
+      vec![1, 1],
+    )
+    .unwrap();
+    let mut quantized = QuantizedGeometry::default();
+
+    quantized
+      .quantize_from(&geometry, &options(3, false, false))
+      .unwrap();
+
+    assert_eq!(quantized.kind, GeometryType::MultiPolygon);
+    assert_eq!(quantized.lengths, [5, 5]);
+    assert_eq!(quantized.polygon_ring_counts, [1, 1]);
   }
 
   #[test]

@@ -472,7 +472,7 @@ mod tests {
   use std::collections::hash_map::DefaultHasher;
   use std::hash::{Hash, Hasher};
 
-  use arrow_array::{BinaryArray, Float64Array, Int64Array, ListArray, StructArray};
+  use arrow_array::{BinaryArray, Float64Array, ListArray, StructArray};
 
   use crate::geometry::PbfGeometry;
   use crate::optimized::multiscale::MultiscaleLevel;
@@ -490,6 +490,30 @@ mod tests {
     for coordinate in [[1.0_f64, 2.0, 3.0], [4.0, 5.0, 6.0]] {
       for component in coordinate {
         bytes.extend_from_slice(&component.to_le_bytes());
+      }
+    }
+    bytes
+  }
+
+  fn multipolygon_wkb() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.push(1);
+    bytes.extend_from_slice(&6_u32.to_le_bytes());
+    bytes.extend_from_slice(&2_u32.to_le_bytes());
+    for offset in [0.0_f64, 10.0] {
+      bytes.push(1);
+      bytes.extend_from_slice(&3_u32.to_le_bytes());
+      bytes.extend_from_slice(&1_u32.to_le_bytes());
+      bytes.extend_from_slice(&5_u32.to_le_bytes());
+      for [x, y] in [
+        [offset, offset],
+        [offset + 4.0, offset],
+        [offset + 4.0, offset + 4.0],
+        [offset, offset + 4.0],
+        [offset, offset],
+      ] {
+        bytes.extend_from_slice(&x.to_le_bytes());
+        bytes.extend_from_slice(&y.to_le_bytes());
       }
     }
     bytes
@@ -614,7 +638,7 @@ mod tests {
       true,
       true,
       levels,
-      MultiscaleEncoding::NativeQuantized,
+      MultiscaleEncoding::Native,
       warnings.clone(),
     );
     let wkb = multiline_z_wkb();
@@ -641,11 +665,11 @@ mod tests {
       .clone();
     let z = coordinates
       .column_by_name("z")
-      .and_then(|column| column.as_any().downcast_ref::<Int64Array>())
+      .and_then(|column| column.as_any().downcast_ref::<Float64Array>())
       .expect("native z");
     let m = coordinates
       .column_by_name("m")
-      .and_then(|column| column.as_any().downcast_ref::<Int64Array>())
+      .and_then(|column| column.as_any().downcast_ref::<Float64Array>())
       .expect("native m");
 
     assert_eq!(z.null_count(), 0);
@@ -654,73 +678,33 @@ mod tests {
   }
 
   #[test]
-  fn native_quantized_float_output_uses_grid_coordinates() {
+  fn wkb_output_preserves_multipolygon_grouping() {
     let levels = MultiscaleLevel::create_all(
       crate::geoparquet::DEFAULT_OUTPUT_WKID,
-      GeometryType::Polyline,
+      GeometryType::Polygon,
     );
     let udf = GeolodUdf::new_with_warnings(
-      GeometryType::Polyline,
+      GeometryType::Polygon,
       false,
       false,
       levels,
-      MultiscaleEncoding::NativeQuantizedFloat,
+      MultiscaleEncoding::Wkb,
       PipelineWarnings::default(),
     );
-    let wkb = multiline_z_wkb();
+    let wkb = multipolygon_wkb();
     let input = BinaryArray::from(vec![Some(wkb.as_slice())]);
     let geometry = GeometryArray::try_new(&input).expect("geometry");
-    let geolod = udf.encode_geolod(&geometry).expect("geolod");
-    let geometries = geolod
-      .column(0)
-      .as_any()
-      .downcast_ref::<ListArray>()
-      .expect("native geometries");
-    let part_values = geometries.value(0);
-    let parts = part_values
-      .as_any()
-      .downcast_ref::<ListArray>()
-      .expect("native parts");
-    let coordinate_values = parts.value(0);
-    let coordinates = coordinate_values
-      .as_any()
-      .downcast_ref::<StructArray>()
-      .expect("native coordinates");
-    let x = coordinates
-      .column_by_name("x")
-      .and_then(|column| column.as_any().downcast_ref::<Float64Array>())
-      .expect("native floating x");
-
-    assert_eq!(x.value(0), 1.0);
-  }
-
-  #[test]
-  fn wkb_quantized_output_uses_grid_coordinates() {
-    let levels = MultiscaleLevel::create_all(
-      crate::geoparquet::DEFAULT_OUTPUT_WKID,
-      GeometryType::Polyline,
-    );
-    let udf = GeolodUdf::new_with_warnings(
-      GeometryType::Polyline,
-      false,
-      false,
-      levels,
-      MultiscaleEncoding::WkbQuantized,
-      PipelineWarnings::default(),
-    );
-    let wkb = multiline_z_wkb();
-    let input = BinaryArray::from(vec![Some(wkb.as_slice())]);
-    let geometry = GeometryArray::try_new(&input).expect("geometry");
-    let geolod = udf.encode_geolod(&geometry).expect("geolod");
-    let encoded = geolod
+    let simplified = udf.encode_geolod(&geometry).expect("simplified geometry");
+    let encoded = simplified
       .column(0)
       .as_any()
       .downcast_ref::<BinaryArray>()
       .expect("WKB geometry");
     let decoded = Geometry::from_wkb(encoded.value(0)).expect("decoded WKB");
 
-    assert_eq!(decoded.ty, crate::geometry::GeometryKind::MultiLineString);
-    assert_eq!(decoded.coordinates[0].x, 1.0);
+    assert_eq!(decoded.ty, crate::geometry::GeometryKind::MultiPolygon);
+    assert_eq!(decoded.polygon_ring_counts, [1, 1]);
+    assert_eq!(decoded.lengths, [5, 5]);
   }
 
   #[test]

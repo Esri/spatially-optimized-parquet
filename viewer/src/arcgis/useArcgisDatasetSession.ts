@@ -8,6 +8,13 @@ import {
 } from "react";
 
 import type { Dataset } from "../common/dataset/datasets";
+import type { DatasetRouteViewpoint } from "../common/dataset/datasetRoute";
+import { deriveClusterLevels } from "./cluster/clusterLevelCatalog";
+import { ClusterPageRendererStore } from "./cluster/clusterPageRenderer";
+import {
+  type ActiveClusterRenderer,
+  resolveClusterPresentation,
+} from "./cluster/clusterPresentation";
 import { createParquetLayerData } from "./createParquetLayerData";
 import {
   reduceDatasetSessionState,
@@ -22,10 +29,13 @@ import {
 } from "./diagnostics";
 import { ParquetDatasetDownloadSession } from "./file-explorer/download/ParquetDatasetDownloadSession";
 import { inferCustomExtent } from "./inferCustomExtent";
+import {
+  applyLayerPresentation,
+  type LayerPresentation,
+  readLayerPresentation,
+} from "./layerPresentation";
 import type {
-  DatasetEffectLayer,
   DatasetMapProfile,
-  DatasetProfileCleanup,
 } from "./profiles/profiles";
 
 export interface ArcgisDatasetSessionResult {
@@ -35,14 +45,18 @@ export interface ArcgisDatasetSessionResult {
   readonly layer: ParquetLayer | null;
   readonly loadError: Error | null;
   readonly loading: boolean;
+  readonly normalPresentation: LayerPresentation;
   readonly parquetSource: unknown | null;
+  readonly preparedClusterRenderer: ActiveClusterRenderer | null;
 }
 
 export interface ArcgisDatasetSessionOptions {
+  readonly clusterEnabled: boolean;
   readonly dataset: Dataset;
   readonly mapElementRef: RefObject<HTMLArcgisMapElement | null>;
   readonly mapReady: boolean;
   readonly profile: DatasetMapProfile;
+  readonly viewpoint: DatasetRouteViewpoint | null;
 }
 
 interface LoadedDatasetSession {
@@ -52,8 +66,9 @@ interface LoadedDatasetSession {
   featureCount: number | null;
   layer: ParquetLayer | null;
   layerViewWatcher?: { remove(): void };
+  normalPresentation: LayerPresentation;
   parquetSource: unknown | null;
-  profileLayerCleanup?: DatasetProfileCleanup;
+  preparedClusterRenderer: ActiveClusterRenderer | null;
   rangeReadHandle?: ArcgisEventHandle;
 }
 
@@ -61,11 +76,17 @@ const defaultCenter: [number, number] = [-98, 39];
 const defaultScale = 25_000_000;
 
 export function useArcgisDatasetSession({
+  clusterEnabled,
   dataset,
   mapElementRef,
   mapReady,
   profile,
+  viewpoint,
 }: ArcgisDatasetSessionOptions): ArcgisDatasetSessionResult {
+  const clusterEnabledRef = useRef(clusterEnabled);
+  clusterEnabledRef.current = clusterEnabled;
+  const viewpointRef = useRef(viewpoint);
+  viewpointRef.current = viewpoint;
   const initialSessionRef = useRef<LoadedDatasetSession | null>(null);
   if (!initialSessionRef.current) {
     initialSessionRef.current = createEmptyDatasetSession(dataset);
@@ -92,6 +113,8 @@ export function useArcgisDatasetSession({
 
     const requestVersion = ++requestVersionRef.current;
     const candidate = createDatasetCandidate(dataset, profile);
+    const prepareCluster = clusterEnabledRef.current;
+    const requestedViewpoint = viewpointRef.current;
     let cancelled = false;
     dispatch({ type: "request-started", requestVersion });
 
@@ -114,17 +137,32 @@ export function useArcgisDatasetSession({
           return;
         }
 
-        const previousSession = committedSessionRef.current;
-        map.layers.removeAll();
-        disposeDatasetSession(previousSession);
+        candidate.normalPresentation = readLayerPresentation(parquetLayer);
         const diagnosticsReady = attachDatasetDiagnostics(
           candidate,
           publishCandidate,
         );
-        const diagnostics = candidate.dataset.kind === "preset"
+        const diagnostics = candidate.dataset.kind === "preset" &&
+            !prepareCluster
           ? null
           : await diagnosticsReady;
-        await navigateToDataset(candidate, mapElement, diagnostics);
+        if (prepareCluster) {
+          await prepareCandidateCluster(candidate, diagnostics);
+        }
+        if (cancelled || requestVersion !== requestVersionRef.current) {
+          disposeDatasetSession(candidate);
+          return;
+        }
+
+        const previousSession = committedSessionRef.current;
+        map.layers.removeAll();
+        disposeDatasetSession(previousSession);
+        await navigateToDataset(
+          candidate,
+          mapElement,
+          diagnostics,
+          requestedViewpoint,
+        );
         if (cancelled || requestVersion !== requestVersionRef.current) {
           disposeDatasetSession(candidate);
           return;
@@ -179,7 +217,9 @@ export function useArcgisDatasetSession({
     layer: state.committed.layer,
     loadError: state.loadError,
     loading: state.loading,
+    normalPresentation: state.committed.normalPresentation,
     parquetSource: state.committed.parquetSource,
+    preparedClusterRenderer: state.committed.preparedClusterRenderer,
   };
 }
 
@@ -192,7 +232,9 @@ function createEmptyDatasetSession(
     download: new ParquetDatasetDownloadSession(),
     featureCount: null,
     layer: null,
+    normalPresentation: readLayerPresentation(null),
     parquetSource: null,
+    preparedClusterRenderer: null,
   };
 }
 
@@ -206,13 +248,48 @@ function createDatasetCandidate(
     data: createParquetLayerData(dataset),
     maxScale: dataset.maxScale,
     ...profile.layerProperties,
+    ...profile.initialPresentation,
   });
   const session = createEmptyDatasetSession(dataset);
   session.layer = layer;
-  session.profileLayerCleanup = hasDatasetEffectLayer(layer)
-    ? profile.configureLayer?.(layer)
-    : undefined;
   return session;
+}
+
+async function prepareCandidateCluster(
+  session: LoadedDatasetSession,
+  diagnostics: ParquetDiagnosticsSnapshot | null,
+): Promise<void> {
+  const layer = session.layer;
+  if (!layer || !session.parquetSource || !diagnostics) {
+    throw new Error("The Parquet diagnostics source is unavailable.");
+  }
+
+  const files = session.download.files.map(({ diagnostics: file }) => file);
+  const level = deriveClusterLevels(files).at(-1);
+  if (!level) {
+    throw new Error(
+      "The dataset has no multiscale level shared by every file.",
+    );
+  }
+
+  const rendererStore = new ClusterPageRendererStore(
+    session.parquetSource,
+    files,
+    layer.objectIdField,
+  );
+  const renderer = await rendererStore.load(level);
+  const active = { layer, level: level.level, renderer };
+  session.preparedClusterRenderer = active;
+  applyLayerPresentation(
+    layer,
+    resolveClusterPresentation({
+      enabled: true,
+      layer,
+      normalPresentation: session.normalPresentation,
+      rendererState: { type: "ready", active },
+      rowGroup: null,
+    }),
+  );
 }
 
 function attachDatasetDiagnostics(
@@ -328,12 +405,18 @@ async function navigateToDataset(
   session: LoadedDatasetSession,
   mapElement: HTMLArcgisMapElement,
   diagnostics: ParquetDiagnosticsSnapshot | null = null,
+  viewpoint: DatasetRouteViewpoint | null = null,
 ): Promise<void> {
   if (session.disposed) {
     return;
   }
 
   try {
+    if (viewpoint) {
+      await mapElement.view.goTo(viewpoint, { animate: false });
+      return;
+    }
+
     if (session.dataset.kind === "preset") {
       await mapElement.view.goTo(
         {
@@ -371,13 +454,8 @@ function disposeDatasetSession(session: LoadedDatasetSession): void {
   session.disposed = true;
   session.rangeReadHandle?.remove();
   session.layerViewWatcher?.remove();
-  session.profileLayerCleanup?.();
   session.download.dispose();
   session.layer?.destroy();
-}
-
-function hasDatasetEffectLayer(layer: object): layer is DatasetEffectLayer {
-  return "effect" in layer;
 }
 
 function toError(error: unknown, fallbackMessage: string): Error {
