@@ -1,0 +1,1 @@
+import{ax as u,gO as a}from"./index-lasFETI3.js";function i(n,e){return n===e||n!=null&&e!=null&&u(n.spatialReference,e.spatialReference)&&n.x===e.x&&n.y===e.y&&n.z===e.z&&n.m===e.m}function c(n,e,l){return n===e||n!=null&&e!=null&&u(n.spatialReference,e.spatialReference)&&a(n.x,e.x,l)&&a(n.y,e.y,l)&&a(n.z??0,e.z??0,l)&&a(n.m??0,e.m??0,l)}export{i as a,c as u};

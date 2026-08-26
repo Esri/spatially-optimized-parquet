@@ -1,0 +1,1 @@
+import{r}from"./featureConversionUtils-CDrt9vpO.js";const n={getObjectId:t=>t.objectId,getAttributes:t=>t.attributes,getAttribute:(t,e)=>t.attributes[e],cloneWithGeometry:(t,e,o)=>new r(e,t.attributes,null,t.objectId,t.displayId,t.distance,t.vertexCount),getGeometry:t=>t.geometry,getCentroid:(t,e)=>t.ensureCentroid(e)};export{n as e};

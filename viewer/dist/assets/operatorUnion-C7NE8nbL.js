@@ -1,0 +1,1 @@
+import{eO as o}from"./index-lasFETI3.js";import"./Point2D-gmyybO_G.js";import"./MultiPathImpl-CrAyTDCU.js";import{c as u}from"./ProjectionTransformation-DJ7a79Qg.js";const r=new u;function s(t,n,e){return r.execute(t,n,e,null)}function f(t,n){return r.executeMany(new o(t),n,null).next()}function l(){return r.supportsCurves()}export{l as o,s as r,f as u};

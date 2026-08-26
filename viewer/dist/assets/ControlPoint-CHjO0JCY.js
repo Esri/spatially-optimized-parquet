@@ -1,0 +1,1 @@
+import{eL as a,ac as t,ae as s,aI as r,af as p}from"./index-lasFETI3.js";let o=class extends a{constructor(e){super(e),this.sourcePoint=null,this.mapPoint=null}};t([s()],o.prototype,"sourcePoint",void 0),t([s({type:r})],o.prototype,"mapPoint",void 0),o=t([p("esri.layers.support.ControlPoint")],o);export{o as p};

@@ -1,0 +1,1 @@
+import{fl as h}from"./index-lasFETI3.js";function u(o,r,n){const s=Math.sin(o),c=Math.cos(o),i=Math.sin(r),f=Math.cos(r),t=n;return t[0]=-s,t[4]=-i*c,t[8]=f*c,t[12]=0,t[1]=c,t[5]=-i*s,t[9]=f*s,t[13]=0,t[2]=0,t[6]=f,t[10]=i,t[14]=0,t[3]=0,t[7]=0,t[11]=0,t[15]=1,t}function a(o,r,n){return u(o,r,n),h(n,n),n}export{u as n,a as o};
