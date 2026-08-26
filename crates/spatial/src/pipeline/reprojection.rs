@@ -18,7 +18,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 use crate::geometry::{GeometryArray, GeometryError, geometry_signature, to_datafusion_error};
-use crate::geoparquet::SpatialReference;
+use crate::geoparquet::{SpatialReference, WEB_MERCATOR_MAX_COORDINATE, WEB_MERCATOR_OUTPUT_WKID};
 use crate::pipeline::PipelineError;
 
 #[derive(Debug, Clone)]
@@ -56,14 +56,25 @@ impl ResolvedReprojection {
     &self.target_spatial_reference
   }
 
-  pub(crate) fn geometry_expr(&self, geometry_column: &str) -> Result<Option<Expr>, PipelineError> {
-    let Some(source_definition) = self.source_definition.as_ref() else {
+  /// Build output geometry normalization when transformation or domain validation is required.
+  pub(crate) fn output_geometry_expr(
+    &self,
+    geometry_column: &str,
+  ) -> Result<Option<Expr>, PipelineError> {
+    let target_wkid = self.target_spatial_reference.wkid.ok_or_else(|| {
+      PipelineError::InvalidRequest("missing output spatial-reference WKID".to_string())
+    })?;
+    if self.source_definition.is_none() && target_wkid != WEB_MERCATOR_OUTPUT_WKID {
       return Ok(None);
-    };
+    }
     let target_definition = self.target_spatial_reference.definition()?;
     Ok(Some(
-      ReprojectGeometryUdf::scalar_udf(source_definition.clone(), target_definition)
-        .call(vec![col(geometry_column)]),
+      OutputGeometryUdf::scalar_udf(
+        self.source_definition.clone(),
+        target_definition,
+        target_wkid,
+      )
+      .call(vec![col(geometry_column)]),
     ))
   }
 }
@@ -89,38 +100,58 @@ impl PreparedTransform {
     })
   }
 
-  /// Reproject one WKB geometry and return target-spatial-reference WKB.
-  fn reproject_wkb(&self, bytes: &[u8]) -> Result<Vec<u8>, GeometryError> {
-    let geometry = Geometry::from_wkb(bytes).map_err(|error| {
-      GeometryError::InvalidGeometry(format!("decode geometry for reprojection: {error}"))
-    })?;
-    let geometry = geometry
+  /// Reproject one geometry into the target spatial reference.
+  fn reproject_geometry(&self, geometry: Geometry) -> Result<Geometry, GeometryError> {
+    geometry
       .transform(&self.coord_transform)
-      .map_err(|error| GeometryError::InvalidGeometry(format!("reproject geometry: {error}")))?;
-    geometry.wkb().map_err(|error| {
-      GeometryError::InvalidGeometry(format!("encode reprojected geometry as WKB: {error}"))
-    })
+      .map_err(|error| GeometryError::InvalidGeometry(format!("reproject geometry: {error}")))
   }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct ReprojectGeometryUdf {
-  source_definition: String,
+struct OutputGeometryUdf {
+  source_definition: Option<String>,
   target_definition: String,
+  target_wkid: u32,
 }
 
-impl ReprojectGeometryUdf {
-  fn scalar_udf(source_definition: String, target_definition: String) -> ScalarUDF {
+impl OutputGeometryUdf {
+  fn scalar_udf(
+    source_definition: Option<String>,
+    target_definition: String,
+    target_wkid: u32,
+  ) -> ScalarUDF {
     ScalarUDF::new_from_impl(Self {
       source_definition,
       target_definition,
+      target_wkid,
+    })
+  }
+
+  fn normalize_wkb(
+    &self,
+    bytes: &[u8],
+    prepared: Option<&PreparedTransform>,
+  ) -> Result<Vec<u8>, GeometryError> {
+    let geometry = Geometry::from_wkb(bytes).map_err(|error| {
+      GeometryError::InvalidGeometry(format!("decode geometry for output normalization: {error}"))
+    })?;
+    let geometry = match prepared {
+      Some(prepared) => prepared.reproject_geometry(geometry)?,
+      None => geometry,
+    };
+    if self.target_wkid == WEB_MERCATOR_OUTPUT_WKID {
+      validate_web_mercator_geometry(&geometry)?;
+    }
+    geometry.wkb().map_err(|error| {
+      GeometryError::InvalidGeometry(format!("encode normalized geometry as WKB: {error}"))
     })
   }
 }
 
-impl ScalarUDFImpl for ReprojectGeometryUdf {
+impl ScalarUDFImpl for OutputGeometryUdf {
   fn name(&self) -> &str {
-    "reprojection_geometry"
+    "output_geometry"
   }
 
   fn signature(&self) -> &Signature {
@@ -136,23 +167,68 @@ impl ScalarUDFImpl for ReprojectGeometryUdf {
     let geometry = arrays
       .first()
       .ok_or_else(|| DataFusionError::Execution("missing geometry argument".to_string()))?;
-    let prepared = PreparedTransform::new(
-      SpatialReference::spatial_ref_from_definition(&self.source_definition)
-        .map_err(to_datafusion_error)?,
-      SpatialReference::spatial_ref_from_definition(&self.target_definition)
-        .map_err(to_datafusion_error)?,
-    )
-    .map_err(to_datafusion_error)?;
+    let prepared = self
+      .source_definition
+      .as_ref()
+      .map(|source_definition| {
+        PreparedTransform::new(
+          SpatialReference::spatial_ref_from_definition(source_definition)
+            .map_err(to_datafusion_error)?,
+          SpatialReference::spatial_ref_from_definition(&self.target_definition)
+            .map_err(to_datafusion_error)?,
+        )
+        .map_err(to_datafusion_error)
+      })
+      .transpose()?;
     let geometry = GeometryArray::try_new(geometry.as_ref())?;
     let mut builder = BinaryBuilder::with_capacity(geometry.len(), geometry.len() * 16);
     for value in geometry.values() {
       match value {
-        Some(bytes) => {
-          builder.append_value(prepared.reproject_wkb(bytes).map_err(to_datafusion_error)?)
-        }
+        Some(bytes) => builder.append_value(
+          self
+            .normalize_wkb(bytes, prepared.as_ref())
+            .map_err(to_datafusion_error)?,
+        ),
         None => builder.append_null(),
       }
     }
     Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
+  }
+}
+
+fn validate_web_mercator_geometry(geometry: &Geometry) -> Result<(), GeometryError> {
+  let envelope = geometry.envelope();
+  let coordinates = [envelope.MinX, envelope.MinY, envelope.MaxX, envelope.MaxY];
+  if coordinates
+    .iter()
+    .any(|value| !value.is_finite() || value.abs() > WEB_MERCATOR_MAX_COORDINATE)
+  {
+    return Err(GeometryError::InvalidGeometry(format!(
+      "Web Mercator geometry exceeds canonical EPSG:3857 bounds of ±{WEB_MERCATOR_MAX_COORDINATE} meters"
+    )));
+  }
+  Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn web_mercator_geometry_accepts_canonical_bounds() {
+    let boundary = WEB_MERCATOR_MAX_COORDINATE;
+    let geometry = Geometry::from_wkt(&format!(
+      "LINESTRING (-{boundary} -{boundary}, {boundary} {boundary})"
+    ))
+    .unwrap();
+    validate_web_mercator_geometry(&geometry).unwrap();
+  }
+
+  #[test]
+  fn web_mercator_geometry_rejects_coordinates_outside_canonical_bounds() {
+    let outside = WEB_MERCATOR_MAX_COORDINATE + 1.0;
+    let geometry = Geometry::from_wkt(&format!("POINT ({outside} 0)")).unwrap();
+    let error = validate_web_mercator_geometry(&geometry).unwrap_err();
+    assert!(error.to_string().contains("canonical EPSG:3857 bounds"));
   }
 }

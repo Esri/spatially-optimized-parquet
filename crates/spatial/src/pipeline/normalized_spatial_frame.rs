@@ -27,11 +27,11 @@ impl NormalizedSpatialFrame {
     strip_z: bool,
     strip_m: bool,
   ) -> Result<Self, PipelineError> {
-    if let Some(expression) = reprojection.geometry_expr(&source.geometry.column)? {
+    if let Some(expression) = reprojection.output_geometry_expr(&source.geometry.column)? {
       dataframe = dataframe
         .with_column(&source.geometry.column, expression)
         .map_err(|source| PipelineError::DataFusion {
-          operation: "reproject geometry column",
+          operation: "normalize output geometry column",
           source,
         })?;
     }

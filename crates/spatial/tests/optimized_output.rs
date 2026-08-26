@@ -8,6 +8,7 @@ use arrow_array::{
   UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema};
+use gdal::vector::Geometry;
 use gdal_sys::OGRwkbGeometryType;
 use parquet::basic::LogicalType;
 use spatial::{
@@ -1790,6 +1791,95 @@ fn optimized_output_reprojects_geopackage_polygon() {
   assert_eq!(geodisplay["levels"][0]["transform"]["scale"][0], 0.703125);
   assert!(!metadata.get("geo").unwrap().contains("3857"));
   assert!(!metadata.get("geodisplay").unwrap().contains("3857"));
+}
+
+#[test]
+fn optimized_output_writes_web_mercator_multiscale_wkb_from_geopackage_line() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("flowline-zm.gpkg");
+  let output = temp.path().join("flowline-3857.parquet");
+  let features = [GpkgFeature {
+    id: 1,
+    name: Some("flowline"),
+    geometry_wkt: "LINESTRING ZM (-150 60 10 100, -149.5 60.5 20 200, -149 61 30 300)",
+  }];
+  write_gpkg(
+    &input,
+    &[GpkgLayer {
+      name: "flowline",
+      geometry_type: OGRwkbGeometryType::wkbLineStringZM,
+      epsg: Some(4326),
+      features: &features,
+    }],
+  );
+
+  runtime()
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        layer: Some("flowline".to_string()),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::Optimized,
+        compression: Some("gzip".to_string()),
+        output_wkid: 3857,
+        strip_z: true,
+        strip_m: true,
+        multiscale_encoding: MultiscaleEncoding::Wkb,
+        overwrite: true,
+        ..Default::default()
+      },
+      ..Default::default()
+    }))
+    .unwrap();
+  validate(&output).unwrap().ensure_valid().unwrap();
+
+  let dataframe = runtime()
+    .block_on(scan_parquet(output.to_str().unwrap()))
+    .unwrap();
+  let batches = runtime().block_on(dataframe.collect()).unwrap();
+  let batch = &batches[0];
+  let geometry = binary_value(batch.column_by_name("geometry").unwrap().as_ref(), 0);
+  assert_eq!(u32::from_le_bytes(geometry[1..5].try_into().unwrap()), 2);
+  let envelope = Geometry::from_wkb(&geometry).unwrap().envelope();
+  let expected_min = transform_point_between_epsg(-150.0, 60.0, 4326, 3857);
+  let expected_max = transform_point_between_epsg(-149.0, 61.0, 4326, 3857);
+  assert_close(envelope.MinX, expected_min.0);
+  assert_close(envelope.MinY, expected_min.1);
+  assert_close(envelope.MaxX, expected_max.0);
+  assert_close(envelope.MaxY, expected_max.1);
+
+  let geolod = batch
+    .column_by_name("geolod")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap();
+  let level_zero = binary_value(geolod.column_by_name("level_0").unwrap().as_ref(), 0);
+  assert_eq!(u32::from_le_bytes(level_zero[1..5].try_into().unwrap()), 2);
+
+  let metadata = kv_map(&output);
+  let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").unwrap()).unwrap();
+  let geodisplay: serde_json::Value =
+    serde_json::from_str(metadata.get("geodisplay").unwrap()).unwrap();
+  assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 3857);
+  assert_eq!(
+    geo["columns"]["geometry"]["geometry_types"],
+    serde_json::json!(["LineString"])
+  );
+  assert_eq!(geodisplay["wkid"], 3857);
+  assert_close(
+    geodisplay["levels"][0]["resolution"].as_f64().unwrap(),
+    78_271.516_964_020_48,
+  );
+  assert_close(
+    geodisplay["levels"][0]["transform"]["scale"][0]
+      .as_f64()
+      .unwrap(),
+    78_271.516_964_020_48,
+  );
 }
 
 #[test]

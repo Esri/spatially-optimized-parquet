@@ -16,31 +16,129 @@ fn runtime() -> Runtime {
 }
 
 #[test]
-fn optimized_output_rejects_non_wgs84_before_filesystem_mutation() {
-  for output_wkid in [3857, 4269] {
+fn output_rejects_unsupported_crs_before_filesystem_mutation() {
+  for mode in [OutputMode::Plain, OutputMode::Optimized] {
     let temp = TempDir::new().unwrap();
     let input = temp.path().join("missing-input.parquet");
     let output = temp.path().join("must-not-exist.parquet");
-    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-      runtime().block_on(Pipeline::run(SpatialPipelineOptions {
+    let error = runtime()
+      .block_on(Pipeline::run(SpatialPipelineOptions {
         input: InputOptions {
           location: input.to_string_lossy().into_owned(),
           ..Default::default()
         },
         output: OutputOptions {
           path: output.clone(),
-          mode: OutputMode::Optimized,
-          output_wkid,
+          mode,
+          output_wkid: 4269,
           overwrite: true,
           ..Default::default()
         },
         ..Default::default()
       }))
-    }));
-    assert!(panic.is_err());
+      .unwrap_err();
+    assert!(
+      error
+        .to_string()
+        .contains("unsupported output spatial reference EPSG:4269"),
+      "{error:#}"
+    );
     assert!(!output.exists());
     assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
   }
+}
+
+#[test]
+fn web_mercator_output_rejects_out_of_domain_projected_coordinates() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("points.parquet");
+  let output = temp.path().join("output.parquet");
+  let schema = Arc::new(Schema::new(vec![Field::new(
+    "geometry",
+    DataType::Binary,
+    false,
+  )]));
+  let point = wkb_point(20_037_509.0, 0.0);
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![Arc::new(BinaryArray::from(vec![point.as_slice()]))],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv_with_epsg("geometry", &["Point"], 3857)],
+  );
+
+  let error = runtime()
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::Plain,
+        output_wkid: 3857,
+        overwrite: true,
+        ..Default::default()
+      },
+      ..Default::default()
+    }))
+    .unwrap_err();
+  assert!(
+    error.to_string().contains("canonical EPSG:3857 bounds"),
+    "{error:#}"
+  );
+}
+
+#[test]
+fn web_mercator_output_rejects_out_of_domain_wgs84_latitude() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("points.parquet");
+  let output = temp.path().join("output.parquet");
+  let schema = Arc::new(Schema::new(vec![Field::new(
+    "geometry",
+    DataType::Binary,
+    false,
+  )]));
+  let point = wkb_point(0.0, 90.0);
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![Arc::new(BinaryArray::from(vec![point.as_slice()]))],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv_with_epsg("geometry", &["Point"], 4326)],
+  );
+
+  let error = runtime()
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::Plain,
+        output_wkid: 3857,
+        overwrite: true,
+        ..Default::default()
+      },
+      ..Default::default()
+    }))
+    .unwrap_err();
+  let message = error.to_string();
+  assert!(
+    message.contains("reproject geometry") || message.contains("canonical EPSG:3857 bounds"),
+    "{error:#}"
+  );
 }
 
 #[test]

@@ -224,6 +224,74 @@ fn partitioned_output_writes_sorted_range_partitions() {
 }
 
 #[test]
+fn partitioned_output_writes_web_mercator_coordinates_and_metadata() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("points-4326.parquet");
+  let output = temp.path().join("out");
+  write_point_input(
+    &input,
+    &[(-150.0, 60.0), (-149.0, 61.0), (-148.0, 62.0)],
+    &["west", "middle", "east"],
+    4326,
+  );
+
+  runtime()
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::Optimized,
+        file_count: Some(2),
+        output_wkid: 3857,
+        overwrite: true,
+        ..Default::default()
+      },
+      ..Default::default()
+    }))
+    .unwrap();
+  validate(&output).unwrap().ensure_valid().unwrap();
+
+  let expected_min = transform_point_between_epsg(-150.0, 60.0, 4326, 3857);
+  let expected_max = transform_point_between_epsg(-148.0, 62.0, 4326, 3857);
+  let files = parquet_files(&output);
+  assert_eq!(files.len(), 2);
+  for file in files {
+    let metadata = kv_map(&file);
+    let geo: serde_json::Value = serde_json::from_str(metadata.get("geo").unwrap()).unwrap();
+    let geodisplay: serde_json::Value =
+      serde_json::from_str(metadata.get("geodisplay").unwrap()).unwrap();
+    assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 3857);
+    assert_json_extent(
+      &geo["columns"]["geometry"]["bbox"],
+      [
+        expected_min.0,
+        expected_min.1,
+        expected_max.0,
+        expected_max.1,
+      ],
+    );
+    assert_eq!(geodisplay["wkid"], 3857);
+
+    let dataframe = runtime()
+      .block_on(scan_parquet(file.to_str().unwrap()))
+      .unwrap();
+    let batches = runtime().block_on(dataframe.collect()).unwrap();
+    for batch in batches {
+      let geometry_column = batch.column_by_name("geometry").unwrap();
+      for row_index in 0..batch.num_rows() {
+        let geometry = binary_value(geometry_column.as_ref(), row_index);
+        let (x, y) = point_from_wkb_xy(&geometry).unwrap();
+        assert!((expected_min.0..=expected_max.0).contains(&x));
+        assert!((expected_min.1..=expected_max.1).contains(&y));
+      }
+    }
+  }
+}
+
+#[test]
 fn partitioned_output_writes_native_multiscale_coordinate_leaves() {
   assert_partitioned_multiscale_coordinate_leaves(
     MultiscaleEncoding::Native,

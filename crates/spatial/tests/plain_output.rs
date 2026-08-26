@@ -362,31 +362,76 @@ fn plain_output_reprojects_selected_rows_and_covering_extent() {
 }
 
 #[test]
-fn plain_output_rejects_non_wgs84_before_filesystem_mutation() {
-  for output_wkid in [3857, 4269] {
-    let temp = TempDir::new().unwrap();
-    let input = temp.path().join("missing-input.parquet");
-    let output = temp.path().join("must-not-exist.parquet");
-    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-      runtime().block_on(Pipeline::run(SpatialPipelineOptions {
-        input: InputOptions {
-          location: input.to_string_lossy().into_owned(),
-          ..Default::default()
-        },
-        output: OutputOptions {
-          path: output.clone(),
-          mode: OutputMode::Plain,
-          output_wkid,
-          overwrite: true,
-          ..Default::default()
-        },
+fn plain_output_reprojects_wgs84_to_web_mercator() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("points-4326.parquet");
+  let output = temp.path().join("points-3857.parquet");
+  let schema = Arc::new(Schema::new(vec![Field::new(
+    "geometry",
+    DataType::Binary,
+    false,
+  )]));
+  let point = wkb_point(1.0, 2.0);
+  let batch = arrow_array::RecordBatch::try_new(
+    schema.clone(),
+    vec![Arc::new(BinaryArray::from(vec![point.as_slice()]))],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv_with_epsg("geometry", &["Point"], 4326)],
+  );
+
+  runtime()
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
         ..Default::default()
-      }))
-    }));
-    assert!(panic.is_err());
-    assert!(!output.exists());
-    assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::Plain,
+        output_wkid: 3857,
+        covering: true,
+        overwrite: true,
+        ..Default::default()
+      },
+      ..Default::default()
+    }))
+    .unwrap();
+
+  let expected = transform_point_between_epsg(1.0, 2.0, 4326, 3857);
+  let dataframe = runtime()
+    .block_on(scan_parquet(output.to_str().unwrap()))
+    .unwrap();
+  let batches = runtime().block_on(dataframe.collect()).unwrap();
+  let batch = &batches[0];
+  let geometry = binary_value(batch.column_by_name("geometry").unwrap().as_ref(), 0);
+  let actual = point_from_wkb_xy(&geometry).unwrap();
+  assert_close(actual.0, expected.0);
+  assert_close(actual.1, expected.1);
+  let bbox = batch
+    .column_by_name("bbox")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap();
+  for field in ["xmin", "xmax"] {
+    assert_close(struct_f64_value(bbox, field, 0), expected.0);
   }
+  for field in ["ymin", "ymax"] {
+    assert_close(struct_f64_value(bbox, field, 0), expected.1);
+  }
+  let geo: serde_json::Value = serde_json::from_str(kv_map(&output).get("geo").unwrap()).unwrap();
+  assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 3857);
+  let extent = geo["columns"]["geometry"]["bbox"].as_array().unwrap();
+  assert_close(extent[0].as_f64().unwrap(), expected.0);
+  assert_close(extent[1].as_f64().unwrap(), expected.1);
+  assert_close(extent[2].as_f64().unwrap(), expected.0);
+  assert_close(extent[3].as_f64().unwrap(), expected.1);
 }
 
 #[test]

@@ -1,19 +1,17 @@
 //! Plans the multiscale geometry representations emitted for complex geometry features.
 
 use crate::geometry::{GeometryFamily as GeometryType, QuantizationTransform};
-use crate::geoparquet::{DEFAULT_OUTPUT_WKID, WEB_MERCATOR_OUTPUT_WKID};
+use crate::geoparquet::{DEFAULT_OUTPUT_WKID, WEB_MERCATOR_OUTPUT_WKID, WEB_MERCATOR_WORLD_WIDTH};
 
-const WGS84_SEMI_MAJOR_AXIS: f64 = 6_378_137.0;
 const ROOT_GRID_SIZE: f64 = 512.0;
 const DISPLAY_DPI: f64 = 96.0;
-const WGS84_EQUATORIAL_CIRCUMFERENCE: f64 = WGS84_SEMI_MAJOR_AXIS * std::f64::consts::TAU;
 /// Defines the WGS84 angular resolution used for the first multiscale level.
 const FIRST_LEVEL_RESOLUTION: f64 = 360.0 / ROOT_GRID_SIZE;
 /// Defines the Web Mercator resolution equivalent to the first WGS84 level.
-const FIRST_PROJECTED_LEVEL_RESOLUTION: f64 = WGS84_EQUATORIAL_CIRCUMFERENCE / ROOT_GRID_SIZE;
+const FIRST_PROJECTED_LEVEL_RESOLUTION: f64 = WEB_MERCATOR_WORLD_WIDTH / ROOT_GRID_SIZE;
 /// Defines the WGS84 map scale denominator used for the first multiscale level.
 const FIRST_LEVEL_SCALE: f64 =
-  WGS84_EQUATORIAL_CIRCUMFERENCE * DISPLAY_DPI * 10_000.0 / (254.0 * ROOT_GRID_SIZE);
+  WEB_MERCATOR_WORLD_WIDTH * DISPLAY_DPI * 10_000.0 / (254.0 * ROOT_GRID_SIZE);
 const MAX_MULTISCALE_LEVEL: u16 = 16;
 
 /// Defines the quantization and simplification settings for one output geometry column.
@@ -99,7 +97,12 @@ mod tests {
   #[test]
   fn creates_web_mercator_levels() {
     let levels = MultiscaleLevel::create_all(WEB_MERCATOR_OUTPUT_WKID, GeometryType::Polygon);
+    assert_eq!(
+      levels.iter().map(|level| level.level).collect::<Vec<_>>(),
+      vec![0, 2, 4, 6, 8, 10, 12, 14, 16]
+    );
     assert_eq!(levels[0].resolution, FIRST_PROJECTED_LEVEL_RESOLUTION);
+    assert_eq!(levels[0].scale, FIRST_LEVEL_SCALE);
     assert_eq!(
       levels[0].transform.scale,
       [

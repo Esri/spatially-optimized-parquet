@@ -5,6 +5,7 @@ use std::sync::Arc;
 use arrow_array::{BinaryArray, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
 use parquet::arrow::arrow_writer::ArrowWriter;
+use parquet::file::reader::{FileReader, SerializedFileReader};
 use tempfile::TempDir;
 
 fn write_point_input(path: &std::path::Path) {
@@ -39,6 +40,19 @@ fn point_wkb(x: f64, y: f64) -> Vec<u8> {
 
 fn normalized_stdout(output: &[u8]) -> String {
   String::from_utf8_lossy(output).replace('\r', "")
+}
+
+fn parquet_metadata_value(path: &std::path::Path, key: &str) -> String {
+  SerializedFileReader::new(File::open(path).unwrap())
+    .unwrap()
+    .metadata()
+    .file_metadata()
+    .key_value_metadata()
+    .unwrap()
+    .iter()
+    .find(|entry| entry.key == key)
+    .and_then(|entry| entry.value.clone())
+    .unwrap()
 }
 
 #[test]
@@ -82,6 +96,49 @@ fn validation_runs_only_through_validate_subcommand() {
   let validation_stdout = normalized_stdout(&validation.stdout);
   assert!(validation_stdout.contains("valid:"));
   assert!(!validation_stdout.contains("warning SOP-META-006"));
+}
+
+#[test]
+fn write_subcommand_supports_web_mercator_output() {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("input.parquet");
+  let output = temp.path().join("output-3857.parquet");
+  write_point_input(&input);
+
+  let result = Command::new(env!("CARGO_BIN_EXE_sop"))
+    .args([
+      "write",
+      input.to_str().unwrap(),
+      "--output",
+      output.to_str().unwrap(),
+      "--geometry-column",
+      "geometry",
+      "--in-sr",
+      "4326",
+      "--out-sr",
+      "3857",
+      "--overwrite",
+    ])
+    .output()
+    .unwrap();
+
+  assert!(
+    result.status.success(),
+    "{}",
+    String::from_utf8_lossy(&result.stderr)
+  );
+  assert!(parquet_metadata_value(&output, "geo").contains(r#""code":3857"#));
+  assert!(parquet_metadata_value(&output, "geodisplay").contains(r#""wkid":3857"#));
+
+  let validation = Command::new(env!("CARGO_BIN_EXE_sop"))
+    .args(["validate", output.to_str().unwrap()])
+    .output()
+    .unwrap();
+  assert!(
+    validation.status.success(),
+    "{}",
+    String::from_utf8_lossy(&validation.stderr)
+  );
 }
 
 #[test]

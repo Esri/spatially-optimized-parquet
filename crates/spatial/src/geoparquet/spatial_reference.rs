@@ -8,8 +8,12 @@ use crate::input::SourceGeometryMetadata;
 
 /// Selects the default output spatial reference.
 pub const DEFAULT_OUTPUT_WKID: u32 = 4326;
-/// Selects the projected spatial reference supported by optimized output.
+/// Selects the supported projected output spatial reference.
 pub(crate) const WEB_MERCATOR_OUTPUT_WKID: u32 = 3857;
+/// Defines the maximum absolute Web Mercator coordinate in meters.
+pub(crate) const WEB_MERCATOR_MAX_COORDINATE: f64 = 20_037_508.342_789_244;
+/// Defines the width of the canonical Web Mercator square in meters.
+pub(crate) const WEB_MERCATOR_WORLD_WIDTH: f64 = WEB_MERCATOR_MAX_COORDINATE * 2.0;
 
 #[derive(Debug, Clone, PartialEq, Default)]
 /// Represents equivalent identifiers and definitions for one coordinate reference system.
@@ -24,9 +28,10 @@ pub(crate) struct SpatialReference {
 
 impl SpatialReference {
   /// Validate the requested output spatial reference before opening job resources.
-  pub(crate) fn validate_output_wkid(output_wkid: u32) {
-    if output_wkid != DEFAULT_OUTPUT_WKID {
-      todo!("output spatial reference EPSG:{output_wkid}");
+  pub(crate) fn validate_output_wkid(output_wkid: u32) -> Result<(), GeoParquetError> {
+    match output_wkid {
+      DEFAULT_OUTPUT_WKID | WEB_MERCATOR_OUTPUT_WKID => Ok(()),
+      wkid => Err(GeoParquetError::UnsupportedOutputSpatialReference { wkid }),
     }
   }
 
@@ -140,4 +145,25 @@ fn supported_authority_code(value: &Value) -> Option<u32> {
   matches!(authority, Some("EPSG" | "ESRI"))
     .then_some(code)
     .flatten()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn supported_output_wkids_are_accepted() {
+    for output_wkid in [DEFAULT_OUTPUT_WKID, WEB_MERCATOR_OUTPUT_WKID] {
+      SpatialReference::validate_output_wkid(output_wkid).unwrap();
+    }
+  }
+
+  #[test]
+  fn unsupported_output_wkid_returns_error() {
+    let error = SpatialReference::validate_output_wkid(4269).unwrap_err();
+    assert!(matches!(
+      error,
+      GeoParquetError::UnsupportedOutputSpatialReference { wkid: 4269 }
+    ));
+  }
 }

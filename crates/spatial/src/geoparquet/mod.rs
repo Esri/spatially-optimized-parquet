@@ -14,7 +14,9 @@ pub(crate) use extensions::{
 };
 pub(crate) use geo_metadata::{GeoMetadata, GeoMetadataInput};
 pub use spatial_reference::DEFAULT_OUTPUT_WKID;
-pub(crate) use spatial_reference::{SpatialReference, WEB_MERCATOR_OUTPUT_WKID};
+pub(crate) use spatial_reference::{
+  SpatialReference, WEB_MERCATOR_MAX_COORDINATE, WEB_MERCATOR_OUTPUT_WKID, WEB_MERCATOR_WORLD_WIDTH,
+};
 
 #[cfg(test)]
 mod tests;

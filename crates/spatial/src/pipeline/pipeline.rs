@@ -235,10 +235,6 @@ impl Pipeline {
   /// Returns an error for invalid configuration, unsupported source data, planning failures, or
   /// failed writes. A failed write tries to remove files it created.
   ///
-  /// # Panics
-  ///
-  /// Panics when `OutputOptions` requests an output WKID other than
-  /// [`crate::DEFAULT_OUTPUT_WKID`], because additional output references are not implemented.
   pub async fn run(
     options: SpatialPipelineOptions,
   ) -> Result<SpatialPipelineResult, PipelineError> {
@@ -253,7 +249,7 @@ impl Pipeline {
       target_partitions,
       write_reporter,
     } = options;
-    SpatialReference::validate_output_wkid(output_options.output_wkid);
+    SpatialReference::validate_output_wkid(output_options.output_wkid)?;
     if output_options.cluster_depth == 0 || output_options.cluster_depth > 32 {
       return Err(PipelineError::InvalidRequest(
         "cluster depth must be between 1 and 32".to_string(),

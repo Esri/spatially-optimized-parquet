@@ -4,6 +4,12 @@ pub enum GeoParquetError {
   /// Reports missing or invalid GeoParquet metadata.
   #[error("GeoParquet metadata error: {0}")]
   Metadata(String),
+  /// Reports an output coordinate reference system the writer does not support.
+  #[error("unsupported output spatial reference EPSG:{wkid}; expected EPSG:4326 or EPSG:3857")]
+  UnsupportedOutputSpatialReference {
+    /// Identifies the rejected EPSG well-known identifier.
+    wkid: u32,
+  },
   /// Reports a coordinate-reference operation failure.
   #[error("spatial reference operation {operation} failed: {source}")]
   SpatialReference {

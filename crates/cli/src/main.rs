@@ -116,7 +116,7 @@ struct WriteCommand {
     long,
     value_name = "LATEST_WKID",
     default_value_t = DEFAULT_OUTPUT_WKID,
-    help = "Set the output CRS"
+    help = "Set the output CRS to EPSG:4326 or EPSG:3857"
   )]
   out_sr: u32,
   #[arg(
