@@ -9,11 +9,12 @@ Spatially Optimized Parquet (SOP) defines an additional layer of cluster-based s
 
 Only two types of clustering are currently supported: xz for complex geometries, and z for points. Additional clustering types, especially to support spatiotemporal datasets, are planned for the future.
 
-#### *2.6 Billion Building Footprints, Overture*
+#### *2.6 Billion Building Footprints, Overture* ([View](https://codepen.io/matt9222/pen/dPNVXZv))
 
 https://github.com/user-attachments/assets/90f20705-ebf9-4c66-950c-d5c7877817f4
 
-#### *11 Million Census Blocks*
+
+#### *11 Million Census Blocks* ([View](https://codepen.io/matt9222/pen/pvRWbpB))
 
 https://github.com/user-attachments/assets/5c02b942-afb1-47cf-b892-27a5954b826c
 
