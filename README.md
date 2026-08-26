@@ -1,5 +1,5 @@
 > [!NOTE]
-> We are currently in the process of directly integrating Spatially Optimized Parquet into [GeoParquet](https://geoparquet.org/releases/v1.1.0/) as an optional DisplayOptimization extension.
+> We are currently working on proposal extensions to integrate Spatially Optimized Parquet into [GeoParquet](https://geoparquet.org/releases/v1.1.0/).
 
 ## Spatially Optimized Parquet
 
@@ -19,14 +19,7 @@ https://github.com/user-attachments/assets/5c02b942-afb1-47cf-b892-27a5954b826c
 
 ## Installation
 
-First, [install Rust](https://rustup.rs/)
-
-```sh
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-```
-
-Then install with:
+First, [setup Rust](https://rustup.rs/), then install with:
 
 ```sh
 cargo install
@@ -39,13 +32,11 @@ You can then run on a `geopackage` with:
 sop write \
   france/bdnb.gpkg \
   --layer batiment_groupe_compile \
-  --output out.parquet \
-  --partitions 1 \
-  --overwrite
+  --output out.parquet
 ```
 
 Validate an existing optimized file or recursive partitioned dataset with:
 
 ```sh
-sop validate out.parquet
+sop validate <file>
 ```
