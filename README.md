@@ -1,6 +1,8 @@
 > [!NOTE]
 > We are currently working on proposal extensions to integrate Spatially Optimized Parquet into [GeoParquet](https://geoparquet.org/releases/v1.1.0/).
 
+<img width="1428" height="590" alt="Screenshot 2026-08-26 at 4 30 35 PM" src="https://github.com/user-attachments/assets/ff50cfec-e5a8-4135-b854-c9d140f58a70" />
+
 ## Spatially Optimized Parquet
 
 This repository includes the in-progress [specification](spec/display-optimization.md) and reference implementation for Spatially Optimized Parquet.
