@@ -1,4 +1,4 @@
-import type { ViewerType } from "./Viewer";
+import type { ViewerType } from "./viewerRoute";
 import styles from "./AppHeader.module.css";
 
 interface AppHeaderProps {
@@ -45,5 +45,5 @@ export function AppHeader({
 }
 
 function viewerToggleLabel(viewer: ViewerType): string {
-  return viewer === "arcgis" ? "MapLibre Starter Code" : "ArcGIS Maps SDK";
+  return viewer === "arcgis" ? "MapLibre Example" : "ArcGIS Maps SDK";
 }

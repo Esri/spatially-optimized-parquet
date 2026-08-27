@@ -1,8 +1,7 @@
 import { lazy, Suspense } from "react";
 
 import { ArcgisViewer } from "./arcgis/ArcgisViewer";
-
-export type ViewerType = "arcgis" | "maplibre";
+import type { ViewerType } from "./viewerRoute";
 
 const MaplibreViewer = lazy(
   () => import("./maplibre/MapLibreViewer"),
