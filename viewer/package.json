@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/vite.mjs",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && node scripts/vite.mjs build",
     "lint": "eslint .",
     "test": "vitest run",
     "preview": "vite preview"
