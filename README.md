@@ -3,6 +3,8 @@
 
 <img width="1428" height="590" alt="Screenshot 2026-08-26 at 4 30 35 PM" src="https://github.com/user-attachments/assets/ff50cfec-e5a8-4135-b854-c9d140f58a70" />
 
+[Viewer](https://fd-stcorestatic5940ebf8-auapb8gzhpb8azaj.a02.azurefd.net/) ([ArcGIS Maps Source](viewer/src/arcgis), [MapLibre Source](viewer/src/maplibre))
+
 ## Spatially Optimized Parquet
 
 This repository includes the in-progress [specification](spec/display-optimization.md) and reference implementation for Spatially Optimized Parquet.
