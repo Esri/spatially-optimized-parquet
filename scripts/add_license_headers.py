@@ -10,6 +10,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 COMMENT_PREFIX_BY_SUFFIX = {
     ".rs": "//",
     ".ts": "//",
+    ".tsx": "//",
 }
 COMMENT_PREFIX_BY_FILE_NAME = {
     "Cargo.toml": "#",
@@ -45,7 +46,7 @@ limitations under the License."""
 def main(arguments: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Add the Apache 2.0 license header to Rust, TypeScript, and Cargo manifest files."
+            "Add the Apache 2.0 license header to Rust, TypeScript, TSX, and Cargo manifest files."
         )
     )
     parser.add_argument(
