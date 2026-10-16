@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::geometry::{Extent2D, GeometryKind};
+use crate::geometry::{Extent2D, GeometryType};
 use crate::geoparquet::SpatialReference;
 use crate::geoparquet::{GeoParquetError, LodMetadata, OrderingMetadata};
 
@@ -30,7 +30,7 @@ pub(crate) struct GeoMetadataInput<'a> {
   /// Identifies the primary geometry column.
   pub(crate) geometry_column: &'a str,
   /// Defines exact geometry kinds present in the output.
-  pub(crate) geometry_types: &'a [GeometryKind],
+  pub(crate) geometry_types: &'a [GeometryType],
   /// Defines the geometry extent in output coordinates.
   pub(crate) output_extent: Extent2D,
   /// Provides the output coordinate reference system.
@@ -90,7 +90,7 @@ impl GeoMetadata {
       .geometry_types
       .iter()
       .copied()
-      .map(|geometry_kind| geometry_kind.geoparquet_type_name(input.has_z, input.has_m))
+      .map(|ty| ty.geoparquet_type_name(input.has_z, input.has_m))
       .collect::<Result<Vec<_>, GeoParquetError>>()?;
     let column = GeoColumnMetadata {
       encoding: "WKB".to_string(),
@@ -158,7 +158,7 @@ impl GeoCovering {
   }
 }
 
-impl GeometryKind {
+impl GeometryType {
   fn geoparquet_type_name(self, has_z: bool, has_m: bool) -> Result<String, GeoParquetError> {
     let base = match self {
       Self::Point => "Point",
@@ -170,7 +170,7 @@ impl GeometryKind {
       Self::GeometryCollection => "GeometryCollection",
       Self::Unknown => {
         return Err(GeoParquetError::Metadata(
-          "unsupported geometry kind metadata".to_string(),
+          "unsupported geometry type metadata".to_string(),
         ));
       }
     };

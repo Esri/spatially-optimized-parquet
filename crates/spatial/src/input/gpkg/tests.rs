@@ -28,7 +28,7 @@ use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
 use crate::geometry::{
-  CoordinateDimensions, Extent2D, GeometryArray, GeometryKind, PolygonRingOrder, WkbCoordinate,
+  CoordinateDimensions, Extent2D, GeometryArray, GeometryType, PolygonRingOrder, WkbCoordinate,
   WkbPartRole, WkbSink, visit_wkb_geometry,
 };
 use crate::input::{InputOpenOptions, InputSource, RowRange, SourceFormat, open_input};
@@ -189,10 +189,10 @@ fn open_input_accepts_single_layer_geopackage_and_reads_metadata() {
 
   let geometry_column = input.inferred_geometry_column().unwrap().unwrap();
   assert_eq!(geometry_column.column, "geometry");
-  assert_eq!(geometry_column.geometry_kind, Some(GeometryKind::Point));
+  assert_eq!(geometry_column.ty, Some(GeometryType::Point));
 
   let geometry_meta = input.source_metadata().unwrap().geometry.unwrap();
-  assert_eq!(geometry_meta.geometry_types, vec![GeometryKind::Point]);
+  assert_eq!(geometry_meta.geometry_types, vec![GeometryType::Point]);
   assert_eq!(
     geometry_meta.bbox,
     Some(Extent2D {
@@ -320,7 +320,7 @@ fn open_input_selects_requested_geopackage_layer() {
   assert_eq!(input.total_rows().unwrap(), 1);
   let geometry_column = input.inferred_geometry_column().unwrap().unwrap();
   assert_eq!(geometry_column.column, "geometry");
-  assert_eq!(geometry_column.geometry_kind, Some(GeometryKind::Polygon));
+  assert_eq!(geometry_column.ty, Some(GeometryType::Polygon));
 }
 
 #[test]
@@ -557,15 +557,12 @@ fn open_input_uses_sampled_geometry_type_for_generic_layer_metadata() {
 
   let input = open_gpkg_input(&path, None);
   let geometry_column = input.inferred_geometry_column().unwrap().unwrap();
-  assert_eq!(
-    geometry_column.geometry_kind,
-    Some(GeometryKind::MultiPolygon)
-  );
+  assert_eq!(geometry_column.ty, Some(GeometryType::MultiPolygon));
 
   let geometry_meta = input.source_metadata().unwrap().geometry.unwrap();
   assert_eq!(
     geometry_meta.geometry_types,
-    vec![GeometryKind::MultiPolygon]
+    vec![GeometryType::MultiPolygon]
   );
   assert_eq!(
     geometry_meta.bbox,
@@ -600,7 +597,7 @@ fn open_input_infers_z_and_m_from_generic_geopackage_wkb() {
   let input = open_gpkg_input(&path, None);
   let geometry = input.source_metadata().unwrap().geometry.unwrap();
 
-  assert_eq!(geometry.geometry_types, vec![GeometryKind::Point]);
+  assert_eq!(geometry.geometry_types, vec![GeometryType::Point]);
   assert!(geometry.has_z);
   assert!(geometry.has_m);
 }
@@ -617,7 +614,7 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
 
   struct GeometryCase {
     name: &'static str,
-    geometry_kind: GeometryKind,
+    ty: GeometryType,
     geometry_types: [OGRwkbGeometryType::Type; 3],
     supports_optimized_output: bool,
   }
@@ -648,7 +645,7 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
   let geometry_cases = [
     GeometryCase {
       name: "point",
-      geometry_kind: GeometryKind::Point,
+      ty: GeometryType::Point,
       geometry_types: [
         OGRwkbGeometryType::wkbPoint25D,
         OGRwkbGeometryType::wkbPointM,
@@ -658,7 +655,7 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
     },
     GeometryCase {
       name: "line_string",
-      geometry_kind: GeometryKind::LineString,
+      ty: GeometryType::LineString,
       geometry_types: [
         OGRwkbGeometryType::wkbLineString25D,
         OGRwkbGeometryType::wkbLineStringM,
@@ -668,7 +665,7 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
     },
     GeometryCase {
       name: "polygon",
-      geometry_kind: GeometryKind::Polygon,
+      ty: GeometryType::Polygon,
       geometry_types: [
         OGRwkbGeometryType::wkbPolygon25D,
         OGRwkbGeometryType::wkbPolygonM,
@@ -678,7 +675,7 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
     },
     GeometryCase {
       name: "multi_point",
-      geometry_kind: GeometryKind::MultiPoint,
+      ty: GeometryType::MultiPoint,
       geometry_types: [
         OGRwkbGeometryType::wkbMultiPoint25D,
         OGRwkbGeometryType::wkbMultiPointM,
@@ -688,7 +685,7 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
     },
     GeometryCase {
       name: "multi_line_string",
-      geometry_kind: GeometryKind::MultiLineString,
+      ty: GeometryType::MultiLineString,
       geometry_types: [
         OGRwkbGeometryType::wkbMultiLineString25D,
         OGRwkbGeometryType::wkbMultiLineStringM,
@@ -698,7 +695,7 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
     },
     GeometryCase {
       name: "multi_polygon",
-      geometry_kind: GeometryKind::MultiPolygon,
+      ty: GeometryType::MultiPolygon,
       geometry_types: [
         OGRwkbGeometryType::wkbMultiPolygon25D,
         OGRwkbGeometryType::wkbMultiPolygonM,
@@ -708,7 +705,7 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
     },
     GeometryCase {
       name: "geometry_collection",
-      geometry_kind: GeometryKind::GeometryCollection,
+      ty: GeometryType::GeometryCollection,
       geometry_types: [
         OGRwkbGeometryType::wkbGeometryCollection25D,
         OGRwkbGeometryType::wkbGeometryCollectionM,
@@ -750,7 +747,7 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
       let geometry_metadata = input.source_metadata().unwrap().geometry.unwrap();
       assert_eq!(
         geometry_metadata.geometry_types,
-        vec![geometry_case.geometry_kind],
+        vec![geometry_case.ty],
         "{} {} metadata geometry type",
         geometry_case.name,
         dimension_case.suffix
@@ -770,7 +767,7 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
       });
       let mut sink = CoordinateSink::default();
       let header = visit_wkb_geometry(&bytes, PolygonRingOrder::Preserve, &mut sink).unwrap();
-      assert_eq!(header.kind, geometry_case.geometry_kind);
+      assert_eq!(header.ty, geometry_case.ty);
       assert_eq!(header.dimensions, dimension_case.dimensions);
       assert!(!sink.coordinates.is_empty());
       assert_eq!(sink.coordinates[0].x, 1.0);

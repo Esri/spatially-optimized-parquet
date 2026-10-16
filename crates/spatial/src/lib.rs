@@ -35,7 +35,7 @@ mod pipeline;
 mod session;
 pub mod validate;
 
-pub use geometry::GeometryError;
+pub use geometry::{GeometryError, GeometryType};
 pub use geoparquet::DEFAULT_OUTPUT_WKID;
 pub use geoparquet::GeoParquetError;
 pub use input::InputError;

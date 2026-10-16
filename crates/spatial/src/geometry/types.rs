@@ -14,7 +14,7 @@
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Identifies the concrete geometry shape represented by source metadata or WKB.
-pub(crate) enum GeometryType {
+pub enum GeometryType {
   /// Represents one point.
   Point,
   /// Represents one line string.
@@ -33,9 +33,6 @@ pub(crate) enum GeometryType {
   Unknown,
 }
 
-/// Preserves the previous name while call sites migrate to `GeometryType`.
-pub(crate) type GeometryKind = GeometryType;
-
 #[derive(Debug, Clone, PartialEq)]
 /// Describes the selected geometry column and its source encoding.
 pub(crate) struct GeometryColumn {
@@ -43,8 +40,8 @@ pub(crate) struct GeometryColumn {
   pub(crate) column: String,
   /// Defines the physical encoding used by that column.
   pub(crate) encoding: GeometryEncoding,
-  /// Provides the source geometry kind when metadata can determine it.
-  pub(crate) geometry_kind: Option<GeometryKind>,
+  /// Provides the source geometry type when metadata can determine it.
+  pub(crate) ty: Option<GeometryType>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

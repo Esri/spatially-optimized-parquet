@@ -17,7 +17,7 @@
 use parquet::file::metadata::KeyValue;
 use serde_json::Value;
 
-use crate::geometry::{Extent2D, GeometryEncoding, GeometryKind};
+use crate::geometry::{Extent2D, GeometryEncoding, GeometryType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SourceCoveringMetadata {
@@ -28,7 +28,7 @@ pub(crate) struct SourceCoveringMetadata {
 pub(crate) struct SourceGeometryMetadata {
   pub(crate) column: String,
   pub(crate) encoding: GeometryEncoding,
-  pub(crate) geometry_types: Vec<GeometryKind>,
+  pub(crate) geometry_types: Vec<GeometryType>,
   pub(crate) bbox: Option<Extent2D>,
   pub(crate) covering: Option<SourceCoveringMetadata>,
   pub(crate) projjson: Option<Value>,

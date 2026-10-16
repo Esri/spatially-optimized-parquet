@@ -16,8 +16,7 @@
 //!
 //! Native geometry stores snapped world coordinates in nested Arrow lists and structs.
 //! Multipoints use `list<struct<x, y, z?, m?>>`, while polylines and polygons add an outer list
-//! for parts. x and y remain non-null. z and m preserve their source validity through nullable
-//! floating-point fields.
+//! for parts. All coordinate fields remain non-null, with missing Z/M values encoded as zero.
 
 use std::sync::Arc;
 
@@ -25,7 +24,7 @@ use arrow_array::ArrayRef;
 use arrow_array::builder::{Float64Builder, ListBuilder, StructBuilder};
 use arrow_schema::{DataType, Field, Fields};
 
-use super::{ComponentValidity, GeometryFamily, QuantizationTransform, QuantizedGeometry};
+use super::{GeometryFamily, QuantizationTransform, QuantizedGeometry};
 
 type CoordinateBuilder = StructBuilder;
 type PointListBuilder = ListBuilder<CoordinateBuilder>;
@@ -110,21 +109,12 @@ impl NativeGeometryArrayBuilder {
     lengths: &[u32],
     has_z: bool,
     has_m: bool,
-    validity: &ComponentValidity,
     transform: &QuantizationTransform,
   ) {
     let stride = coordinate_stride(has_z, has_m);
     match self {
       Self::MultiPoint(builder) => {
-        Self::append_coordinates(
-          builder.values(),
-          coordinates,
-          has_z,
-          has_m,
-          validity,
-          transform,
-          0,
-        );
+        Self::append_coordinates(builder.values(), coordinates, has_z, has_m, transform);
         builder.append(true);
       }
 
@@ -137,9 +127,7 @@ impl NativeGeometryArrayBuilder {
             &coordinates[coordinate_offset..coordinate_offset + value_count],
             has_z,
             has_m,
-            validity,
             transform,
-            coordinate_offset / stride,
           );
           builder.values().append(true);
           coordinate_offset += value_count;
@@ -159,10 +147,10 @@ impl NativeGeometryArrayBuilder {
       Arc::new(Field::new("y", DataType::Float64, false)),
     ];
     if has_z {
-      fields.push(Arc::new(Field::new("z", DataType::Float64, true)));
+      fields.push(Arc::new(Field::new("z", DataType::Float64, false)));
     }
     if has_m {
-      fields.push(Arc::new(Field::new("m", DataType::Float64, true)));
+      fields.push(Arc::new(Field::new("m", DataType::Float64, false)));
     }
     Fields::from(fields)
   }
@@ -177,7 +165,6 @@ impl NativeGeometryArrayBuilder {
       &geometry.lengths,
       geometry.has_z,
       geometry.has_m,
-      &geometry.validity,
       transform,
     );
   }
@@ -201,42 +188,31 @@ impl NativeGeometryArrayBuilder {
     coordinates: &[i64],
     has_z: bool,
     has_m: bool,
-    validity: &ComponentValidity,
     transform: &QuantizationTransform,
-    coordinate_index_offset: usize,
   ) {
     let stride = coordinate_stride(has_z, has_m);
-    for (local_coordinate_index, coordinate) in coordinates.chunks_exact(stride).enumerate() {
-      let coordinate_index = coordinate_index_offset + local_coordinate_index;
+    for coordinate in coordinates.chunks_exact(stride) {
       append_value(builder, 0, coordinate[0], transform, 0);
       append_value(builder, 1, coordinate[1], transform, 1);
       let mut component_index = 2;
       if has_z {
-        if validity.z_is_valid(coordinate_index) {
-          append_value(
-            builder,
-            component_index,
-            coordinate[component_index],
-            transform,
-            2,
-          );
-        } else {
-          append_null(builder, component_index);
-        }
+        append_value(
+          builder,
+          component_index,
+          coordinate[component_index],
+          transform,
+          2,
+        );
         component_index += 1;
       }
       if has_m {
-        if validity.m_is_valid(coordinate_index) {
-          append_value(
-            builder,
-            component_index,
-            coordinate[component_index],
-            transform,
-            3,
-          );
-        } else {
-          append_null(builder, component_index);
-        }
+        append_value(
+          builder,
+          component_index,
+          coordinate[component_index],
+          transform,
+          3,
+        );
       }
       builder.append(true);
     }
@@ -254,13 +230,6 @@ fn append_value(
     .field_builder::<Float64Builder>(field_index)
     .expect("floating-point coordinate builder")
     .append_value(transform.unquantize(value, axis));
-}
-
-fn append_null(builder: &mut CoordinateBuilder, field_index: usize) {
-  builder
-    .field_builder::<Float64Builder>(field_index)
-    .expect("floating-point coordinate builder")
-    .append_null();
 }
 
 fn coordinate_stride(has_z: bool, has_m: bool) -> usize {
@@ -282,7 +251,6 @@ mod tests {
       &[2, 1],
       false,
       false,
-      &ComponentValidity::default(),
       &QuantizationTransform {
         scale: [0.5; 4],
         translate: [10.0; 4],

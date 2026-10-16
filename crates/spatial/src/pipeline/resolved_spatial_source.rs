@@ -16,7 +16,7 @@
 
 use arrow_schema::Schema;
 
-use crate::geometry::{Extent2D, GeometryColumn, GeometryEncoding, GeometryFamily, GeometryKind};
+use crate::geometry::{Extent2D, GeometryColumn, GeometryEncoding, GeometryFamily, GeometryType};
 use crate::geoparquet::SpatialReference;
 use crate::input::{InputSource, RowRange, SourceDatasetMetadata, SourceGeometryMetadata};
 use crate::pipeline::{PipelineError, geometry_scan::scan_geometry_metadata};
@@ -27,7 +27,7 @@ pub(crate) struct ResolvedSpatialSource {
   /// Identifies the selected WKB geometry column.
   pub(crate) geometry: GeometryColumn,
   /// Defines the exact source geometry kinds.
-  pub(crate) geometry_types: Vec<GeometryKind>,
+  pub(crate) geometry_types: Vec<GeometryType>,
   /// Defines the selected-row extent in source coordinates.
   pub(crate) source_extent: Extent2D,
   /// Provides the source coordinate reference system.
@@ -68,7 +68,7 @@ impl GeometryColumn {
       return Ok(Self {
         column: column.to_string(),
         encoding: GeometryEncoding::Wkb,
-        geometry_kind: None,
+        ty: None,
       });
     }
     inferred_geometry_column.ok_or_else(|| {

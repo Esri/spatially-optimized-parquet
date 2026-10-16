@@ -36,12 +36,10 @@ pub(crate) use geometry::{Coord, Geometry, GeometryFamily};
 pub(crate) use native::NativeGeometryArrayBuilder;
 pub(crate) use pbf::{PbfArrayBuilder, PbfGeometry};
 pub(crate) use quantization::{
-  ComponentValidity, QuantizationOptions, QuantizationTransform, QuantizedGeometry,
-  encode_deltas_xy,
+  QuantizationOptions, QuantizationTransform, QuantizedGeometry, quantize_into,
 };
-pub(crate) use types::{
-  CoordinateDimensions, GeometryColumn, GeometryEncoding, GeometryKind, GeometryType,
-};
+pub use types::GeometryType;
+pub(crate) use types::{CoordinateDimensions, GeometryColumn, GeometryEncoding};
 pub(crate) use wkb::{
   PolygonRingOrder, WkbArrayBuilder, WkbCoordinate, WkbHeader, WkbPartRole, WkbSink,
   strip_wkb_dimensions, visit_wkb_geometry,

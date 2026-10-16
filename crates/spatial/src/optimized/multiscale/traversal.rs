@@ -15,8 +15,8 @@
 //! Traverses supported geometry structures through a shared part sink.
 
 use crate::geometry::{
-  CoordinateDimensions, Extent2D, GeometryError, GeometryFamily as GeometryType, GeometryKind,
-  PolygonRingOrder, WkbCoordinate, WkbHeader, visit_wkb_geometry as decode_wkb_geometry,
+  CoordinateDimensions, Extent2D, GeometryError, GeometryFamily, GeometryType, PolygonRingOrder,
+  WkbCoordinate, WkbHeader, visit_wkb_geometry as decode_wkb_geometry,
 };
 
 pub(crate) use crate::geometry::{WkbPartRole as GeometryPartRole, WkbSink as GeometryPartSink};
@@ -46,7 +46,7 @@ impl WkbHeader {
   }
 }
 
-impl GeometryType {
+impl GeometryFamily {
   /// Visit one display geometry while enforcing this optimized geometry type.
   pub(crate) fn visit_wkb_for_display<S: GeometryPartSink>(
     self,
@@ -54,26 +54,26 @@ impl GeometryType {
     sink: &mut S,
   ) -> Result<CoordinateDimensions, GeometryError> {
     let header = decode_wkb_geometry(bytes, PolygonRingOrder::Reverse, sink)?;
-    let kind_matches = match self {
-      Self::Point => header.kind == GeometryKind::Point,
-      Self::MultiPoint => header.kind == GeometryKind::MultiPoint,
+    let type_matches = match self {
+      Self::Point => header.ty == GeometryType::Point,
+      Self::MultiPoint => header.ty == GeometryType::MultiPoint,
       Self::Polyline => {
         matches!(
-          header.kind,
-          GeometryKind::LineString | GeometryKind::MultiLineString
+          header.ty,
+          GeometryType::LineString | GeometryType::MultiLineString
         )
       }
       Self::Polygon => {
         matches!(
-          header.kind,
-          GeometryKind::Polygon | GeometryKind::MultiPolygon
+          header.ty,
+          GeometryType::Polygon | GeometryType::MultiPolygon
         )
       }
     };
-    if !kind_matches {
+    if !type_matches {
       return Err(GeometryError::InvalidGeometry(format!(
         "WKB geometry {:?} does not match optimized type {self:?}",
-        header.kind
+        header.ty
       )));
     }
     Ok(header.dimensions)

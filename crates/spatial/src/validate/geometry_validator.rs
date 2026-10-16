@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::geometry::{
-  CoordinateDimensions, Extent2D, GeometryFamily as GeometryType, GeometryKind,
-};
+use crate::geometry::{CoordinateDimensions, Extent2D, GeometryFamily, GeometryType};
 use crate::geometry::{WkbCoordinate, WkbHeader};
 use crate::optimized::{GeometryPartRole, GeometryPartSink};
 use arrow_array::{Array, BinaryArray, BinaryViewArray, LargeBinaryArray};
@@ -32,7 +30,7 @@ struct RingValidationInfo {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GeometryValidationInfo {
-  kind: GeometryKind,
+  ty: GeometryType,
   dimensions: CoordinateDimensions,
   pub(crate) extent: Option<Extent2D>,
   finite_coordinates: bool,
@@ -46,7 +44,7 @@ impl GeometryValidator {
     let mut sink = InspectionSink::default();
     let header = WkbHeader::visit(bytes, &mut sink)?;
     Ok(GeometryValidationInfo {
-      kind: header.kind,
+      ty: header.ty,
       dimensions: header.dimensions,
       extent: sink.extent,
       finite_coordinates: sink.has_coordinate && sink.finite_coordinates,
@@ -56,7 +54,7 @@ impl GeometryValidator {
 
   pub(crate) fn validate(
     inspection: &GeometryValidationInfo,
-    expected_geometry_type: GeometryType,
+    expected_geometry_type: GeometryFamily,
     expected_has_z: bool,
     expected_has_m: bool,
     location: ValidationLocation,
@@ -69,7 +67,7 @@ impl GeometryValidator {
         location.clone(),
         format!(
           "sampled WKB geometry {:?} does not match geometryType '{}'",
-          inspection.kind,
+          inspection.ty,
           expected_geometry_type.as_str()
         ),
       );
@@ -152,17 +150,17 @@ impl GeometryValidator {
     )))
   }
 
-  fn matches_geometry_type(inspection: &GeometryValidationInfo, expected: GeometryType) -> bool {
+  fn matches_geometry_type(inspection: &GeometryValidationInfo, expected: GeometryFamily) -> bool {
     match expected {
-      GeometryType::Point => inspection.kind == GeometryKind::Point,
-      GeometryType::MultiPoint => inspection.kind == GeometryKind::MultiPoint,
-      GeometryType::Polyline => matches!(
-        inspection.kind,
-        GeometryKind::LineString | GeometryKind::MultiLineString
+      GeometryFamily::Point => inspection.ty == GeometryType::Point,
+      GeometryFamily::MultiPoint => inspection.ty == GeometryType::MultiPoint,
+      GeometryFamily::Polyline => matches!(
+        inspection.ty,
+        GeometryType::LineString | GeometryType::MultiLineString
       ),
-      GeometryType::Polygon => matches!(
-        inspection.kind,
-        GeometryKind::Polygon | GeometryKind::MultiPolygon
+      GeometryFamily::Polygon => matches!(
+        inspection.ty,
+        GeometryType::Polygon | GeometryType::MultiPolygon
       ),
     }
   }
@@ -271,7 +269,7 @@ mod tests {
 
     let inspection = GeometryValidator::inspect(&bytes).unwrap();
 
-    assert_eq!(inspection.kind, GeometryKind::Polygon);
+    assert_eq!(inspection.ty, GeometryType::Polygon);
     assert!(inspection.rings[0].closed);
     assert!(inspection.rings[0].signed_area > 0.0);
   }

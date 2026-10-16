@@ -31,7 +31,7 @@ use parquet::file::properties::WriterProperties;
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
-use crate::geometry::{Extent2D, GeometryColumn, GeometryEncoding, GeometryKind};
+use crate::geometry::{Extent2D, GeometryColumn, GeometryEncoding, GeometryType};
 use crate::input::{
   InputError, InputOpenOptions, InputSource, RowRange, SourceDatasetMetadata, SourceFormat,
   SourceGeometryMetadata, open_input,
@@ -150,7 +150,7 @@ impl InputSource for MetadataInputSource {
     Ok(Some(GeometryColumn {
       column: "geometry".into(),
       encoding: GeometryEncoding::Wkb,
-      geometry_kind: Some(GeometryKind::Point),
+      ty: Some(GeometryType::Point),
     }))
   }
 
@@ -210,7 +210,7 @@ fn inferred_geometry_column_reads_geoparquet_primary_column() {
   let input = open_parquet_input(&path);
   let geometry_column = input.inferred_geometry_column().unwrap().unwrap();
   assert_eq!(geometry_column.column, "geometry");
-  assert_eq!(geometry_column.geometry_kind, Some(GeometryKind::Point));
+  assert_eq!(geometry_column.ty, Some(GeometryType::Point));
 }
 
 #[test]
@@ -286,7 +286,7 @@ fn source_metadata_tolerates_null_bbox_metadata() {
   let geometry = metadata.geometry.unwrap();
   assert_eq!(geometry.column, "geometry");
   assert!(geometry.bbox.is_none());
-  assert_eq!(geometry.geometry_types, vec![GeometryKind::Point]);
+  assert_eq!(geometry.geometry_types, vec![GeometryType::Point]);
 }
 
 #[test]
@@ -325,7 +325,7 @@ fn source_metadata_merges_multifile_geometry_types_and_extent() {
 
   assert_eq!(
     geometry.geometry_types,
-    vec![GeometryKind::MultiPoint, GeometryKind::Point]
+    vec![GeometryType::MultiPoint, GeometryType::Point]
   );
   assert_eq!(
     geometry.bbox,
@@ -393,7 +393,7 @@ fn resolved_source_uses_complete_metadata_without_creating_dataframe() {
       geometry: Some(SourceGeometryMetadata {
         column: "geometry".into(),
         encoding: GeometryEncoding::Wkb,
-        geometry_types: vec![GeometryKind::Point],
+        geometry_types: vec![GeometryType::Point],
         bbox: Some(expected_extent),
         covering: None,
         projjson: Some(epsg_projjson(4326)),
@@ -416,7 +416,7 @@ fn resolved_source_uses_complete_metadata_without_creating_dataframe() {
     ))
     .unwrap();
 
-  assert_eq!(context.geometry_types, vec![GeometryKind::Point]);
+  assert_eq!(context.geometry_types, vec![GeometryType::Point]);
   assert_eq!(context.source_extent, expected_extent);
   assert_eq!(dataframe_calls.load(Ordering::SeqCst), 0);
 }
@@ -435,7 +435,7 @@ fn write_context_reuses_complete_source_metadata_for_normalized_output() {
       geometry: Some(SourceGeometryMetadata {
         column: "geometry".into(),
         encoding: GeometryEncoding::Wkb,
-        geometry_types: vec![GeometryKind::Point],
+        geometry_types: vec![GeometryType::Point],
         bbox: Some(expected_extent),
         covering: None,
         projjson: Some(epsg_projjson(4326)),
@@ -485,7 +485,7 @@ fn resolved_source_prefers_top_level_spatial_reference_authority_code() {
       geometry: Some(SourceGeometryMetadata {
         column: "geometry".into(),
         encoding: GeometryEncoding::Wkb,
-        geometry_types: vec![GeometryKind::Point],
+        geometry_types: vec![GeometryType::Point],
         bbox: Some(Extent2D {
           xmin: -10.0,
           ymin: 5.0,
@@ -529,7 +529,7 @@ fn resolved_source_preserves_projjson_for_unknown_spatial_reference_authority() 
       geometry: Some(SourceGeometryMetadata {
         column: "geometry".into(),
         encoding: GeometryEncoding::Wkb,
-        geometry_types: vec![GeometryKind::Point],
+        geometry_types: vec![GeometryType::Point],
         bbox: Some(Extent2D {
           xmin: -10.0,
           ymin: 5.0,

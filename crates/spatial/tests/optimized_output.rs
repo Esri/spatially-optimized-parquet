@@ -25,6 +25,7 @@ use arrow_schema::{DataType, Field, Schema};
 use gdal::vector::Geometry;
 use gdal_sys::OGRwkbGeometryType;
 use parquet::basic::LogicalType;
+use prost::Message;
 use spatial::{
   InputOptions, MultiscaleEncoding, OutputMode, OutputOptions, Pipeline, PipelineError, RowRange,
   SpatialPipelineOptions, SpatialPipelineResult, ValidationRule, WriteProgress, validate,
@@ -42,6 +43,14 @@ use common::gpkg::{GpkgFeature, GpkgLayer, write_gpkg};
 use common::parquet::{
   geoparquet_kv, geoparquet_kv_with_epsg, kv_map, reader_metadata, scan_parquet, write_parquet,
 };
+
+#[derive(Clone, PartialEq, Message)]
+struct PbfGeometry {
+  #[prost(uint32, repeated, tag = "2")]
+  lengths: Vec<u32>,
+  #[prost(sint64, repeated, tag = "3")]
+  coords: Vec<i64>,
+}
 
 fn runtime() -> Runtime {
   Runtime::new().unwrap()
@@ -687,16 +696,6 @@ fn optimized_complex_geometry_output_zero_fills_dimensions_that_disagree_with_me
 
 #[test]
 fn optimized_output_writes_dimensional_polygon_pbf_with_absolute_z_and_m() {
-  use prost::Message;
-
-  #[derive(Clone, PartialEq, Message)]
-  struct PbfGeometry {
-    #[prost(uint32, repeated, tag = "2")]
-    lengths: Vec<u32>,
-    #[prost(sint64, repeated, tag = "3")]
-    coords: Vec<i64>,
-  }
-
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("polygon-zm.parquet");
   let output = temp.path().join("polygon-zm-optimized.parquet");
@@ -776,17 +775,166 @@ fn optimized_output_writes_dimensional_polygon_pbf_with_absolute_z_and_m() {
 }
 
 #[test]
-fn optimized_output_strips_polygon_pbf_dimensions() {
-  use prost::Message;
-
-  #[derive(Clone, PartialEq, Message)]
-  struct PbfGeometry {
-    #[prost(uint32, repeated, tag = "2")]
-    lengths: Vec<u32>,
-    #[prost(sint64, repeated, tag = "3")]
-    coords: Vec<i64>,
+fn optimized_output_writes_xyzm_multipolygon_pbf_with_holes_and_collapsed_rings() {
+  let collapsed_exterior = [
+    (0.01, 0.01, Some(10.0), Some(100.0)),
+    (0.02, 0.01, Some(10.0), Some(100.0)),
+    (0.02, 0.02, Some(10.0), Some(100.0)),
+    (0.01, 0.02, Some(10.0), Some(100.0)),
+    (0.01, 0.01, Some(10.0), Some(100.0)),
+  ];
+  let first_exterior = [
+    (10.0, 0.0, Some(100.0), Some(1000.0)),
+    (12.0, 0.0, Some(999.0), Some(9999.0)),
+    (18.0, 0.0, Some(110.0), Some(1100.0)),
+    (18.0, 8.0, Some(120.0), Some(1200.0)),
+    (10.0, 8.0, Some(130.0), Some(1300.0)),
+    (10.0, 0.0, Some(140.0), Some(1400.0)),
+  ];
+  let collapsed_hole = [
+    (11.01, 1.01, Some(90.0), Some(900.0)),
+    (11.01, 1.02, Some(90.0), Some(900.0)),
+    (11.02, 1.02, Some(90.0), Some(900.0)),
+    (11.02, 1.01, Some(90.0), Some(900.0)),
+    (11.01, 1.01, Some(90.0), Some(900.0)),
+  ];
+  let first_hole = [
+    (14.0, 4.0, Some(200.0), Some(2000.0)),
+    (14.0, 6.0, Some(210.0), Some(2100.0)),
+    (16.0, 6.0, Some(220.0), Some(2200.0)),
+    (16.0, 4.0, Some(230.0), Some(2300.0)),
+    (14.0, 4.0, Some(240.0), Some(2400.0)),
+  ];
+  let second_exterior = [
+    (30.0, 0.0, Some(300.0), Some(3000.0)),
+    (38.0, 0.0, Some(310.0), Some(3100.0)),
+    (38.0, 8.0, Some(320.0), Some(3200.0)),
+    (30.0, 8.0, Some(330.0), Some(3300.0)),
+    (30.0, 0.0, Some(340.0), Some(3400.0)),
+  ];
+  let second_hole = [
+    (32.0, 2.0, Some(400.0), Some(4000.0)),
+    (32.0, 4.0, Some(410.0), Some(4100.0)),
+    (34.0, 4.0, Some(420.0), Some(4200.0)),
+    (34.0, 2.0, Some(430.0), Some(4300.0)),
+    (32.0, 2.0, Some(440.0), Some(4400.0)),
+  ];
+  let polygons = [
+    common::wkb::dimensional_polygon_rings(&[&collapsed_exterior]),
+    common::wkb::dimensional_polygon_rings(&[&first_exterior, &collapsed_hole, &first_hole]),
+    common::wkb::dimensional_polygon_rings(&[&second_exterior, &second_hole]),
+  ];
+  let mut multipolygon = vec![1];
+  multipolygon.extend_from_slice(&3006_u32.to_le_bytes());
+  multipolygon.extend_from_slice(&3_u32.to_le_bytes());
+  for polygon in polygons {
+    multipolygon.extend_from_slice(&polygon);
   }
 
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("multipolygon-zm.parquet");
+  let output = temp.path().join("multipolygon-zm-pbf.parquet");
+  let schema = Arc::new(Schema::new(vec![Field::new(
+    "geometry",
+    DataType::Binary,
+    false,
+  )]));
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![Arc::new(BinaryArray::from(vec![Some(
+      multipolygon.as_slice(),
+    )]))],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    parquet::basic::Compression::SNAPPY,
+    &[geoparquet_kv("geometry", &["MultiPolygon ZM"])],
+  );
+
+  let result = run_optimized_multiscale(&input, &output, MultiscaleEncoding::Pbf).unwrap();
+
+  assert_eq!(result.rows_written(), 1);
+  assert!(result.warnings().is_empty());
+  validate(&output).unwrap().ensure_valid().unwrap();
+
+  let dataframe = runtime()
+    .block_on(scan_parquet(output.to_str().unwrap()))
+    .unwrap();
+  let batches = runtime().block_on(dataframe.collect()).unwrap();
+  assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 1);
+  assert_eq!(
+    binary_value(batches[0].column_by_name("geometry").unwrap().as_ref(), 0),
+    multipolygon
+  );
+  let geolod = batches[0]
+    .column_by_name("geolod")
+    .unwrap()
+    .as_any()
+    .downcast_ref::<StructArray>()
+    .unwrap();
+  let retained_first_exterior = [
+    first_exterior[0],
+    first_exterior[2],
+    first_exterior[3],
+    first_exterior[4],
+    first_exterior[5],
+  ];
+  let coarse_rings = vec![
+    &retained_first_exterior[..],
+    &first_hole[..],
+    &second_exterior[..],
+    &second_hole[..],
+  ];
+  let fine_rings = vec![
+    &collapsed_exterior[..],
+    &retained_first_exterior[..],
+    &collapsed_hole[..],
+    &first_hole[..],
+    &second_exterior[..],
+    &second_hole[..],
+  ];
+
+  for (level, resolution, expected_rings) in [
+    ("level_0", 360.0 / 512.0, coarse_rings),
+    ("level_16", 360.0 / 512.0 / 65536.0, fine_rings),
+  ] {
+    let encoded = binary_value(geolod.column_by_name(level).unwrap().as_ref(), 0);
+    let decoded = PbfGeometry::decode(encoded.as_slice()).unwrap();
+    let mut expected_coords = Vec::new();
+    for ring in &expected_rings {
+      let mut prev_x = 0;
+      let mut prev_y = 0;
+      for &(x, y, z, m) in ring.iter().rev() {
+        let x = (x / resolution).round() as i64;
+        let y = (y / resolution).round() as i64;
+        expected_coords.extend_from_slice(&[
+          x - prev_x,
+          y - prev_y,
+          z.unwrap() as i64,
+          m.unwrap() as i64,
+        ]);
+        prev_x = x;
+        prev_y = y;
+      }
+    }
+
+    assert_eq!(decoded.lengths, vec![5; expected_rings.len()], "{level}");
+    assert_eq!(decoded.coords, expected_coords, "{level}");
+  }
+
+  let metadata = kv_map(&output);
+  let geodisplay: serde_json::Value =
+    serde_json::from_str(metadata.get("geodisplay").unwrap()).unwrap();
+  assert_eq!(geodisplay["encoding"], "esriPBF");
+  assert_eq!(geodisplay["hasZ"], true);
+  assert_eq!(geodisplay["hasM"], true);
+}
+
+#[test]
+fn optimized_output_strips_polygon_pbf_dimensions() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("polygon-zm.parquet");
   let schema = Arc::new(Schema::new(vec![Field::new(
@@ -1253,7 +1401,7 @@ fn optimized_output_writes_wkb_and_native_multiscale_geometry() {
 }
 
 #[test]
-fn optimized_native_output_writes_missing_values_as_nullable_components_zm() {
+fn optimized_native_output_zero_fills_missing_zm_components() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("polygon-missing-zm.parquet");
   let output = temp.path().join("polygon-missing-zm-native.parquet");
@@ -1326,13 +1474,15 @@ fn optimized_native_output_writes_missing_values_as_nullable_components_zm() {
     .downcast_ref::<Float64Array>()
     .unwrap();
 
-  assert_eq!(z.null_count(), coordinates.len());
-  assert_eq!(m.null_count(), coordinates.len());
+  assert_eq!(z.null_count(), 0);
+  assert_eq!(m.null_count(), 0);
+  assert_eq!(z.values().as_ref(), &[0.0; 4]);
+  assert_eq!(m.values().as_ref(), &[0.0; 4]);
   let DataType::Struct(fields) = coordinates.data_type() else {
     panic!("native coordinates must use a struct")
   };
-  assert!(fields.find("z").expect("z field").1.is_nullable());
-  assert!(fields.find("m").expect("m field").1.is_nullable());
+  assert!(!fields.find("z").expect("z field").1.is_nullable());
+  assert!(!fields.find("m").expect("m field").1.is_nullable());
 }
 
 #[test]

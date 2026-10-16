@@ -18,7 +18,7 @@ use arrow_array::ArrayRef;
 use arrow_schema::DataType;
 
 use super::MultiscaleEncoding;
-use crate::geometry::{GeometryError, GeometryFamily as GeometryType};
+use crate::geometry::{GeometryError, GeometryFamily};
 
 use super::{GEOLOD_COLUMN, MultiscaleLevel};
 use crate::geometry::{
@@ -36,7 +36,7 @@ pub(crate) enum MultiscaleLevelArrayBuilder {
 impl MultiscaleEncoding {
   pub(crate) fn geometry_data_type(
     self,
-    geometry_type: GeometryType,
+    geometry_type: GeometryFamily,
     has_z: bool,
     has_m: bool,
   ) -> DataType {
@@ -47,18 +47,10 @@ impl MultiscaleEncoding {
     }
   }
 
-  pub(crate) fn missing_component_value(self) -> &'static str {
-    match self {
-      Self::Pbf => "0",
-      Self::Wkb => "0",
-      Self::Native => "null",
-    }
-  }
-
   pub(crate) fn byte_stream_split_column_paths(
     self,
     levels: &[MultiscaleLevel],
-    geometry_type: GeometryType,
+    geometry_type: GeometryFamily,
     has_z: bool,
     has_m: bool,
   ) -> Vec<String> {
@@ -79,7 +71,7 @@ impl MultiscaleEncoding {
 
   pub(crate) fn resolve_writer(
     self,
-    geometry_type: GeometryType,
+    geometry_type: GeometryFamily,
     has_z: bool,
     has_m: bool,
     capacity: usize,

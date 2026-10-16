@@ -21,7 +21,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::geometry::Extent2D;
-use crate::geometry::{GeometryEncoding, GeometryKind};
+use crate::geometry::{GeometryEncoding, GeometryType};
 use crate::input::{InputError, SourceCoveringMetadata, SourceGeometryMetadata};
 
 use super::source::ParquetInputSource;
@@ -48,7 +48,7 @@ pub(super) struct ParquetGeoColumnMetadata {
 /// Represents one geometry type parsed from GeoParquet metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ParsedGeometryType {
-  pub(super) kind: GeometryKind,
+  pub(super) ty: GeometryType,
   has_z: bool,
   has_m: bool,
 }
@@ -126,21 +126,21 @@ impl ParsedGeometryType {
     } else {
       (value, false, false)
     };
-    let kind = match base {
-      "Point" => GeometryKind::Point,
-      "LineString" => GeometryKind::LineString,
-      "MultiPoint" => GeometryKind::MultiPoint,
-      "MultiLineString" => GeometryKind::MultiLineString,
-      "Polygon" => GeometryKind::Polygon,
-      "MultiPolygon" => GeometryKind::MultiPolygon,
-      "GeometryCollection" => GeometryKind::GeometryCollection,
+    let ty = match base {
+      "Point" => GeometryType::Point,
+      "LineString" => GeometryType::LineString,
+      "MultiPoint" => GeometryType::MultiPoint,
+      "MultiLineString" => GeometryType::MultiLineString,
+      "Polygon" => GeometryType::Polygon,
+      "MultiPolygon" => GeometryType::MultiPolygon,
+      "GeometryCollection" => GeometryType::GeometryCollection,
       _ => {
         return Err(InputError::Metadata(format!(
           "unsupported geoparquet geometry type: {value}"
         )));
       }
     };
-    Ok(Self { kind, has_z, has_m })
+    Ok(Self { ty, has_z, has_m })
   }
 }
 
@@ -334,7 +334,7 @@ impl SourceGeometryMetadata {
     let parsed_geometry_types = column_meta.parsed_geometry_types()?;
     let geometry_types = parsed_geometry_types
       .iter()
-      .map(|geometry_type| geometry_type.kind)
+      .map(|geometry_type| geometry_type.ty)
       .collect();
 
     Ok(Some(SourceGeometryMetadata {
@@ -401,7 +401,7 @@ fn merge_bbox(
 mod tests {
   use serde_json::json;
 
-  use crate::geometry::{Extent2D, GeometryKind};
+  use crate::geometry::{Extent2D, GeometryType};
 
   use super::{ParquetGeoMetadata, ParquetInputSource, ParsedGeometryType, bbox_from_geoparquet};
 
@@ -480,24 +480,24 @@ mod tests {
       ("Point ZM", true, true),
     ] {
       let parsed = ParsedGeometryType::parse(geometry_type).unwrap();
-      assert_eq!(parsed.kind, GeometryKind::Point);
+      assert_eq!(parsed.ty, GeometryType::Point);
       assert_eq!(parsed.has_z, expected_z);
       assert_eq!(parsed.has_m, expected_m);
     }
   }
 
   #[test]
-  fn geoparquet_geometry_type_inference_supports_all_geometry_kinds() {
+  fn geoparquet_geometry_type_inference_supports_all_geometry_types() {
     for (value, expected) in [
-      ("Point", GeometryKind::Point),
-      ("LineString", GeometryKind::LineString),
-      ("MultiPoint", GeometryKind::MultiPoint),
-      ("MultiLineString", GeometryKind::MultiLineString),
-      ("Polygon", GeometryKind::Polygon),
-      ("MultiPolygon", GeometryKind::MultiPolygon),
-      ("GeometryCollection", GeometryKind::GeometryCollection),
+      ("Point", GeometryType::Point),
+      ("LineString", GeometryType::LineString),
+      ("MultiPoint", GeometryType::MultiPoint),
+      ("MultiLineString", GeometryType::MultiLineString),
+      ("Polygon", GeometryType::Polygon),
+      ("MultiPolygon", GeometryType::MultiPolygon),
+      ("GeometryCollection", GeometryType::GeometryCollection),
     ] {
-      assert_eq!(ParsedGeometryType::parse(value).unwrap().kind, expected);
+      assert_eq!(ParsedGeometryType::parse(value).unwrap().ty, expected);
     }
   }
 

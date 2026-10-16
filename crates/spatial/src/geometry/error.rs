@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::GeometryType;
+
 /// Represents failures while parsing, transforming, or encoding geometry values.
 #[derive(Debug, thiserror::Error)]
 pub enum GeometryError {
@@ -21,6 +23,9 @@ pub enum GeometryError {
   /// Reports invalid geometry topology or dimensions.
   #[error("invalid geometry: {0}")]
   InvalidGeometry(String),
+  /// Reports a concrete geometry type that the operation does not support.
+  #[error("unsupported geometry type: {0:?}")]
+  UnsupportedGeometryType(GeometryType),
   /// Reports quantization failures.
   #[error("geometry quantization failed: {0}")]
   Quantization(String),

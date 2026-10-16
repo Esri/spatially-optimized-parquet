@@ -16,7 +16,7 @@ use std::collections::BTreeSet;
 
 use serde::de::DeserializeOwned;
 
-use crate::geometry::{Extent2D, GeometryFamily as GeometryType};
+use crate::geometry::{Extent2D, GeometryFamily};
 use crate::geoparquet::GeoMetadata;
 use crate::optimized::{
   ClusteringIndexXZ, ClusteringIndexZ, GEODISPLAY_VERSION, GeodisplayMetadata,
@@ -342,7 +342,7 @@ impl MetadataValidator {
     );
     let location =
       ValidationLocation::file(file.file.relative_path.clone()).with_column("geodisplay");
-    if index.geometry_type != GeometryType::Point {
+    if index.geometry_type != GeometryFamily::Point {
       report.push(
         ValidationRule::MetadataContract,
         ValidationSeverity::Error,
@@ -401,7 +401,7 @@ impl MetadataValidator {
       ValidationLocation::file(file.file.relative_path.clone()).with_column("geodisplay");
     if !matches!(
       index.geometry_type,
-      GeometryType::MultiPoint | GeometryType::Polyline | GeometryType::Polygon
+      GeometryFamily::MultiPoint | GeometryFamily::Polyline | GeometryFamily::Polygon
     ) {
       report.push(
         ValidationRule::MetadataContract,
@@ -432,7 +432,7 @@ impl MetadataValidator {
         "code must not be empty",
       );
     }
-    if index.geometry_type != GeometryType::MultiPoint && index.levels.is_empty() {
+    if index.geometry_type != GeometryFamily::MultiPoint && index.levels.is_empty() {
       report.push(
         ValidationRule::XzMetadata,
         ValidationSeverity::Error,
@@ -512,10 +512,10 @@ impl MetadataValidator {
       match geodisplay {
         GeodisplayMetadata::Z { .. } => base == "Point",
         GeodisplayMetadata::Xz { index } => match index.geometry_type {
-          GeometryType::MultiPoint => base == "MultiPoint",
-          GeometryType::Polyline => matches!(base, "LineString" | "MultiLineString"),
-          GeometryType::Polygon => matches!(base, "Polygon" | "MultiPolygon"),
-          GeometryType::Point => false,
+          GeometryFamily::MultiPoint => base == "MultiPoint",
+          GeometryFamily::Polyline => matches!(base, "LineString" | "MultiLineString"),
+          GeometryFamily::Polygon => matches!(base, "Polygon" | "MultiPolygon"),
+          GeometryFamily::Point => false,
         },
       }
     });

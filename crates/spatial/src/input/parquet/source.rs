@@ -93,8 +93,8 @@ impl InputSource for ParquetInputSource {
     }
 
     let geometry_types = column_meta.parsed_geometry_types()?;
-    let geometry_kind = if geometry_types.len() == 1 {
-      Some(geometry_types[0].kind)
+    let ty = if geometry_types.len() == 1 {
+      Some(geometry_types[0].ty)
     } else {
       None
     };
@@ -102,7 +102,7 @@ impl InputSource for ParquetInputSource {
     Ok(Some(GeometryColumn {
       column: geo_meta.primary_column.clone(),
       encoding: GeometryEncoding::Wkb,
-      geometry_kind,
+      ty,
     }))
   }
 

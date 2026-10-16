@@ -18,7 +18,7 @@ use gdal::vector::{LayerAccess, geometry_type_to_name};
 use gdal_sys::OGRwkbGeometryType;
 
 use crate::geometry::Extent2D;
-use crate::geometry::{GeometryEncoding, GeometryKind};
+use crate::geometry::{GeometryEncoding, GeometryType};
 use crate::input::{InputError, InputOpenOptions, SourceGeometryMetadata};
 
 const MAX_GEOMETRY_TYPE_SAMPLE_FEATURES: usize = 64;
@@ -35,7 +35,7 @@ pub(super) struct GpkgLayerSummary {
 /// Captures whether sampled features establish one geometry type or mixed content.
 enum SampledGeometryType {
   Concrete {
-    geometry_kind: GeometryKind,
+    ty: GeometryType,
     has_z: bool,
     has_m: bool,
   },
@@ -127,10 +127,9 @@ impl GpkgLayerSummary {
   }
 
   fn geometry_type_hint(geometry_type: OGRwkbGeometryType::Type) -> String {
-    let (geometry_kind, has_z, has_m) =
-      SourceGeometryMetadata::from_gpkg_geometry_type(geometry_type);
-    if let Some(geometry_kind) = geometry_kind {
-      return Self::geometry_kind_hint(geometry_kind, has_z, has_m);
+    let (ty, has_z, has_m) = SourceGeometryMetadata::from_gpkg_geometry_type(geometry_type);
+    if let Some(ty) = ty {
+      return Self::type_hint(ty, has_z, has_m);
     }
 
     let raw_name = geometry_type_to_name(geometry_type);
@@ -141,8 +140,8 @@ impl GpkgLayerSummary {
     }
   }
 
-  fn geometry_kind_hint(geometry_kind: GeometryKind, has_z: bool, has_m: bool) -> String {
-    let base = Self::geometry_kind_label(geometry_kind).unwrap_or("Geometry");
+  fn type_hint(ty: GeometryType, has_z: bool, has_m: bool) -> String {
+    let base = Self::type_label(ty).unwrap_or("Geometry");
     let suffix = match (has_z, has_m) {
       (false, false) => "",
       (true, false) => " Z",
@@ -152,16 +151,16 @@ impl GpkgLayerSummary {
     format!("{base}{suffix}")
   }
 
-  fn geometry_kind_label(geometry_kind: GeometryKind) -> Option<&'static str> {
-    match geometry_kind {
-      GeometryKind::Point => Some("Point"),
-      GeometryKind::LineString => Some("LineString"),
-      GeometryKind::MultiPoint => Some("MultiPoint"),
-      GeometryKind::MultiLineString => Some("MultiLineString"),
-      GeometryKind::Polygon => Some("Polygon"),
-      GeometryKind::MultiPolygon => Some("MultiPolygon"),
-      GeometryKind::GeometryCollection => Some("GeometryCollection"),
-      GeometryKind::Unknown => None,
+  fn type_label(ty: GeometryType) -> Option<&'static str> {
+    match ty {
+      GeometryType::Point => Some("Point"),
+      GeometryType::LineString => Some("LineString"),
+      GeometryType::MultiPoint => Some("MultiPoint"),
+      GeometryType::MultiLineString => Some("MultiLineString"),
+      GeometryType::Polygon => Some("Polygon"),
+      GeometryType::MultiPolygon => Some("MultiPolygon"),
+      GeometryType::GeometryCollection => Some("GeometryCollection"),
+      GeometryType::Unknown => None,
     }
   }
 
@@ -181,7 +180,7 @@ impl GpkgLayerSummary {
 impl SampledGeometryType {
   /// Inspect a bounded feature sample when GDAL reports a generic geometry type.
   fn from_layer(layer: &mut impl LayerAccess) -> Option<Self> {
-    let mut sampled_geometry: Option<(GeometryKind, bool, bool)> = None;
+    let mut sampled_geometry: Option<(GeometryType, bool, bool)> = None;
 
     for feature in layer.features().take(MAX_GEOMETRY_TYPE_SAMPLE_FEATURES) {
       let Ok(geometry) = feature.geometry_by_index(0) else {
@@ -191,36 +190,26 @@ impl SampledGeometryType {
         continue;
       }
 
-      let (geometry_kind, has_z, has_m) =
+      let (ty, has_z, has_m) =
         SourceGeometryMetadata::from_gpkg_geometry_type(geometry.geometry_type());
-      let geometry_kind = geometry_kind?;
+      let ty = ty?;
       match sampled_geometry {
-        Some((existing_kind, existing_has_z, existing_has_m))
-          if existing_kind != geometry_kind
-            || existing_has_z != has_z
-            || existing_has_m != has_m =>
+        Some((existing_ty, existing_has_z, existing_has_m))
+          if existing_ty != ty || existing_has_z != has_z || existing_has_m != has_m =>
         {
           return Some(Self::Mixed);
         }
         Some(_) => {}
-        None => sampled_geometry = Some((geometry_kind, has_z, has_m)),
+        None => sampled_geometry = Some((ty, has_z, has_m)),
       }
     }
 
-    sampled_geometry.map(|(geometry_kind, has_z, has_m)| Self::Concrete {
-      geometry_kind,
-      has_z,
-      has_m,
-    })
+    sampled_geometry.map(|(ty, has_z, has_m)| Self::Concrete { ty, has_z, has_m })
   }
 
   fn hint(self) -> String {
     match self {
-      Self::Concrete {
-        geometry_kind,
-        has_z,
-        has_m,
-      } => GpkgLayerSummary::geometry_kind_hint(geometry_kind, has_z, has_m),
+      Self::Concrete { ty, has_z, has_m } => GpkgLayerSummary::type_hint(ty, has_z, has_m),
       Self::Mixed => "Mixed".to_string(),
     }
   }
@@ -244,15 +233,15 @@ impl SourceGeometryMetadata {
         geom_field.spatial_ref().ok(),
       )
     };
-    let (mut geometry_kind, mut has_z, mut has_m) = Self::from_gpkg_geometry_type(geometry_type);
-    if geometry_kind.is_none()
+    let (mut ty, mut has_z, mut has_m) = Self::from_gpkg_geometry_type(geometry_type);
+    if ty.is_none()
       && let Some(SampledGeometryType::Concrete {
-        geometry_kind: sampled_kind,
+        ty: sampled_ty,
         has_z: sampled_has_z,
         has_m: sampled_has_m,
       }) = SampledGeometryType::from_layer(layer)
     {
-      geometry_kind = Some(sampled_kind);
+      ty = Some(sampled_ty);
       has_z = sampled_has_z;
       has_m = sampled_has_m;
     }
@@ -275,7 +264,7 @@ impl SourceGeometryMetadata {
     Ok(SourceGeometryMetadata {
       column: column_name,
       encoding: GeometryEncoding::Wkb,
-      geometry_types: geometry_kind.into_iter().collect(),
+      geometry_types: ty.into_iter().collect(),
       bbox,
       covering: None,
       projjson,
@@ -294,38 +283,38 @@ impl SourceGeometryMetadata {
   #[allow(non_upper_case_globals)]
   fn from_gpkg_geometry_type(
     geometry_type: OGRwkbGeometryType::Type,
-  ) -> (Option<GeometryKind>, bool, bool) {
+  ) -> (Option<GeometryType>, bool, bool) {
     use OGRwkbGeometryType::*;
 
     match geometry_type {
-      wkbPoint => (Some(GeometryKind::Point), false, false),
-      wkbLineString => (Some(GeometryKind::LineString), false, false),
-      wkbPolygon => (Some(GeometryKind::Polygon), false, false),
-      wkbMultiPoint => (Some(GeometryKind::MultiPoint), false, false),
-      wkbMultiLineString => (Some(GeometryKind::MultiLineString), false, false),
-      wkbMultiPolygon => (Some(GeometryKind::MultiPolygon), false, false),
-      wkbGeometryCollection => (Some(GeometryKind::GeometryCollection), false, false),
-      wkbPoint25D => (Some(GeometryKind::Point), true, false),
-      wkbLineString25D => (Some(GeometryKind::LineString), true, false),
-      wkbPolygon25D => (Some(GeometryKind::Polygon), true, false),
-      wkbMultiPoint25D => (Some(GeometryKind::MultiPoint), true, false),
-      wkbMultiLineString25D => (Some(GeometryKind::MultiLineString), true, false),
-      wkbMultiPolygon25D => (Some(GeometryKind::MultiPolygon), true, false),
-      wkbGeometryCollection25D => (Some(GeometryKind::GeometryCollection), true, false),
-      wkbPointM => (Some(GeometryKind::Point), false, true),
-      wkbLineStringM => (Some(GeometryKind::LineString), false, true),
-      wkbPolygonM => (Some(GeometryKind::Polygon), false, true),
-      wkbMultiPointM => (Some(GeometryKind::MultiPoint), false, true),
-      wkbMultiLineStringM => (Some(GeometryKind::MultiLineString), false, true),
-      wkbMultiPolygonM => (Some(GeometryKind::MultiPolygon), false, true),
-      wkbGeometryCollectionM => (Some(GeometryKind::GeometryCollection), false, true),
-      wkbPointZM => (Some(GeometryKind::Point), true, true),
-      wkbLineStringZM => (Some(GeometryKind::LineString), true, true),
-      wkbPolygonZM => (Some(GeometryKind::Polygon), true, true),
-      wkbMultiPointZM => (Some(GeometryKind::MultiPoint), true, true),
-      wkbMultiLineStringZM => (Some(GeometryKind::MultiLineString), true, true),
-      wkbMultiPolygonZM => (Some(GeometryKind::MultiPolygon), true, true),
-      wkbGeometryCollectionZM => (Some(GeometryKind::GeometryCollection), true, true),
+      wkbPoint => (Some(GeometryType::Point), false, false),
+      wkbLineString => (Some(GeometryType::LineString), false, false),
+      wkbPolygon => (Some(GeometryType::Polygon), false, false),
+      wkbMultiPoint => (Some(GeometryType::MultiPoint), false, false),
+      wkbMultiLineString => (Some(GeometryType::MultiLineString), false, false),
+      wkbMultiPolygon => (Some(GeometryType::MultiPolygon), false, false),
+      wkbGeometryCollection => (Some(GeometryType::GeometryCollection), false, false),
+      wkbPoint25D => (Some(GeometryType::Point), true, false),
+      wkbLineString25D => (Some(GeometryType::LineString), true, false),
+      wkbPolygon25D => (Some(GeometryType::Polygon), true, false),
+      wkbMultiPoint25D => (Some(GeometryType::MultiPoint), true, false),
+      wkbMultiLineString25D => (Some(GeometryType::MultiLineString), true, false),
+      wkbMultiPolygon25D => (Some(GeometryType::MultiPolygon), true, false),
+      wkbGeometryCollection25D => (Some(GeometryType::GeometryCollection), true, false),
+      wkbPointM => (Some(GeometryType::Point), false, true),
+      wkbLineStringM => (Some(GeometryType::LineString), false, true),
+      wkbPolygonM => (Some(GeometryType::Polygon), false, true),
+      wkbMultiPointM => (Some(GeometryType::MultiPoint), false, true),
+      wkbMultiLineStringM => (Some(GeometryType::MultiLineString), false, true),
+      wkbMultiPolygonM => (Some(GeometryType::MultiPolygon), false, true),
+      wkbGeometryCollectionM => (Some(GeometryType::GeometryCollection), false, true),
+      wkbPointZM => (Some(GeometryType::Point), true, true),
+      wkbLineStringZM => (Some(GeometryType::LineString), true, true),
+      wkbPolygonZM => (Some(GeometryType::Polygon), true, true),
+      wkbMultiPointZM => (Some(GeometryType::MultiPoint), true, true),
+      wkbMultiLineStringZM => (Some(GeometryType::MultiLineString), true, true),
+      wkbMultiPolygonZM => (Some(GeometryType::MultiPolygon), true, true),
+      wkbGeometryCollectionZM => (Some(GeometryType::GeometryCollection), true, true),
       _ => (None, false, false),
     }
   }

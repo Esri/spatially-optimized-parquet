@@ -17,7 +17,7 @@
 use parquet::file::metadata::KeyValue;
 
 use crate::GeoParquetError;
-use crate::geometry::GeometryKind;
+use crate::geometry::GeometryType;
 use crate::geoparquet::{
   COVERING_BBOX_COLUMN, GeoMetadata, GeoMetadataInput, LodEncoding, LodLevel, LodMetadata,
   LodTransform, OrderingMetadata, XzOrderingMetadata, ZOrderingMetadata,
@@ -49,7 +49,7 @@ impl OptimizedLayout {
     let geometry_types = source_geometry
       .filter(|geometry| !geometry.geometry_types.is_empty())
       .map(|geometry| geometry.geometry_types.clone())
-      .unwrap_or_else(|| vec![self.fallback_geometry_kind()]);
+      .unwrap_or_else(|| vec![self.fallback_geometry_type()]);
     let geo_metadata = GeoMetadataInput {
       geometry_column: &self.geometry().geometry.column,
       geometry_types: &geometry_types,
@@ -123,12 +123,12 @@ impl OptimizedLayout {
     }
   }
 
-  fn fallback_geometry_kind(&self) -> GeometryKind {
+  fn fallback_geometry_type(&self) -> GeometryType {
     match self.geometry().family {
-      crate::geometry::GeometryFamily::Point => GeometryKind::Point,
-      crate::geometry::GeometryFamily::MultiPoint => GeometryKind::MultiPoint,
-      crate::geometry::GeometryFamily::Polyline => GeometryKind::LineString,
-      crate::geometry::GeometryFamily::Polygon => GeometryKind::Polygon,
+      crate::geometry::GeometryFamily::Point => GeometryType::Point,
+      crate::geometry::GeometryFamily::MultiPoint => GeometryType::MultiPoint,
+      crate::geometry::GeometryFamily::Polyline => GeometryType::LineString,
+      crate::geometry::GeometryFamily::Polygon => GeometryType::Polygon,
     }
   }
 

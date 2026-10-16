@@ -14,7 +14,7 @@
 
 //! Plans the multiscale geometry representations emitted for complex geometry features.
 
-use crate::geometry::{GeometryFamily as GeometryType, QuantizationTransform};
+use crate::geometry::{GeometryFamily, QuantizationTransform};
 use crate::geoparquet::{DEFAULT_OUTPUT_WKID, WEB_MERCATOR_OUTPUT_WKID, WEB_MERCATOR_WORLD_WIDTH};
 
 const ROOT_GRID_SIZE: f64 = 512.0;
@@ -47,7 +47,7 @@ pub(crate) struct MultiscaleLevel {
 
 impl MultiscaleLevel {
   /// Create supported even-numbered level specifications for the target spatial reference.
-  pub(crate) fn create_all(output_wkid: u32, geometry_type: GeometryType) -> Vec<Self> {
+  pub(crate) fn create_all(output_wkid: u32, geometry_type: GeometryFamily) -> Vec<Self> {
     let min_length = Self::min_vertex_count(geometry_type);
     let mut resolution = match output_wkid {
       DEFAULT_OUTPUT_WKID => FIRST_LEVEL_RESOLUTION,
@@ -78,11 +78,11 @@ impl MultiscaleLevel {
     levels
   }
 
-  fn min_vertex_count(geometry_type: GeometryType) -> usize {
+  fn min_vertex_count(geometry_type: GeometryFamily) -> usize {
     match geometry_type {
-      GeometryType::MultiPoint | GeometryType::Point => 1,
-      GeometryType::Polyline => 2,
-      GeometryType::Polygon => 3,
+      GeometryFamily::MultiPoint | GeometryFamily::Point => 1,
+      GeometryFamily::Polyline => 2,
+      GeometryFamily::Polygon => 3,
     }
   }
 }
@@ -93,7 +93,7 @@ mod tests {
 
   #[test]
   fn creates_even_wgs84_levels() {
-    let levels = MultiscaleLevel::create_all(DEFAULT_OUTPUT_WKID, GeometryType::Polygon);
+    let levels = MultiscaleLevel::create_all(DEFAULT_OUTPUT_WKID, GeometryFamily::Polygon);
     assert_eq!(levels.first().unwrap().level, 0);
     assert_eq!(levels.last().unwrap().level, 16);
     assert_eq!(levels[0].min_length, 3);
@@ -110,7 +110,7 @@ mod tests {
 
   #[test]
   fn creates_web_mercator_levels() {
-    let levels = MultiscaleLevel::create_all(WEB_MERCATOR_OUTPUT_WKID, GeometryType::Polygon);
+    let levels = MultiscaleLevel::create_all(WEB_MERCATOR_OUTPUT_WKID, GeometryFamily::Polygon);
     assert_eq!(
       levels.iter().map(|level| level.level).collect::<Vec<_>>(),
       vec![0, 2, 4, 6, 8, 10, 12, 14, 16]

@@ -16,13 +16,13 @@
 
 use futures_util::StreamExt;
 
-use crate::geometry::{Extent2D, GeometryArray, GeometryKind, WkbHeader};
+use crate::geometry::{Extent2D, GeometryArray, GeometryType, WkbHeader};
 use crate::pipeline::PipelineError;
 
 pub(super) async fn scan_geometry_metadata(
   dataframe: datafusion::dataframe::DataFrame,
   geometry_column: &str,
-) -> Result<(Vec<GeometryKind>, Extent2D), PipelineError> {
+) -> Result<(Vec<GeometryType>, Extent2D), PipelineError> {
   let mut geometry_types = Vec::new();
   let mut full_extent: Option<Extent2D> = None;
   let mut stream = dataframe
@@ -69,16 +69,16 @@ pub(super) async fn scan_geometry_metadata(
 
 fn scan_binary_values(
   geometry: &GeometryArray<'_>,
-  geometry_types: &mut Vec<GeometryKind>,
+  geometry_types: &mut Vec<GeometryType>,
   full_extent: &mut Option<Extent2D>,
 ) -> Result<(), PipelineError> {
   for value in geometry.values() {
     let Some(bytes) = value else {
       continue;
     };
-    let geometry_kind = WkbHeader::read(bytes)?.kind;
-    if !geometry_types.contains(&geometry_kind) {
-      geometry_types.push(geometry_kind);
+    let ty = WkbHeader::read(bytes)?.ty;
+    if !geometry_types.contains(&ty) {
+      geometry_types.push(ty);
     }
     let extent = Extent2D::from_wkb(bytes)?;
     match full_extent {

@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use ::parquet::file::metadata::KeyValue;
 use serde_json::{Value, json};
 
-use crate::geometry::{Extent2D, GeometryFamily, GeometryKind};
+use crate::geometry::{Extent2D, GeometryFamily, GeometryType};
 use crate::geoparquet::SpatialReference;
 use crate::geoparquet::{
   GeoMetadata, GeoMetadataInput, LodEncoding, LodLevel, LodMetadata, LodTransform,
@@ -45,7 +45,7 @@ fn spatial_reference() -> SpatialReference {
 }
 
 fn geo_input<'a>(
-  geometry_types: &'a [GeometryKind],
+  geometry_types: &'a [GeometryType],
   spatial_reference: &'a SpatialReference,
   covering: bool,
 ) -> GeoMetadataInput<'a> {
@@ -106,7 +106,7 @@ fn point_index_input() -> ClusteringIndexZInput {
 #[test]
 fn geo_metadata_serializes_crs_extent_wkb_and_covering() {
   let spatial_reference = spatial_reference();
-  let geometry_types = [GeometryKind::Point, GeometryKind::MultiPolygon];
+  let geometry_types = [GeometryType::Point, GeometryType::MultiPolygon];
   let values = metadata_values(
     GeoMetadata::parquet_entries(
       Vec::new(),
@@ -150,7 +150,7 @@ fn geo_metadata_serializes_crs_extent_wkb_and_covering() {
 #[test]
 fn geo_metadata_serializes_ordering_and_lod_extensions() {
   let spatial_reference = spatial_reference();
-  let geometry_types = [GeometryKind::Polygon];
+  let geometry_types = [GeometryType::Polygon];
   let mut input = geo_input(&geometry_types, &spatial_reference, false);
   input.ordering = Some(OrderingMetadata::Xz(XzOrderingMetadata {
     geometry_column: "geometry".to_string(),
@@ -187,7 +187,7 @@ fn geo_metadata_serializes_ordering_and_lod_extensions() {
 #[test]
 fn geo_metadata_omits_covering_and_replaces_reserved_source_entry() {
   let spatial_reference = spatial_reference();
-  let geometry_types = [GeometryKind::Point];
+  let geometry_types = [GeometryType::Point];
   let values = metadata_values(
     GeoMetadata::parquet_entries(
       vec![
@@ -210,7 +210,7 @@ fn geo_metadata_omits_covering_and_replaces_reserved_source_entry() {
 #[test]
 fn point_geometry_geodisplay_metadata_serializes_z_clustering() {
   let spatial_reference = spatial_reference();
-  let geometry_types = [GeometryKind::Point];
+  let geometry_types = [GeometryType::Point];
   let values = metadata_values(
     OptimizedLayout::optimized_point_metadata(
       Vec::new(),
@@ -254,7 +254,7 @@ fn point_geometry_geodisplay_metadata_serializes_z_clustering() {
 #[test]
 fn optimized_metadata_selects_sop_and_extensions_independently() {
   let spatial_reference = spatial_reference();
-  let geometry_types = [GeometryKind::Point];
+  let geometry_types = [GeometryType::Point];
 
   for (write_sop, write_extensions) in [(false, false), (true, false), (false, true), (true, true)]
   {
@@ -288,7 +288,7 @@ fn optimized_metadata_selects_sop_and_extensions_independently() {
 #[test]
 fn xz_geodisplay_metadata_serializes_multiscale_clustering() {
   let spatial_reference = spatial_reference();
-  let geometry_types = [GeometryKind::Polygon];
+  let geometry_types = [GeometryType::Polygon];
   let values = metadata_values(
     OptimizedLayout::optimized_xz_metadata(
       Vec::new(),

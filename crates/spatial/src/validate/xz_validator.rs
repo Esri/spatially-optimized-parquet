@@ -16,7 +16,7 @@ use arrow_array::{Array, Float64Array};
 use arrow_schema::DataType;
 
 use crate::geometry::{
-  Extent2D, GeometryFamily as GeometryType, NativeGeometryArrayBuilder, PbfGeometry, WkbCoordinate,
+  Extent2D, GeometryFamily, NativeGeometryArrayBuilder, PbfGeometry, WkbCoordinate,
 };
 use crate::input::parquet::PartitionFamily;
 use crate::optimized::{ClusterKey, GeometryPartRole, GeometryPartSink};
@@ -461,12 +461,12 @@ impl XzValidator {
     }
   }
 
-  fn optimized_geometry_type(index: &ClusteringIndexXZ) -> Option<GeometryType> {
+  fn optimized_geometry_type(index: &ClusteringIndexXZ) -> Option<GeometryFamily> {
     match index.geometry_type {
-      GeometryType::MultiPoint | GeometryType::Polyline | GeometryType::Polygon => {
+      GeometryFamily::MultiPoint | GeometryFamily::Polyline | GeometryFamily::Polygon => {
         Some(index.geometry_type)
       }
-      GeometryType::Point => None,
+      GeometryFamily::Point => None,
     }
   }
 
@@ -502,7 +502,7 @@ impl XzValidator {
   #[allow(clippy::too_many_arguments)]
   fn validate_pbf_vertex_provenance(
     wkb: &[u8],
-    geometry_type: GeometryType,
+    geometry_type: GeometryFamily,
     lengths: &[u32],
     coords: &[i64],
     level: &crate::optimized::MultiscaleLevel,
@@ -970,7 +970,7 @@ mod tests {
 
     XzValidator::validate_pbf_vertex_provenance(
       &wkb,
-      GeometryType::Polyline,
+      GeometryFamily::Polyline,
       &[2],
       &[0, 0, 10, 2, 0, 999],
       &level,

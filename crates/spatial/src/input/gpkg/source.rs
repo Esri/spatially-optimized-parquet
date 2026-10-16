@@ -146,11 +146,11 @@ impl GpkgInputSource {
     let total_rows = layer
       .try_feature_count()
       .unwrap_or_else(|| layer.feature_count());
-    let geometry_kind = geometry_metadata.geometry_types.first().copied();
+    let ty = geometry_metadata.geometry_types.first().copied();
     let geometry = Some(GeometryColumn {
       column: geometry_metadata.column.clone(),
       encoding: GeometryEncoding::Wkb,
-      geometry_kind,
+      ty,
     });
     let source_metadata = SourceDatasetMetadata {
       geometry: Some(geometry_metadata),

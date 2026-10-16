@@ -30,7 +30,7 @@ use datafusion::prelude::col;
 
 use super::MultiscaleEncoding;
 use crate::geometry::{
-  Geometry, GeometryArray, GeometryFamily as GeometryType, QuantizationOptions, QuantizedGeometry,
+  Geometry, GeometryArray, GeometryFamily, QuantizationOptions, QuantizedGeometry, quantize_into,
   to_datafusion_error,
 };
 use crate::pipeline::PipelineWarnings;
@@ -46,7 +46,7 @@ use super::{
 /// Equality and hashing include every encoding parameter because DataFusion uses UDF
 /// identity when comparing and optimizing logical expressions.
 pub(crate) struct GeolodUdf {
-  ty: GeometryType,
+  ty: GeometryFamily,
   has_z: bool,
   has_m: bool,
   levels: Vec<MultiscaleLevel>,
@@ -60,7 +60,7 @@ impl GeolodUdf {
   /// Build the geodisplay expression for complex geometry output.
   pub(crate) fn expression(
     geometry_column: &str,
-    geometry_type: GeometryType,
+    geometry_type: GeometryFamily,
     has_z: bool,
     has_m: bool,
     levels: &[MultiscaleLevel],
@@ -81,7 +81,7 @@ impl GeolodUdf {
 
   /// Construct stable output fields for the selected geometry type and multiscale levels.
   #[cfg(test)]
-  fn new(ty: GeometryType, has_z: bool, has_m: bool, levels: Vec<MultiscaleLevel>) -> Self {
+  fn new(ty: GeometryFamily, has_z: bool, has_m: bool, levels: Vec<MultiscaleLevel>) -> Self {
     Self::new_with_warnings(
       ty,
       has_z,
@@ -93,7 +93,7 @@ impl GeolodUdf {
   }
 
   fn new_with_warnings(
-    ty: GeometryType,
+    ty: GeometryFamily,
     has_z: bool,
     has_m: bool,
     levels: Vec<MultiscaleLevel>,
@@ -122,7 +122,7 @@ impl GeolodUdf {
   }
 
   fn udf(
-    geometry_type: GeometryType,
+    geometry_type: GeometryFamily,
     has_z: bool,
     has_m: bool,
     levels: Vec<MultiscaleLevel>,
@@ -190,7 +190,8 @@ impl GeolodUdf {
               geometry.ty, self.ty
             )));
           }
-          if self.multiscale_encoding == MultiscaleEncoding::Pbf && self.ty == GeometryType::Polygon
+          if self.multiscale_encoding == MultiscaleEncoding::Pbf
+            && self.ty == GeometryFamily::Polygon
           {
             reverse_polygon_parts(&mut geometry);
           }
@@ -207,18 +208,13 @@ impl GeolodUdf {
               self.warnings.record(format!(
                 "Warning: WKB dimensions do not match source metadata; \
                  normalizing multiscale geometry from hasZ={}, hasM={} to hasZ={}, hasM={} and \
-                 encoding missing Z/M values as {}",
-                source_has_z,
-                source_has_m,
-                self.has_z,
-                self.has_m,
-                self.multiscale_encoding.missing_component_value()
+                 encoding missing Z/M values as 0",
+                source_has_z, source_has_m, self.has_z, self.has_m
               ));
             }
           }
           for (writer, options) in level_builders.iter_mut().zip(&quantization_options) {
-            quantized_geometry
-              .quantize_from(&geometry, options)
+            quantize_into(&geometry, options, &mut quantized_geometry)
               .map_err(to_datafusion_error)?;
             writer
               .append(&quantized_geometry, &options.transform)
@@ -292,10 +288,10 @@ impl Eq for GeolodUdf {}
 impl Hash for GeolodUdf {
   fn hash<H: Hasher>(&self, state: &mut H) {
     match self.ty {
-      GeometryType::Point => 0u8,
-      GeometryType::MultiPoint => 1u8,
-      GeometryType::Polyline => 2u8,
-      GeometryType::Polygon => 3u8,
+      GeometryFamily::Point => 0u8,
+      GeometryFamily::MultiPoint => 1u8,
+      GeometryFamily::Polyline => 2u8,
+      GeometryFamily::Polygon => 3u8,
     }
     .hash(state);
     self.has_z.hash(state);
@@ -542,12 +538,12 @@ mod tests {
   fn assert_encoding_parameter_changes_identity(mutate: impl FnOnce(&mut MultiscaleLevel)) {
     let levels = MultiscaleLevel::create_all(
       crate::geoparquet::DEFAULT_OUTPUT_WKID,
-      GeometryType::Polygon,
+      GeometryFamily::Polygon,
     );
-    let original = GeolodUdf::new(GeometryType::Polygon, false, false, levels.clone());
+    let original = GeolodUdf::new(GeometryFamily::Polygon, false, false, levels.clone());
     let mut changed_levels = levels;
     mutate(&mut changed_levels[0]);
-    let changed = GeolodUdf::new(GeometryType::Polygon, false, false, changed_levels);
+    let changed = GeolodUdf::new(GeometryFamily::Polygon, false, false, changed_levels);
     assert_ne!(original, changed);
   }
 
@@ -582,28 +578,28 @@ mod tests {
   fn identity_includes_geometry_type_encoding_order_and_count() {
     let levels = MultiscaleLevel::create_all(
       crate::geoparquet::DEFAULT_OUTPUT_WKID,
-      GeometryType::Polygon,
+      GeometryFamily::Polygon,
     );
-    let original = GeolodUdf::new(GeometryType::Polygon, false, false, levels.clone());
-    let equal = GeolodUdf::new(GeometryType::Polygon, false, false, levels.clone());
+    let original = GeolodUdf::new(GeometryFamily::Polygon, false, false, levels.clone());
+    let equal = GeolodUdf::new(GeometryFamily::Polygon, false, false, levels.clone());
     assert_eq!(original, equal);
     assert_eq!(hash_udf(&original), hash_udf(&equal));
 
-    let different_type = GeolodUdf::new(GeometryType::Polyline, false, false, levels.clone());
+    let different_type = GeolodUdf::new(GeometryFamily::Polyline, false, false, levels.clone());
     assert_ne!(original, different_type);
 
     let mut reordered = levels.clone();
     reordered.swap(0, 1);
     assert_ne!(
       original,
-      GeolodUdf::new(GeometryType::Polygon, false, false, reordered)
+      GeolodUdf::new(GeometryFamily::Polygon, false, false, reordered)
     );
 
     let mut shortened = levels;
     shortened.pop();
     assert_ne!(
       original,
-      GeolodUdf::new(GeometryType::Polygon, false, false, shortened,)
+      GeolodUdf::new(GeometryFamily::Polygon, false, false, shortened,)
     );
   }
 
@@ -611,11 +607,11 @@ mod tests {
   fn missing_m_values_are_encoded_as_zero_for_output_zm() {
     let levels = MultiscaleLevel::create_all(
       crate::geoparquet::DEFAULT_OUTPUT_WKID,
-      GeometryType::Polyline,
+      GeometryFamily::Polyline,
     );
     let warnings = PipelineWarnings::default();
     let udf = GeolodUdf::new_with_warnings(
-      GeometryType::Polyline,
+      GeometryFamily::Polyline,
       true,
       true,
       levels,
@@ -641,14 +637,14 @@ mod tests {
   }
 
   #[test]
-  fn missing_m_values_are_null_for_native_output_zm() {
+  fn missing_m_values_are_zero_for_native_output_zm() {
     let levels = MultiscaleLevel::create_all(
       crate::geoparquet::DEFAULT_OUTPUT_WKID,
-      GeometryType::Polyline,
+      GeometryFamily::Polyline,
     );
     let warnings = PipelineWarnings::default();
     let udf = GeolodUdf::new_with_warnings(
-      GeometryType::Polyline,
+      GeometryFamily::Polyline,
       true,
       true,
       levels,
@@ -687,18 +683,20 @@ mod tests {
       .expect("native m");
 
     assert_eq!(z.null_count(), 0);
-    assert_eq!(m.null_count(), 2);
-    assert!(warnings.messages()[0].contains("encoding missing Z/M values as null"));
+    assert_eq!(m.null_count(), 0);
+    assert_eq!(m.values().as_ref(), &[0.0, 0.0]);
+    assert!(!coordinates.fields()[3].is_nullable());
+    assert!(warnings.messages()[0].contains("encoding missing Z/M values as 0"));
   }
 
   #[test]
   fn wkb_output_preserves_multipolygon_grouping() {
     let levels = MultiscaleLevel::create_all(
       crate::geoparquet::DEFAULT_OUTPUT_WKID,
-      GeometryType::Polygon,
+      GeometryFamily::Polygon,
     );
     let udf = GeolodUdf::new_with_warnings(
-      GeometryType::Polygon,
+      GeometryFamily::Polygon,
       false,
       false,
       levels,
@@ -716,7 +714,7 @@ mod tests {
       .expect("WKB geometry");
     let decoded = Geometry::from_wkb(encoded.value(0)).expect("decoded WKB");
 
-    assert_eq!(decoded.ty, crate::geometry::GeometryKind::MultiPolygon);
+    assert_eq!(decoded.ty, crate::geometry::GeometryType::MultiPolygon);
     assert_eq!(decoded.polygon_ring_counts, [1, 1]);
     assert_eq!(decoded.lengths, [5, 5]);
   }
@@ -725,14 +723,14 @@ mod tests {
   fn world_float_encodings_dequantize_coordinates() {
     let levels = MultiscaleLevel::create_all(
       crate::geoparquet::DEFAULT_OUTPUT_WKID,
-      GeometryType::Polyline,
+      GeometryFamily::Polyline,
     );
     let wkb = multiline_z_wkb();
     let input = BinaryArray::from(vec![Some(wkb.as_slice())]);
     let geometry = GeometryArray::try_new(&input).expect("geometry");
 
     let native = GeolodUdf::new_with_warnings(
-      GeometryType::Polyline,
+      GeometryFamily::Polyline,
       false,
       false,
       levels.clone(),
@@ -762,7 +760,7 @@ mod tests {
       .expect("native x");
 
     let wkb = GeolodUdf::new_with_warnings(
-      GeometryType::Polyline,
+      GeometryFamily::Polyline,
       false,
       false,
       levels,

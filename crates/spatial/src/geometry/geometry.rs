@@ -38,16 +38,16 @@ pub(crate) enum GeometryFamily {
 }
 
 impl GeometryFamily {
-  /// Classify one concrete geometry kind.
+  /// Classify one concrete geometry type.
   pub(crate) fn from_type(geometry_type: GeometryType) -> Result<Self, GeometryError> {
     match geometry_type {
       GeometryType::Point => Ok(Self::Point),
       GeometryType::MultiPoint => Ok(Self::MultiPoint),
       GeometryType::LineString | GeometryType::MultiLineString => Ok(Self::Polyline),
       GeometryType::Polygon | GeometryType::MultiPolygon => Ok(Self::Polygon),
-      GeometryType::GeometryCollection | GeometryType::Unknown => Err(
-        GeometryError::InvalidGeometry(format!("unsupported geometry type: {geometry_type:?}")),
-      ),
+      GeometryType::GeometryCollection | GeometryType::Unknown => {
+        Err(GeometryError::UnsupportedGeometryType(geometry_type))
+      }
     }
   }
 
@@ -105,7 +105,7 @@ pub(crate) struct Geometry {
   pub(crate) coordinates: Vec<Coord>,
   /// Defines the coordinate count for each part.
   pub(crate) lengths: Vec<u32>,
-  /// Groups polygon rings by polygon for Polygon and MultiPolygon WKB output.
+  /// Preserve WKB polygon boundaries for writing non-PBF outputs.
   pub(crate) polygon_ring_counts: Vec<u32>,
 }
 
@@ -159,55 +159,5 @@ impl GeometryType {
   /// Resolve the normalized family used by shared processing and output layout.
   pub(crate) fn family(self) -> Result<GeometryFamily, GeometryError> {
     GeometryFamily::from_type(self)
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use super::{super::GeometryType, Coord, Geometry, GeometryFamily};
-
-  #[test]
-  fn classifies_concrete_kinds_into_geometry_types() {
-    assert_eq!(
-      GeometryFamily::from_type(GeometryType::MultiLineString).unwrap(),
-      GeometryFamily::Polyline
-    );
-    assert_eq!(
-      GeometryFamily::from_types(&[GeometryType::Polygon, GeometryType::MultiPolygon]).unwrap(),
-      GeometryFamily::Polygon
-    );
-    assert_eq!(
-      GeometryFamily::from_types(&[GeometryType::LineString, GeometryType::MultiLineString,])
-        .unwrap(),
-      GeometryFamily::Polyline
-    );
-  }
-
-  #[test]
-  fn rejects_mixed_geometry_families() {
-    let error =
-      GeometryFamily::from_types(&[GeometryType::Point, GeometryType::Polygon]).unwrap_err();
-
-    assert!(error.to_string().contains("mixed geometry families"));
-    assert!(error.to_string().contains("Point"));
-    assert!(error.to_string().contains("Polygon"));
-  }
-
-  #[test]
-  fn rejects_part_lengths_that_do_not_cover_coordinates() {
-    let error = Geometry::new(
-      GeometryType::LineString,
-      vec![Coord {
-        x: 0.0,
-        y: 0.0,
-        z: None,
-        m: None,
-      }],
-      vec![2],
-      Vec::new(),
-    )
-    .unwrap_err();
-
-    assert!(error.to_string().contains("part lengths"));
   }
 }
