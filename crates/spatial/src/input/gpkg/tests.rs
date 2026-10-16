@@ -581,7 +581,7 @@ fn open_input_infers_z_and_m_from_generic_geopackage_wkb() {
   let path = temp.path().join("generic-point-zm.gpkg");
   let features = [GpkgFeature {
     id: 1,
-    name: Some("dimensional"),
+    name: Some("xyzm"),
     geometry_wkt: "POINT ZM (1 2 3 4)",
   }];
   write_gpkg(
@@ -723,20 +723,20 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
         geometry_case.name,
         dimension_case.suffix.to_ascii_lowercase()
       ));
-      let wkt = dimensional_geometry_wkt(
+      let wkt = xyzm_geometry_wkt(
         geometry_case.name,
         dimension_case.suffix,
         dimension_case.dimension_values,
       );
       let features = [GpkgFeature {
         id: 1,
-        name: Some("dimensional"),
+        name: Some("xyzm"),
         geometry_wkt: &wkt,
       }];
       write_gpkg(
         &path,
         &[GpkgLayer {
-          name: "dimensional",
+          name: "xyzm",
           geometry_type: geometry_case.geometry_types[dimension_index],
           epsg: Some(4326),
           features: &features,
@@ -810,7 +810,7 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
   }
 }
 
-fn dimensional_geometry_wkt(name: &str, suffix: &str, dimension_values: &str) -> String {
+fn xyzm_geometry_wkt(name: &str, suffix: &str, dimension_values: &str) -> String {
   let first = format!("1 2 {dimension_values}");
   let second = format!("5 2 {dimension_values}");
   let third = format!("5 6 {dimension_values}");
@@ -828,7 +828,7 @@ fn dimensional_geometry_wkt(name: &str, suffix: &str, dimension_values: &str) ->
     "geometry_collection" => {
       format!("GEOMETRYCOLLECTION {suffix} (POINT {suffix} ({first}))")
     }
-    _ => unreachable!("unsupported dimensional geometry fixture: {name}"),
+    _ => unreachable!("unsupported XYZM geometry fixture: {name}"),
   }
 }
 

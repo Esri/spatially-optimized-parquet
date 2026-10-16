@@ -37,7 +37,7 @@ use common::assertion::{
   assert_close, assert_covering_metadata, assert_json_extent, binary_value, string_value,
   struct_f64_value,
 };
-use common::fixture::{wkb_dimensional_point, wkb_dimensional_polygon, wkb_point, wkb_polygon};
+use common::fixture::{wkb_point, wkb_polygon, wkb_xyzm_point, wkb_xyzm_polygon};
 use common::geometry::{point_from_wkb_xy, polygon_extent_from_wkb, transform_point_between_epsg};
 use common::gpkg::{GpkgFeature, GpkgLayer, write_gpkg};
 use common::parquet::{
@@ -410,11 +410,11 @@ fn optimized_output_keeps_point_z_and_m_in_wkb_columns_and_metadata() {
     Field::new("name", DataType::Utf8, false),
     Field::new("geometry", DataType::Binary, true),
   ]));
-  let point = wkb_dimensional_point(1.0, 2.0, Some(30.0), Some(40.0));
+  let point = wkb_xyzm_point(1.0, 2.0, Some(30.0), Some(40.0));
   let batch = RecordBatch::try_new(
     schema.clone(),
     vec![
-      Arc::new(StringArray::from(vec!["dimensional"])),
+      Arc::new(StringArray::from(vec!["xyzm"])),
       Arc::new(BinaryArray::from(vec![Some(point.as_slice())])),
     ],
   )
@@ -492,7 +492,7 @@ fn optimized_output_supports_point_xyz_and_point_xym() {
       DataType::Binary,
       false,
     )]));
-    let point = wkb_dimensional_point(1.0, 2.0, z, m);
+    let point = wkb_xyzm_point(1.0, 2.0, z, m);
     let batch = RecordBatch::try_new(
       schema.clone(),
       vec![Arc::new(BinaryArray::from(vec![Some(point.as_slice())]))],
@@ -548,7 +548,7 @@ fn optimized_output_strips_z_and_m_independently() {
     DataType::Binary,
     false,
   )]));
-  let point = wkb_dimensional_point(1.0, 2.0, Some(30.0), Some(40.0));
+  let point = wkb_xyzm_point(1.0, 2.0, Some(30.0), Some(40.0));
   let batch = RecordBatch::try_new(
     schema.clone(),
     vec![Arc::new(BinaryArray::from(vec![Some(point.as_slice())]))],
@@ -695,7 +695,7 @@ fn optimized_complex_geometry_output_zero_fills_dimensions_that_disagree_with_me
 }
 
 #[test]
-fn optimized_output_writes_dimensional_polygon_pbf_with_absolute_z_and_m() {
+fn optimized_output_writes_xyzm_polygon_pbf_with_absolute_z_and_m() {
   let temp = TempDir::new().unwrap();
   let input = temp.path().join("polygon-zm.parquet");
   let output = temp.path().join("polygon-zm-optimized.parquet");
@@ -704,7 +704,7 @@ fn optimized_output_writes_dimensional_polygon_pbf_with_absolute_z_and_m() {
     DataType::Binary,
     false,
   )]));
-  let polygon = wkb_dimensional_polygon(&[
+  let polygon = wkb_xyzm_polygon(&[
     (0.0, 0.0, Some(10.0), Some(100.0)),
     (4.0, 0.0, Some(20.0), Some(200.0)),
     (4.0, 4.0, Some(30.0), Some(300.0)),
@@ -820,9 +820,9 @@ fn optimized_output_writes_xyzm_multipolygon_pbf_with_holes_and_collapsed_rings(
     (32.0, 2.0, Some(440.0), Some(4400.0)),
   ];
   let polygons = [
-    common::wkb::dimensional_polygon_rings(&[&collapsed_exterior]),
-    common::wkb::dimensional_polygon_rings(&[&first_exterior, &collapsed_hole, &first_hole]),
-    common::wkb::dimensional_polygon_rings(&[&second_exterior, &second_hole]),
+    common::wkb::xyzm_polygon_rings(&[&collapsed_exterior]),
+    common::wkb::xyzm_polygon_rings(&[&first_exterior, &collapsed_hole, &first_hole]),
+    common::wkb::xyzm_polygon_rings(&[&second_exterior, &second_hole]),
   ];
   let mut multipolygon = vec![1];
   multipolygon.extend_from_slice(&3006_u32.to_le_bytes());
@@ -942,7 +942,7 @@ fn optimized_output_strips_polygon_pbf_dimensions() {
     DataType::Binary,
     false,
   )]));
-  let polygon = wkb_dimensional_polygon(&[
+  let polygon = wkb_xyzm_polygon(&[
     (0.0, 0.0, Some(10.0), Some(100.0)),
     (4.0, 0.0, Some(20.0), Some(200.0)),
     (4.0, 4.0, Some(30.0), Some(300.0)),
@@ -1067,7 +1067,7 @@ fn optimized_output_reprojects_point_xy_and_preserves_point_z_and_m() {
     false,
   )]));
   let (x, y) = transform_point_between_epsg(1.0, 2.0, 4326, 3857);
-  let point = wkb_dimensional_point(x, y, Some(30.0), Some(40.0));
+  let point = wkb_xyzm_point(x, y, Some(30.0), Some(40.0));
   let batch = RecordBatch::try_new(
     schema.clone(),
     vec![Arc::new(BinaryArray::from(vec![Some(point.as_slice())]))],
@@ -1410,7 +1410,7 @@ fn optimized_native_output_zero_fills_missing_zm_components() {
     DataType::Binary,
     false,
   )]));
-  let polygon = wkb_dimensional_polygon(&[
+  let polygon = wkb_xyzm_polygon(&[
     (0.0, 0.0, Some(f64::NAN), Some(f64::NAN)),
     (2.0, 0.0, Some(f64::NAN), Some(f64::NAN)),
     (2.0, 2.0, Some(f64::NAN), Some(f64::NAN)),

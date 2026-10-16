@@ -625,7 +625,7 @@ fn decode_type(encoded_type: u32) -> Result<(u32, bool, bool, bool)> {
     1 => (true, false),
     2 => (false, true),
     3 => (true, true),
-    _ => bail!("invalid ISO WKB dimensional type {encoded_type}"),
+    _ => bail!("invalid ISO WKB XY/XYZ/XYM/XYZM type {encoded_type}"),
   };
   Ok((base_type, has_z, has_m, false))
 }
@@ -702,7 +702,7 @@ fn write_selected_coordinate(
     output.extend_from_slice(
       &coordinate
         .z
-        .expect("selected Z originates from dimensional WKB")
+        .expect("selected Z originates from XYZ or XYZM WKB")
         .to_le_bytes(),
     );
   }
@@ -710,7 +710,7 @@ fn write_selected_coordinate(
     output.extend_from_slice(
       &coordinate
         .m
-        .expect("selected M originates from dimensional WKB")
+        .expect("selected M originates from XYM or XYZM WKB")
         .to_le_bytes(),
     );
   }

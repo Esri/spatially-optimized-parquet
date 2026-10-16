@@ -946,7 +946,7 @@ mod tests {
   }
 
   #[test]
-  fn rejects_dimensional_pbf_component_not_present_in_wkb() {
+  fn rejects_xyz_pbf_z_value_not_present_in_wkb() {
     let mut wkb = vec![1];
     wkb.extend_from_slice(&1002_u32.to_le_bytes());
     wkb.extend_from_slice(&2_u32.to_le_bytes());

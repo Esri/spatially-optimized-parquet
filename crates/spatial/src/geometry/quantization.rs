@@ -172,7 +172,7 @@ fn quantize_multipoint(
 }
 
 /// Quantize line or polygon parts from source geometry, discarding parts below the minimum length.
-/// See spec/display-optimization.md, 2D Quantization.
+/// See spec/display-optimization.md, XY Quantization.
 fn quantize_parts(
   output: &mut QuantizedGeometry,
   geometry: &Geometry,

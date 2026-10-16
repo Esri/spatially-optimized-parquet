@@ -15,7 +15,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
-/// Represents an axis-aligned two-dimensional extent.
+/// Represents an axis-aligned XY extent.
 pub(crate) struct Extent2D {
   /// Defines the minimum x coordinate.
   pub(crate) xmin: f64,

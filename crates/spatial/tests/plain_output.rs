@@ -29,7 +29,7 @@ use tokio::runtime::Runtime;
 use common::assertion::{
   assert_close, assert_covering_metadata, binary_value, string_value, struct_f64_value,
 };
-use common::fixture::{wkb_dimensional_point, wkb_point};
+use common::fixture::{wkb_point, wkb_xyzm_point};
 use common::geometry::{point_from_wkb_xy, transform_point_between_epsg};
 use common::parquet::{
   geoparquet_kv, geoparquet_kv_with_epsg, kv_map, reader_metadata, scan_parquet, write_parquet,
@@ -173,7 +173,7 @@ fn plain_output_strips_z_and_m_independently() {
     DataType::Binary,
     false,
   )]));
-  let point = wkb_dimensional_point(1.0, 2.0, Some(30.0), Some(40.0));
+  let point = wkb_xyzm_point(1.0, 2.0, Some(30.0), Some(40.0));
   let batch = arrow_array::RecordBatch::try_new(
     schema.clone(),
     vec![Arc::new(BinaryArray::from(vec![Some(point.as_slice())]))],
