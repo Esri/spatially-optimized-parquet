@@ -27,13 +27,6 @@ use super::{GeometryError, QuantizedGeometry};
 
 type Result<T> = std::result::Result<T, GeometryError>;
 
-#[derive(Debug, Default)]
-struct GeometryEncodeScratch {
-  quantized_coords: Vec<i64>,
-  quantized_lengths: Vec<u32>,
-  buffer: Vec<u8>,
-}
-
 #[derive(Clone, PartialEq, Message)]
 pub(crate) struct PbfGeometry {
   #[prost(uint32, repeated, tag = "2")]
@@ -49,40 +42,11 @@ impl PbfGeometry {
   }
 }
 
-impl GeometryEncodeScratch {
-  /// Serialize pre-quantized absolute coordinates as a PBF payload.
-  fn encode(&mut self, geometry: &QuantizedGeometry) -> Result<&[u8]> {
-    self.quantized_coords.clear();
-    self
-      .quantized_coords
-      .extend_from_slice(&geometry.coordinates);
-    self.quantized_lengths.clear();
-    self.quantized_lengths.extend_from_slice(&geometry.lengths);
-    encode_deltas_xy(
-      &mut self.quantized_coords,
-      &self.quantized_lengths,
-      geometry.has_z,
-      geometry.has_m,
-    );
-    let message = PbfGeometry {
-      lengths: std::mem::take(&mut self.quantized_lengths),
-      coords: std::mem::take(&mut self.quantized_coords),
-    };
-    self.buffer.clear();
-    self.buffer.reserve(message.encoded_len());
-    message
-      .encode(&mut self.buffer)
-      .map_err(|error| GeometryError::Pbf(error.to_string()))?;
-    self.quantized_coords = message.coords;
-    self.quantized_lengths = message.lengths;
-    Ok(self.buffer.as_slice())
-  }
-}
-
 /// Builds a BinaryArray containing one Esri PBF payload per geometry row.
 pub(crate) struct PbfArrayBuilder {
   builder: BinaryBuilder,
-  scratch: GeometryEncodeScratch,
+  message: PbfGeometry,
+  buffer: Vec<u8>,
 }
 
 impl PbfArrayBuilder {
@@ -90,14 +54,30 @@ impl PbfArrayBuilder {
   pub(crate) fn new(capacity: usize) -> Self {
     Self {
       builder: BinaryBuilder::with_capacity(capacity, capacity * 16),
-      scratch: GeometryEncodeScratch::default(),
+      message: PbfGeometry::default(),
+      buffer: Vec::new(),
     }
   }
 
   /// Append one absolute quantized geometry as a PBF payload.
   pub(crate) fn append(&mut self, geometry: &QuantizedGeometry) -> Result<()> {
-    let bytes = self.scratch.encode(geometry)?;
-    self.builder.append_value(bytes);
+    self.message.coords.clear();
+    self.message.coords.extend_from_slice(&geometry.coordinates);
+    self.message.lengths.clear();
+    self.message.lengths.extend_from_slice(&geometry.lengths);
+    encode_deltas_xy(
+      &mut self.message.coords,
+      &self.message.lengths,
+      geometry.has_z,
+      geometry.has_m,
+    );
+    self.buffer.clear();
+    self.buffer.reserve(self.message.encoded_len());
+    self
+      .message
+      .encode(&mut self.buffer)
+      .map_err(|error| GeometryError::Pbf(error.to_string()))?;
+    self.builder.append_value(&self.buffer);
     Ok(())
   }
 
@@ -142,8 +122,6 @@ fn encode_deltas_xy(coords: &mut [i64], lengths: &[u32], has_z: bool, has_m: boo
 
 #[cfg(test)]
 mod tests {
-  use std::io::Cursor;
-
   use super::*;
   use crate::geometry::{
     Coord, Geometry, GeometryType, QuantizationOptions, QuantizationTransform, quantize_into,
@@ -167,10 +145,15 @@ mod tests {
       has_z: false,
       has_m: false,
     };
-    let mut scratch = GeometryEncodeScratch::default();
-    let bytes = scratch.encode(&geometry).unwrap().to_vec();
-    let decoded = PbfGeometry::decode(Cursor::new(&bytes)).unwrap();
-    let esri_decoded = EsriPbfGeometry::decode(Cursor::new(bytes)).unwrap();
+    let mut builder = PbfArrayBuilder::new(1);
+    builder.append(&geometry).unwrap();
+    let array = builder.finish();
+    let array = array
+      .as_any()
+      .downcast_ref::<arrow_array::BinaryArray>()
+      .unwrap();
+    let decoded = PbfGeometry::from_bytes(array.value(0)).unwrap();
+    let esri_decoded = EsriPbfGeometry::decode(array.value(0)).unwrap();
     assert_eq!(decoded.lengths, vec![4]);
     assert_eq!(decoded.coords.len(), 8);
     assert_eq!(esri_decoded.lengths, vec![4]);
@@ -218,8 +201,14 @@ mod tests {
     assert!(!quantized.has_z);
     assert!(!quantized.has_m);
 
-    let mut scratch = GeometryEncodeScratch::default();
-    let decoded = PbfGeometry::from_bytes(scratch.encode(&quantized).unwrap()).unwrap();
+    let mut builder = PbfArrayBuilder::new(1);
+    builder.append(&quantized).unwrap();
+    let array = builder.finish();
+    let array = array
+      .as_any()
+      .downcast_ref::<arrow_array::BinaryArray>()
+      .unwrap();
+    let decoded = PbfGeometry::from_bytes(array.value(0)).unwrap();
 
     assert_eq!(decoded.lengths, [2]);
     assert_eq!(decoded.coords, [1, 2, 3, 3]);
