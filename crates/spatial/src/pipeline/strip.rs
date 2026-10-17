@@ -36,24 +36,29 @@ pub(crate) struct StripGeometryDimensionsUdf {
 }
 
 impl StripGeometryDimensionsUdf {
+  /// Build a lazy WKB expression that removes the requested Z/M components.
   pub(crate) fn expression(geometry_column: &str, strip_z: bool, strip_m: bool) -> Expr {
     ScalarUDF::new_from_impl(Self { strip_z, strip_m }).call(vec![col(geometry_column)])
   }
 }
 
 impl ScalarUDFImpl for StripGeometryDimensionsUdf {
+  /// Return the registered WKB dimension-stripping function name.
   fn name(&self) -> &str {
     "strip_geometry_dimensions"
   }
 
+  /// Return the supported WKB array argument contract.
   fn signature(&self) -> &Signature {
     geometry_signature()
   }
 
+  /// Declare binary WKB output for stripped geometry values.
   fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
     Ok(DataType::Binary)
   }
 
+  /// Strip requested WKB components row by row while preserving null geometry.
   fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
     let geometry = ColumnarValue::values_to_arrays(&args.args)?
       .into_iter()

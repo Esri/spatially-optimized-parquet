@@ -33,17 +33,6 @@ pub enum GeometryType {
   Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-/// Describes the selected geometry column and its source encoding.
-pub(crate) struct GeometryColumn {
-  /// Identifies the Arrow column containing geometry values.
-  pub(crate) column: String,
-  /// Defines the physical encoding used by that column.
-  pub(crate) encoding: GeometryEncoding,
-  /// Provides the source geometry type when metadata can determine it.
-  pub(crate) ty: Option<GeometryType>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Identifies supported physical geometry encodings.
 pub(crate) enum GeometryEncoding {
@@ -58,4 +47,15 @@ pub(crate) enum CoordinateDimensions {
   Xyz,
   Xym,
   Xyzm,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+/// Describes the selected geometry column and its source encoding.
+pub(crate) struct GeometryColumn {
+  /// Identifies the Arrow column containing geometry values.
+  pub(crate) column: String,
+  /// Defines the physical encoding used by that column.
+  pub(crate) encoding: GeometryEncoding,
+  /// Provides the source geometry type when metadata can determine it.
+  pub(crate) ty: Option<GeometryType>,
 }

@@ -93,6 +93,101 @@ impl ResolvedReprojection {
   }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct OutputGeometryUdf {
+  source_definition: Option<String>,
+  target_definition: String,
+  target_wkid: u32,
+}
+
+impl OutputGeometryUdf {
+  /// Retain source and target definitions for deferred WKB normalization.
+  fn scalar_udf(
+    source_definition: Option<String>,
+    target_definition: String,
+    target_wkid: u32,
+  ) -> ScalarUDF {
+    ScalarUDF::new_from_impl(Self {
+      source_definition,
+      target_definition,
+      target_wkid,
+    })
+  }
+}
+
+impl ScalarUDFImpl for OutputGeometryUdf {
+  /// Return the registered output-geometry normalization function name.
+  fn name(&self) -> &str {
+    "output_geometry"
+  }
+
+  /// Return the supported WKB array argument contract.
+  fn signature(&self) -> &Signature {
+    geometry_signature()
+  }
+
+  /// Declare binary WKB output for normalized geometry values.
+  fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
+    Ok(DataType::Binary)
+  }
+
+  /// Prepare one coordinate transform per batch and normalize each non-null WKB value.
+  fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
+    let arrays = ColumnarValue::values_to_arrays(&args.args)?;
+    let geometry = arrays
+      .first()
+      .ok_or_else(|| DataFusionError::Execution("missing geometry argument".to_string()))?;
+    let prepared = match &self.source_definition {
+      Some(source_definition) => Some(
+        PreparedTransform::new(
+          SpatialReference::spatial_ref_from_definition(source_definition)
+            .map_err(to_datafusion_error)?,
+          SpatialReference::spatial_ref_from_definition(&self.target_definition)
+            .map_err(to_datafusion_error)?,
+        )
+        .map_err(to_datafusion_error)?,
+      ),
+      None => None,
+    };
+    let geometry = GeometryArray::try_new(geometry.as_ref())?;
+    let mut builder = BinaryBuilder::with_capacity(geometry.len(), geometry.len() * 16);
+    for value in geometry.values() {
+      match value {
+        Some(bytes) => builder.append_value(
+          self
+            .normalize_wkb(bytes, prepared.as_ref())
+            .map_err(to_datafusion_error)?,
+        ),
+        None => builder.append_null(),
+      }
+    }
+    Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
+  }
+}
+
+impl OutputGeometryUdf {
+  /// Decode WKB, apply a prepared transform, validate target bounds, and encode the result.
+  fn normalize_wkb(
+    &self,
+    bytes: &[u8],
+    prepared: Option<&PreparedTransform>,
+  ) -> Result<Vec<u8>, GeometryError> {
+    let geometry = Geometry::from_wkb(bytes).map_err(|error| {
+      GeometryError::InvalidGeometry(format!("decode geometry for output normalization: {error}"))
+    })?;
+    let geometry = match prepared {
+      Some(prepared) => prepared.reproject_geometry(geometry)?,
+      None => geometry,
+    };
+    if self.target_wkid == WEB_MERCATOR_OUTPUT_WKID {
+      validate_web_mercator_geometry(&geometry)?;
+    }
+    geometry.wkb().map_err(|error| {
+      GeometryError::InvalidGeometry(format!("encode normalized geometry as WKB: {error}"))
+    })
+  }
+}
+
 #[derive(Debug)]
 /// Owns a prepared GDAL coordinate transform and the spatial references backing it.
 struct PreparedTransform {
@@ -122,94 +217,7 @@ impl PreparedTransform {
   }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct OutputGeometryUdf {
-  source_definition: Option<String>,
-  target_definition: String,
-  target_wkid: u32,
-}
-
-impl OutputGeometryUdf {
-  fn scalar_udf(
-    source_definition: Option<String>,
-    target_definition: String,
-    target_wkid: u32,
-  ) -> ScalarUDF {
-    ScalarUDF::new_from_impl(Self {
-      source_definition,
-      target_definition,
-      target_wkid,
-    })
-  }
-
-  fn normalize_wkb(
-    &self,
-    bytes: &[u8],
-    prepared: Option<&PreparedTransform>,
-  ) -> Result<Vec<u8>, GeometryError> {
-    let geometry = Geometry::from_wkb(bytes).map_err(|error| {
-      GeometryError::InvalidGeometry(format!("decode geometry for output normalization: {error}"))
-    })?;
-    let geometry = match prepared {
-      Some(prepared) => prepared.reproject_geometry(geometry)?,
-      None => geometry,
-    };
-    if self.target_wkid == WEB_MERCATOR_OUTPUT_WKID {
-      validate_web_mercator_geometry(&geometry)?;
-    }
-    geometry.wkb().map_err(|error| {
-      GeometryError::InvalidGeometry(format!("encode normalized geometry as WKB: {error}"))
-    })
-  }
-}
-
-impl ScalarUDFImpl for OutputGeometryUdf {
-  fn name(&self) -> &str {
-    "output_geometry"
-  }
-
-  fn signature(&self) -> &Signature {
-    geometry_signature()
-  }
-
-  fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
-    Ok(DataType::Binary)
-  }
-
-  fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
-    let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-    let geometry = arrays
-      .first()
-      .ok_or_else(|| DataFusionError::Execution("missing geometry argument".to_string()))?;
-    let prepared = self
-      .source_definition
-      .as_ref()
-      .map(|source_definition| {
-        PreparedTransform::new(
-          SpatialReference::spatial_ref_from_definition(source_definition)
-            .map_err(to_datafusion_error)?,
-          SpatialReference::spatial_ref_from_definition(&self.target_definition)
-            .map_err(to_datafusion_error)?,
-        )
-        .map_err(to_datafusion_error)
-      })
-      .transpose()?;
-    let geometry = GeometryArray::try_new(geometry.as_ref())?;
-    let mut builder = BinaryBuilder::with_capacity(geometry.len(), geometry.len() * 16);
-    for value in geometry.values() {
-      match value {
-        Some(bytes) => builder.append_value(
-          self
-            .normalize_wkb(bytes, prepared.as_ref())
-            .map_err(to_datafusion_error)?,
-        ),
-        None => builder.append_null(),
-      }
-    }
-    Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
-  }
-}
-
+/// Reject non-finite XY bounds and coordinates outside the canonical Web Mercator square.
 fn validate_web_mercator_geometry(geometry: &Geometry) -> Result<(), GeometryError> {
   let envelope = geometry.envelope();
   let coordinates = [envelope.MinX, envelope.MinY, envelope.MaxX, envelope.MaxY];

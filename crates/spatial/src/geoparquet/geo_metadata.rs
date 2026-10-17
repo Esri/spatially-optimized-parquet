@@ -85,13 +85,35 @@ pub(crate) struct GeoCoveringBbox {
 }
 
 impl GeoMetadata {
+  /// Serialize GeoParquet metadata while preserving non-reserved source entries.
+  pub(crate) fn parquet_entries(
+    mut source_entries: Vec<KeyValue>,
+    input: GeoMetadataInput<'_>,
+  ) -> Result<Vec<KeyValue>, GeoParquetError> {
+    source_entries.retain(|entry| entry.key != "geo");
+    source_entries.push(Self::parquet_entry(input)?);
+    Ok(source_entries)
+  }
+
+  /// Serialize one GeoParquet metadata entry.
+  pub(crate) fn parquet_entry(input: GeoMetadataInput<'_>) -> Result<KeyValue, GeoParquetError> {
+    Ok(KeyValue::new(
+      "geo".to_string(),
+      Some(
+        serde_json::to_string(&Self::new(input)?).map_err(|source| GeoParquetError::Json {
+          operation: "serialize GeoParquet metadata",
+          source,
+        })?,
+      ),
+    ))
+  }
+
+  /// Build the output geometry contract with its extent, coordinate layout, and spatial reference.
   pub(super) fn new(input: GeoMetadataInput<'_>) -> Result<Self, GeoParquetError> {
-    let geometry_types = input
-      .geometry_types
-      .iter()
-      .copied()
-      .map(|ty| ty.geoparquet_type_name(input.has_z, input.has_m))
-      .collect::<Result<Vec<_>, GeoParquetError>>()?;
+    let mut geometry_types = Vec::with_capacity(input.geometry_types.len());
+    for geometry_type in input.geometry_types {
+      geometry_types.push(geometry_type.geoparquet_type_name(input.has_z, input.has_m)?);
+    }
     let column = GeoColumnMetadata {
       encoding: "WKB".to_string(),
       geometry_types,
@@ -120,32 +142,10 @@ impl GeoMetadata {
       lod: input.lod,
     })
   }
-
-  /// Serialize GeoParquet metadata while preserving non-reserved source entries.
-  pub(crate) fn parquet_entries(
-    mut source_entries: Vec<KeyValue>,
-    input: GeoMetadataInput<'_>,
-  ) -> Result<Vec<KeyValue>, GeoParquetError> {
-    source_entries.retain(|entry| entry.key != "geo");
-    source_entries.push(Self::parquet_entry(input)?);
-    Ok(source_entries)
-  }
-
-  /// Serialize one GeoParquet metadata entry.
-  pub(crate) fn parquet_entry(input: GeoMetadataInput<'_>) -> Result<KeyValue, GeoParquetError> {
-    Ok(KeyValue::new(
-      "geo".to_string(),
-      Some(
-        serde_json::to_string(&Self::new(input)?).map_err(|source| GeoParquetError::Json {
-          operation: "serialize GeoParquet metadata",
-          source,
-        })?,
-      ),
-    ))
-  }
 }
 
 impl GeoCovering {
+  /// Build the four field paths referencing a GeoParquet XY covering struct.
   fn new(column: &str) -> Self {
     Self {
       bbox: GeoCoveringBbox {
@@ -159,6 +159,7 @@ impl GeoCovering {
 }
 
 impl GeometryType {
+  /// Format a GeoParquet geometry kind with its XY, XYZ, XYM, or XYZM layout suffix.
   fn geoparquet_type_name(self, has_z: bool, has_m: bool) -> Result<String, GeoParquetError> {
     let base = match self {
       Self::Point => "Point",

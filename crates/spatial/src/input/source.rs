@@ -29,6 +29,24 @@ use futures_util::future::BoxFuture;
 use super::{InputError, SourceDatasetMetadata, SourceFormat, gpkg, parquet};
 use crate::geometry::GeometryColumn;
 
+/// Defines the normalized input contract consumed by output layout resolution.
+pub(crate) trait InputSource: Send + Sync {
+  /// Load the normalized Arrow schema.
+  fn schema(&self) -> Result<SchemaRef, InputError>;
+  /// Return the row count discovered from source metadata.
+  fn total_rows(&self) -> Result<u64, InputError>;
+  /// Infer the geometry column and encoding when metadata permits it.
+  fn inferred_geometry_column(&self) -> Result<Option<GeometryColumn>, InputError>;
+  /// Return normalized geometry and pass-through file metadata.
+  fn source_metadata(&self) -> Result<SourceDatasetMetadata, InputError>;
+  /// Create a lazy DataFusion DataFrame for a selected row range.
+  fn to_dataframe<'a>(
+    &'a self,
+    ctx: &'a SessionContext,
+    row_range: RowRange,
+  ) -> BoxFuture<'a, Result<DataFrame, InputError>>;
+}
+
 /// Selects a zero-based contiguous range of source rows.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RowRange {
@@ -108,10 +126,6 @@ impl InputOpenOptions {
   }
 }
 
-pub(super) fn is_http_location(value: &str) -> bool {
-  value.starts_with("http://") || value.starts_with("https://")
-}
-
 /// Open one source implementation selected by a resolved physical format.
 pub(crate) async fn open_input(
   format: SourceFormat,
@@ -132,20 +146,7 @@ pub(crate) async fn open_input(
   }
 }
 
-/// Defines the normalized input contract consumed by output layout resolution.
-pub(crate) trait InputSource: Send + Sync {
-  /// Load the normalized Arrow schema.
-  fn schema(&self) -> Result<SchemaRef, InputError>;
-  /// Return the row count discovered from source metadata.
-  fn total_rows(&self) -> Result<u64, InputError>;
-  /// Infer the geometry column and encoding when metadata permits it.
-  fn inferred_geometry_column(&self) -> Result<Option<GeometryColumn>, InputError>;
-  /// Return normalized geometry and pass-through file metadata.
-  fn source_metadata(&self) -> Result<SourceDatasetMetadata, InputError>;
-  /// Create a lazy DataFusion DataFrame for a selected row range.
-  fn to_dataframe<'a>(
-    &'a self,
-    ctx: &'a SessionContext,
-    row_range: RowRange,
-  ) -> BoxFuture<'a, Result<DataFrame, InputError>>;
+/// Identify locations with an HTTP or HTTPS scheme.
+pub(super) fn is_http_location(value: &str) -> bool {
+  value.starts_with("http://") || value.starts_with("https://")
 }

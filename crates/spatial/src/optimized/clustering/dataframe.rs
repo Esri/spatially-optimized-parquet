@@ -39,6 +39,7 @@ impl GeometryInfo {
     self.add_cluster_key_column(dataframe, target_extent, cluster_depth)
   }
 
+  /// Add scalar XY, XYZ, XYM, or XYZM columns for point clustering.
   fn add_point_columns(&self, mut dataframe: DataFrame) -> Result<DataFrame> {
     if self.clustering_family != ClusteringFamily::PointGeometry {
       return Ok(dataframe);
@@ -56,6 +57,7 @@ impl GeometryInfo {
     Ok(dataframe)
   }
 
+  /// Assign Z-order point keys or XZ-order bounds keys to the dataframe.
   fn add_cluster_key_column(
     &self,
     dataframe: DataFrame,
@@ -63,7 +65,7 @@ impl GeometryInfo {
     cluster_depth: u32,
   ) -> Result<DataFrame> {
     match self.clustering_family {
-      ClusteringFamily::PointGeometry => Ok(dataframe.with_column(
+      ClusteringFamily::PointGeometry => dataframe.with_column(
         GEOKEY_COLUMN,
         PointGeometryClusterKeyUdf::expression(
           bbox_field_expr("xmin"),
@@ -71,8 +73,8 @@ impl GeometryInfo {
           target_extent,
           cluster_depth,
         ),
-      )?),
-      ClusteringFamily::ComplexGeometry => Ok(dataframe.with_column(
+      ),
+      ClusteringFamily::ComplexGeometry => dataframe.with_column(
         GEOKEY_COLUMN,
         ComplexGeometryBoundsClusterKeyUdf::expression(
           bbox_field_expr("xmin"),
@@ -82,7 +84,7 @@ impl GeometryInfo {
           target_extent,
           cluster_depth,
         ),
-      )?),
+      ),
     }
   }
 }

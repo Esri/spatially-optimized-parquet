@@ -27,22 +27,7 @@ use super::{GeometryError, QuantizedGeometry};
 
 type Result<T> = std::result::Result<T, GeometryError>;
 
-#[derive(Clone, PartialEq, Message)]
-pub(crate) struct PbfGeometry {
-  #[prost(uint32, repeated, tag = "2")]
-  pub(crate) lengths: Vec<u32>,
-  #[prost(sint64, repeated, tag = "3")]
-  pub(crate) coords: Vec<i64>,
-}
-
-impl PbfGeometry {
-  /// Decode one Esri PBF geometry payload through the writer's wire schema.
-  pub(crate) fn from_bytes(bytes: &[u8]) -> Result<Self> {
-    Self::decode(bytes).map_err(|error| GeometryError::Pbf(error.to_string()))
-  }
-}
-
-/// Builds a BinaryArray containing one Esri PBF payload per geometry row.
+/// Owns reusable message and byte storage for writing PBF rows into an Arrow binary array.
 pub(crate) struct PbfArrayBuilder {
   builder: BinaryBuilder,
   message: PbfGeometry,
@@ -92,6 +77,21 @@ impl PbfArrayBuilder {
   }
 }
 
+#[derive(Clone, PartialEq, Message)]
+pub(crate) struct PbfGeometry {
+  #[prost(uint32, repeated, tag = "2")]
+  pub(crate) lengths: Vec<u32>,
+  #[prost(sint64, repeated, tag = "3")]
+  pub(crate) coords: Vec<i64>,
+}
+
+impl PbfGeometry {
+  /// Decode one Esri PBF geometry payload through the writer's wire schema.
+  pub(crate) fn from_bytes(bytes: &[u8]) -> Result<Self> {
+    Self::decode(bytes).map_err(|error| GeometryError::Pbf(error.to_string()))
+  }
+}
+
 /// Delta encode XY within each part, leaving Z/M absolute per spec/display-optimization.md, Encoding.
 fn encode_deltas_xy(coords: &mut [i64], lengths: &[u32], has_z: bool, has_m: bool) {
   let stride = 2 + usize::from(has_z) + usize::from(has_m);
@@ -135,84 +135,137 @@ mod tests {
     coords: Vec<i64>,
   }
 
-  #[test]
-  fn encodes_quantized_geometry() {
-    let geometry = QuantizedGeometry {
-      ty: crate::geometry::GeometryType::LineString,
-      coordinates: vec![0, 0, 1, 0, 1, 1, 0, 0],
-      lengths: vec![4],
-      polygon_ring_counts: Vec::new(),
-      has_z: false,
-      has_m: false,
-    };
-    let mut builder = PbfArrayBuilder::new(1);
-    builder.append(&geometry).unwrap();
-    let array = builder.finish();
-    let array = array
-      .as_any()
-      .downcast_ref::<arrow_array::BinaryArray>()
+  mod encode {
+    use super::*;
+
+    #[test]
+    fn encodes_quantized_geometry() {
+      let geometry = QuantizedGeometry {
+        ty: crate::geometry::GeometryType::LineString,
+        coordinates: vec![0, 0, 1, 0, 1, 1, 0, 0],
+        lengths: vec![4],
+        polygon_ring_counts: Vec::new(),
+        has_z: false,
+        has_m: false,
+      };
+      let mut builder = PbfArrayBuilder::new(1);
+      builder.append(&geometry).unwrap();
+      let array = builder.finish();
+      let array = array
+        .as_any()
+        .downcast_ref::<arrow_array::BinaryArray>()
+        .unwrap();
+      let decoded = PbfGeometry::from_bytes(array.value(0)).unwrap();
+      let esri_decoded = EsriPbfGeometry::decode(array.value(0)).unwrap();
+      assert_eq!(decoded.lengths, vec![4]);
+      assert_eq!(decoded.coords.len(), 8);
+      assert_eq!(esri_decoded.lengths, vec![4]);
+      assert_eq!(esri_decoded.coords.len(), 8);
+    }
+
+    #[test]
+    fn quantizes_xy_from_xyz_input() {
+      let geometry = Geometry::new(
+        GeometryType::LineString,
+        vec![
+          Coord {
+            x: 1.0,
+            y: 2.0,
+            z: Some(30.0),
+            m: None,
+          },
+          Coord {
+            x: 4.0,
+            y: 5.0,
+            z: Some(60.0),
+            m: None,
+          },
+        ],
+        vec![2],
+        Vec::new(),
+      )
       .unwrap();
-    let decoded = PbfGeometry::from_bytes(array.value(0)).unwrap();
-    let esri_decoded = EsriPbfGeometry::decode(array.value(0)).unwrap();
-    assert_eq!(decoded.lengths, vec![4]);
-    assert_eq!(decoded.coords.len(), 8);
-    assert_eq!(esri_decoded.lengths, vec![4]);
-    assert_eq!(esri_decoded.coords.len(), 8);
-  }
-
-  #[test]
-  fn quantizes_xy_from_xyz_input() {
-    let geometry = Geometry::new(
-      GeometryType::LineString,
-      vec![
-        Coord {
-          x: 1.0,
-          y: 2.0,
-          z: Some(30.0),
-          m: None,
+      let options = QuantizationOptions {
+        transform: QuantizationTransform {
+          scale: [1.0; 4],
+          translate: [0.0; 4],
         },
-        Coord {
-          x: 4.0,
-          y: 5.0,
-          z: Some(60.0),
-          m: None,
-        },
-      ],
-      vec![2],
-      Vec::new(),
-    )
-    .unwrap();
-    let options = QuantizationOptions {
-      transform: QuantizationTransform {
-        scale: [1.0; 4],
-        translate: [0.0; 4],
-      },
-      tolerance: 1.0,
-      min_length: 2,
-      has_z: false,
-      has_m: false,
-    };
-    let mut quantized = QuantizedGeometry::default();
+        tolerance: 1.0,
+        min_length: 2,
+        has_z: false,
+        has_m: false,
+      };
+      let mut quantized = QuantizedGeometry::default();
 
-    quantize_into(&geometry, &options, &mut quantized).unwrap();
+      quantize_into(&geometry, &options, &mut quantized).unwrap();
 
-    assert_eq!(quantized.lengths, [2]);
-    assert_eq!(quantized.coordinates, [1, 2, 4, 5]);
-    assert!(!quantized.has_z);
-    assert!(!quantized.has_m);
+      assert_eq!(quantized.lengths, [2]);
+      assert_eq!(quantized.coordinates, [1, 2, 4, 5]);
+      assert!(!quantized.has_z);
+      assert!(!quantized.has_m);
 
-    let mut builder = PbfArrayBuilder::new(1);
-    builder.append(&quantized).unwrap();
-    let array = builder.finish();
-    let array = array
-      .as_any()
-      .downcast_ref::<arrow_array::BinaryArray>()
-      .unwrap();
-    let decoded = PbfGeometry::from_bytes(array.value(0)).unwrap();
+      let mut builder = PbfArrayBuilder::new(1);
+      builder.append(&quantized).unwrap();
+      let array = builder.finish();
+      let array = array
+        .as_any()
+        .downcast_ref::<arrow_array::BinaryArray>()
+        .unwrap();
+      let decoded = PbfGeometry::from_bytes(array.value(0)).unwrap();
 
-    assert_eq!(decoded.lengths, [2]);
-    assert_eq!(decoded.coords, [1, 2, 3, 3]);
-    assert_eq!(quantized.coordinates, [1, 2, 4, 5]);
+      assert_eq!(decoded.lengths, [2]);
+      assert_eq!(decoded.coords, [1, 2, 3, 3]);
+      assert_eq!(quantized.coordinates, [1, 2, 4, 5]);
+    }
+
+    #[test]
+    fn reuses_message_buffers_across_layouts_and_null_rows() {
+      use arrow_array::Array;
+
+      let geometry = QuantizedGeometry {
+        ty: GeometryType::MultiLineString,
+        coordinates: vec![10, 20, 30, 40, 12, 23, 31, 41, 100, 200, 300, 400],
+        lengths: vec![2, 1],
+        polygon_ring_counts: vec![],
+        has_z: true,
+        has_m: true,
+      };
+      let xy = QuantizedGeometry {
+        ty: GeometryType::LineString,
+        coordinates: vec![4, 5, 7, 9],
+        lengths: vec![2],
+        polygon_ring_counts: vec![],
+        has_z: false,
+        has_m: false,
+      };
+      let mut builder = PbfArrayBuilder::new(3);
+
+      builder.append(&geometry).unwrap();
+      builder.append_null();
+      builder.append(&xy).unwrap();
+      let array = builder.finish();
+      let array = array
+        .as_any()
+        .downcast_ref::<arrow_array::BinaryArray>()
+        .unwrap();
+
+      assert_eq!(array.len(), 3);
+      let first = PbfGeometry::from_bytes(array.value(0)).unwrap();
+      assert_eq!(first.lengths, [2, 1]);
+      assert_eq!(
+        first.coords,
+        [10, 20, 30, 40, 2, 3, 31, 41, 100, 200, 300, 400]
+      );
+      assert!(array.is_null(1));
+      let last = PbfGeometry::from_bytes(array.value(2)).unwrap();
+      assert_eq!(last.lengths, [2]);
+      assert_eq!(last.coords, [4, 5, 3, 4]);
+      assert_eq!(
+        geometry.coordinates,
+        [10, 20, 30, 40, 12, 23, 31, 41, 100, 200, 300, 400]
+      );
+      assert_eq!(xy.coordinates, [4, 5, 7, 9]);
+    }
   }
 
   mod delta {

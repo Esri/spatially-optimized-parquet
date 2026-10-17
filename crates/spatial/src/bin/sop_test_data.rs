@@ -128,6 +128,7 @@ enum CoordinateLayout {
 impl CoordinateLayout {
   const ALL: [Self; 4] = [Self::Xy, Self::Xyz, Self::Xym, Self::Xyzm];
 
+  /// Return the lowercase XY/XYZ/XYM/XYZM layout suffix used in fixture filenames.
   fn suffix(self) -> &'static str {
     match self {
       Self::Xy => "xy",
@@ -137,6 +138,7 @@ impl CoordinateLayout {
     }
   }
 
+  /// Return the GeoParquet geometry-type suffix for this coordinate layout.
   fn geometry_suffix(self) -> &'static str {
     match self {
       Self::Xy => "",
@@ -146,18 +148,22 @@ impl CoordinateLayout {
     }
   }
 
+  /// Determine whether this fixture layout includes a Z component.
   fn has_z(self) -> bool {
     matches!(self, Self::Xyz | Self::Xyzm)
   }
 
+  /// Determine whether this fixture layout includes an M component.
   fn has_m(self) -> bool {
     matches!(self, Self::Xym | Self::Xyzm)
   }
 
+  /// Count the XY and optional Z/M components encoded for each fixture vertex.
   fn stride(self) -> usize {
     2 + usize::from(self.has_z()) + usize::from(self.has_m())
   }
 
+  /// Attach deterministic Z/M values to fixture longitude and latitude.
   fn coordinate(self, index: usize, longitude: f64, latitude: f64) -> Coordinate {
     (
       longitude,
@@ -188,6 +194,7 @@ impl FixtureGeometry {
     Self::MultiPolygon,
   ];
 
+  /// Return the lowercase geometry name used in fixture filenames.
   fn name(self) -> &'static str {
     match self {
       Self::Point => "point",
@@ -199,6 +206,7 @@ impl FixtureGeometry {
     }
   }
 
+  /// Build the GeoParquet geometry declaration with its coordinate-layout suffix.
   fn geoparquet_type(self, layout: CoordinateLayout) -> String {
     let geometry_type = match self {
       Self::Point => "Point",
@@ -211,6 +219,7 @@ impl FixtureGeometry {
     format!("{geometry_type}{}", layout.geometry_suffix())
   }
 
+  /// Select line and polygon fixtures that must produce simplified multiscale geometry.
   fn is_complex(self) -> bool {
     matches!(
       self,
@@ -218,6 +227,7 @@ impl FixtureGeometry {
     )
   }
 
+  /// Return the original line or polygon vertex count used to verify simplification.
   fn source_vertex_count(self) -> usize {
     match self {
       Self::LineString | Self::MultiLineString => 6,
@@ -227,6 +237,7 @@ impl FixtureGeometry {
     }
   }
 
+  /// Return the base ISO WKB type before applying the coordinate-layout offset.
   fn wkb_type(self) -> u32 {
     match self {
       Self::Point => 1,
@@ -246,6 +257,7 @@ enum OutputContract {
 }
 
 impl OutputContract {
+  /// Select the output directory associated with the fixture metadata contract.
   fn directory(self) -> &'static str {
     match self {
       Self::Sop => SOP_DIRECTORY,
@@ -262,6 +274,7 @@ struct PbfGeometry {
   coords: Vec<i64>,
 }
 
+/// Regenerate and inspect every geometry-family and coordinate-layout fixture for both contracts.
 fn main() -> Result<()> {
   let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
   let output_root = repository.join(OUTPUT_DIRECTORY);
@@ -279,37 +292,22 @@ fn main() -> Result<()> {
     operation: "create Tokio runtime".to_string(),
     source,
   })?;
-  generate_sop(&runtime, input_directory.path(), &sop_directory)?;
-  generate_geoparquet_extensions(&runtime, input_directory.path(), &extensions_directory)?;
+  generate_family(
+    &runtime,
+    input_directory.path(),
+    &sop_directory,
+    OutputContract::Sop,
+  )?;
+  generate_family(
+    &runtime,
+    input_directory.path(),
+    &extensions_directory,
+    OutputContract::GeoparquetExtensions,
+  )?;
   Ok(())
 }
 
-fn generate_sop(
-  runtime: &tokio::runtime::Runtime,
-  input_directory: &Path,
-  output_directory: &Path,
-) -> Result<()> {
-  generate_family(
-    runtime,
-    input_directory,
-    output_directory,
-    OutputContract::Sop,
-  )
-}
-
-fn generate_geoparquet_extensions(
-  runtime: &tokio::runtime::Runtime,
-  input_directory: &Path,
-  output_directory: &Path,
-) -> Result<()> {
-  generate_family(
-    runtime,
-    input_directory,
-    output_directory,
-    OutputContract::GeoparquetExtensions,
-  )
-}
-
+/// Write, optimize, inspect, and print each fixture under one output metadata contract.
 fn generate_family(
   runtime: &tokio::runtime::Runtime,
   input_directory: &Path,
@@ -330,6 +328,7 @@ fn generate_family(
   Ok(())
 }
 
+/// Replace an existing fixture output directory with an empty directory.
 fn reset_directory(path: &Path) -> Result<()> {
   if path.exists() {
     fs::remove_dir_all(path).map_err(|source| FixtureError::Io {
@@ -343,6 +342,7 @@ fn reset_directory(path: &Path) -> Result<()> {
   })
 }
 
+/// Write one named WKB feature with metadata matching its geometry family and layout.
 fn write_input_fixture(
   path: &Path,
   geometry: FixtureGeometry,
@@ -375,6 +375,7 @@ fn write_input_fixture(
   )
 }
 
+/// Run the optimized writer with the selected SOP or GeoParquet-extension metadata contract.
 fn optimize_fixture(
   runtime: &tokio::runtime::Runtime,
   input: &Path,
@@ -410,6 +411,7 @@ fn optimize_fixture(
   Ok(())
 }
 
+/// Validate fixture metadata, row count, WKB layout, and display geometry invariants.
 fn inspect_fixture(
   path: &Path,
   geometry: FixtureGeometry,
@@ -473,6 +475,7 @@ fn inspect_fixture(
   Ok(())
 }
 
+/// Require a little-endian source WKB type matching the fixture geometry and coordinate layout.
 fn inspect_wkb_layout(
   batches: &[RecordBatch],
   geometry: FixtureGeometry,
@@ -506,6 +509,7 @@ fn inspect_wkb_layout(
   Ok(())
 }
 
+/// Borrow one value from any supported Arrow binary representation.
 fn binary_value(array: &dyn Array, index: usize) -> Option<&[u8]> {
   if let Some(array) = array.as_any().downcast_ref::<BinaryArray>() {
     return Some(array.value(index));
@@ -519,6 +523,7 @@ fn binary_value(array: &dyn Array, index: usize) -> Option<&[u8]> {
   None
 }
 
+/// Require SOP dimension flags to match the fixture's optional Z/M components.
 fn inspect_sop_metadata(
   path: &Path,
   metadata: &HashMap<String, String>,
@@ -538,6 +543,7 @@ fn inspect_sop_metadata(
   Ok(())
 }
 
+/// Require draft ordering and applicable LOD metadata without an SOP geodisplay entry.
 fn inspect_geoparquet_extension_metadata(
   path: &Path,
   metadata: &HashMap<String, String>,
@@ -562,6 +568,7 @@ fn inspect_geoparquet_extension_metadata(
   Ok(())
 }
 
+/// Require generated point Z/M child columns to match the fixture coordinate layout.
 fn inspect_point_components(
   batches: &[RecordBatch],
   layout: CoordinateLayout,
@@ -578,6 +585,7 @@ fn inspect_point_components(
   Ok(())
 }
 
+/// Validate every PBF coordinate stride and require at least one reduced-detail vertex count.
 fn inspect_simplification(
   batches: &[RecordBatch],
   geometry: FixtureGeometry,
@@ -629,6 +637,7 @@ fn inspect_simplification(
   Ok(())
 }
 
+/// Encode the selected Redlands fixture geometry with deterministic optional Z/M values.
 fn fixture_geometry(geometry: FixtureGeometry, layout: CoordinateLayout) -> Vec<u8> {
   match geometry {
     FixtureGeometry::Point => {
@@ -653,6 +662,7 @@ fn fixture_geometry(geometry: FixtureGeometry, layout: CoordinateLayout) -> Vec<
   }
 }
 
+/// Build six offset line vertices whose bends exercise multiscale simplification.
 fn redlands_line_string(layout: CoordinateLayout) -> Vec<Coordinate> {
   [
     (0.000, 0.000),
@@ -670,11 +680,13 @@ fn redlands_line_string(layout: CoordinateLayout) -> Vec<Coordinate> {
   .collect()
 }
 
+/// Split the six-vertex fixture line into two three-vertex line strings.
 fn redlands_multi_line_string(layout: CoordinateLayout) -> Vec<Vec<Coordinate>> {
   let line = redlands_line_string(layout);
   vec![line[..3].to_vec(), line[3..].to_vec()]
 }
 
+/// Build a polygon with a hole and a separate second exterior ring.
 fn redlands_multi_polygon(layout: CoordinateLayout) -> Vec<Vec<Vec<Coordinate>>> {
   vec![
     redlands_polygon(layout),
@@ -692,6 +704,7 @@ fn redlands_multi_polygon(layout: CoordinateLayout) -> Vec<Vec<Vec<Coordinate>>>
   ]
 }
 
+/// Build closed exterior and interior fixture rings with distinct Z/M index ranges.
 fn redlands_polygon(layout: CoordinateLayout) -> Vec<Vec<Coordinate>> {
   vec![
     offset_ring(
@@ -719,6 +732,7 @@ fn redlands_polygon(layout: CoordinateLayout) -> Vec<Vec<Coordinate>> {
   ]
 }
 
+/// Offset the Redlands origin and attach layout-specific deterministic Z/M components.
 fn offset_coordinate(
   layout: CoordinateLayout,
   index: usize,
@@ -732,6 +746,7 @@ fn offset_coordinate(
   )
 }
 
+/// Build an offset ring while continuing deterministic Z/M indices from the supplied offset.
 fn offset_ring(
   layout: CoordinateLayout,
   index_offset: usize,
@@ -751,6 +766,7 @@ fn offset_ring(
     .collect()
 }
 
+/// Encode one little-endian XY, XYZ, XYM, or XYZM fixture point.
 fn encode_point(x: f64, y: f64, z: Option<f64>, m: Option<f64>) -> Vec<u8> {
   let mut output = Vec::with_capacity(37);
   write_header(&mut output, geometry_type(1, z.is_some(), m.is_some()));
@@ -758,6 +774,7 @@ fn encode_point(x: f64, y: f64, z: Option<f64>, m: Option<f64>) -> Vec<u8> {
   output
 }
 
+/// Encode fixture points with shared layout flags and individual WKB point headers.
 fn encode_multi_point(coordinates: &[Coordinate]) -> Vec<u8> {
   let (has_z, has_m) = dimensions(coordinates);
   let mut output = Vec::new();
@@ -770,6 +787,7 @@ fn encode_multi_point(coordinates: &[Coordinate]) -> Vec<u8> {
   output
 }
 
+/// Encode fixture line vertices with layout flags inferred from their optional Z/M components.
 fn encode_line_string(coordinates: &[Coordinate]) -> Vec<u8> {
   let (has_z, has_m) = dimensions(coordinates);
   let mut output = Vec::new();
@@ -781,13 +799,9 @@ fn encode_line_string(coordinates: &[Coordinate]) -> Vec<u8> {
   output
 }
 
+/// Encode fixture line parts with shared layout flags and individual WKB line headers.
 fn encode_multi_line_string(lines: &[Vec<Coordinate>]) -> Vec<u8> {
-  let coordinates = lines
-    .iter()
-    .flat_map(|line| line.iter())
-    .copied()
-    .collect::<Vec<_>>();
-  let (has_z, has_m) = dimensions(&coordinates);
+  let (has_z, has_m) = part_dimensions(lines);
   let mut output = Vec::new();
   write_header(&mut output, geometry_type(5, has_z, has_m));
   write_count(&mut output, lines.len());
@@ -801,13 +815,9 @@ fn encode_multi_line_string(lines: &[Vec<Coordinate>]) -> Vec<u8> {
   output
 }
 
+/// Encode fixture polygon rings without altering their closure or winding.
 fn encode_polygon(rings: &[Vec<Coordinate>]) -> Vec<u8> {
-  let coordinates = rings
-    .iter()
-    .flat_map(|ring| ring.iter())
-    .copied()
-    .collect::<Vec<_>>();
-  let (has_z, has_m) = dimensions(&coordinates);
+  let (has_z, has_m) = part_dimensions(rings);
   let mut output = Vec::new();
   write_header(&mut output, geometry_type(3, has_z, has_m));
   write_count(&mut output, rings.len());
@@ -820,14 +830,15 @@ fn encode_polygon(rings: &[Vec<Coordinate>]) -> Vec<u8> {
   output
 }
 
+/// Encode fixture polygons with shared layout flags and individual WKB polygon headers.
 fn encode_multi_polygon(polygons: &[Vec<Vec<Coordinate>>]) -> Vec<u8> {
-  let coordinates = polygons
-    .iter()
-    .flat_map(|polygon| polygon.iter())
-    .flat_map(|ring| ring.iter())
-    .copied()
-    .collect::<Vec<_>>();
-  let (has_z, has_m) = dimensions(&coordinates);
+  let mut has_z = false;
+  let mut has_m = false;
+  for polygon in polygons {
+    let (polygon_has_z, polygon_has_m) = part_dimensions(polygon);
+    has_z |= polygon_has_z;
+    has_m |= polygon_has_m;
+  }
   let mut output = Vec::new();
   write_header(&mut output, geometry_type(6, has_z, has_m));
   write_count(&mut output, polygons.len());
@@ -844,11 +855,13 @@ fn encode_multi_polygon(polygons: &[Vec<Vec<Coordinate>>]) -> Vec<u8> {
   output
 }
 
+/// Append the little-endian marker and ISO WKB geometry type.
 fn write_header(output: &mut Vec<u8>, geometry_type: u32) {
   output.push(1);
   output.extend_from_slice(&geometry_type.to_le_bytes());
 }
 
+/// Append a part or vertex count after requiring it to fit UInt32.
 fn write_count(output: &mut Vec<u8>, count: usize) {
   output.extend_from_slice(
     &u32::try_from(count)
@@ -857,6 +870,7 @@ fn write_count(output: &mut Vec<u8>, count: usize) {
   );
 }
 
+/// Append XY followed by present Z/M components without filling absent values.
 fn write_coordinate(output: &mut Vec<u8>, coordinate: Coordinate) {
   output.extend_from_slice(&coordinate.0.to_le_bytes());
   output.extend_from_slice(&coordinate.1.to_le_bytes());
@@ -868,6 +882,19 @@ fn write_coordinate(output: &mut Vec<u8>, coordinate: Coordinate) {
   }
 }
 
+/// Detect shared Z/M layout flags across line parts or polygon rings without copying vertices.
+fn part_dimensions(parts: &[Vec<Coordinate>]) -> (bool, bool) {
+  let mut has_z = false;
+  let mut has_m = false;
+  for part in parts {
+    let (part_has_z, part_has_m) = dimensions(part);
+    has_z |= part_has_z;
+    has_m |= part_has_m;
+  }
+  (has_z, has_m)
+}
+
+/// Detect whether any source coordinate supplies a Z component or an M component.
 fn dimensions(coordinates: &[Coordinate]) -> (bool, bool) {
   (
     coordinates.iter().any(|coordinate| coordinate.2.is_some()),
@@ -875,6 +902,7 @@ fn dimensions(coordinates: &[Coordinate]) -> (bool, bool) {
   )
 }
 
+/// Apply the ISO WKB type offset for XY, XYZ, XYM, or XYZM layout.
 fn geometry_type(base_type: u32, has_z: bool, has_m: bool) -> u32 {
   base_type
     + match (has_z, has_m) {
@@ -885,6 +913,7 @@ fn geometry_type(base_type: u32, has_z: bool, has_m: bool) -> u32 {
     }
 }
 
+/// Write Snappy-compressed fixture batches and append the supplied footer metadata.
 fn write_parquet(
   path: &Path,
   schema: &SchemaRef,
@@ -924,6 +953,7 @@ fn write_parquet(
   Ok(())
 }
 
+/// Build WGS 84 GeoParquet WKB metadata for the supplied geometry declaration.
 fn geoparquet_metadata(primary_column: &str, geometry_types: &[&str]) -> Result<KeyValue> {
   let crs = SpatialRef::from_epsg(4326)
     .map_err(|source| FixtureError::Gdal {
@@ -953,6 +983,7 @@ fn geoparquet_metadata(primary_column: &str, geometry_types: &[&str]) -> Result<
   Ok(KeyValue::new("geo".to_string(), Some(value.to_string())))
 }
 
+/// Read valued footer entries into a map while retaining the last entry for repeated keys.
 fn parquet_metadata(path: &Path) -> Result<HashMap<String, String>> {
   let metadata = ArrowReaderMetadata::load(
     &File::open(path).map_err(|source| FixtureError::Io {
@@ -965,23 +996,21 @@ fn parquet_metadata(path: &Path) -> Result<HashMap<String, String>> {
     operation: format!("read metadata from {}", path.display()),
     source,
   })?;
-  Ok(
-    metadata
-      .metadata()
-      .file_metadata()
-      .key_value_metadata()
-      .map_or(&[][..], |items| items.as_slice())
-      .iter()
-      .filter_map(|entry| {
-        entry
-          .value
-          .as_ref()
-          .map(|value| (entry.key.clone(), value.clone()))
-      })
-      .collect(),
-  )
+  let entries = metadata
+    .metadata()
+    .file_metadata()
+    .key_value_metadata()
+    .map_or(&[][..], Vec::as_slice);
+  let mut values = HashMap::new();
+  for entry in entries {
+    if let Some(value) = &entry.value {
+      values.insert(entry.key.clone(), value.clone());
+    }
+  }
+  Ok(values)
 }
 
+/// Read every fixture record batch while retaining contextual file and decoding errors.
 fn read_batches(path: &Path) -> Result<Vec<RecordBatch>> {
   ParquetRecordBatchReaderBuilder::try_new(File::open(path).map_err(|source| FixtureError::Io {
     operation: format!("open {}", path.display()),

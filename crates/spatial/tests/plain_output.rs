@@ -35,10 +35,6 @@ use common::parquet::{
   geoparquet_kv, geoparquet_kv_with_epsg, kv_map, reader_metadata, scan_parquet, write_parquet,
 };
 
-fn runtime() -> Runtime {
-  Runtime::new().unwrap()
-}
-
 #[test]
 fn plain_output_preserves_wkb_rows_and_passthrough_metadata() {
   let temp = TempDir::new().unwrap();
@@ -494,4 +490,9 @@ fn plain_output_rejects_partition_count() {
       .to_string()
       .contains("plain GeoParquet output does not support --partitions")
   );
+}
+
+/// Create the Tokio runtime used to execute plain writes and scan assertions.
+fn runtime() -> Runtime {
+  Runtime::new().unwrap()
 }

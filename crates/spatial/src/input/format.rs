@@ -36,29 +36,6 @@ pub enum SourceFormat {
   Parquet,
 }
 
-impl FromStr for SourceFormat {
-  type Err = InputError;
-
-  fn from_str(value: &str) -> Result<Self, InputError> {
-    match value.to_ascii_lowercase().as_str() {
-      "gpkg" | "geopackage" => Ok(Self::GeoPackage),
-      "parquet" | "geoparquet" => Ok(Self::Parquet),
-      _ => Err(InputError::Format(format!(
-        "unsupported input format '{value}'; expected gpkg or parquet"
-      ))),
-    }
-  }
-}
-
-impl fmt::Display for SourceFormat {
-  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-    formatter.write_str(match self {
-      Self::GeoPackage => "gpkg",
-      Self::Parquet => "parquet",
-    })
-  }
-}
-
 impl SourceFormat {
   /// Resolve an input format from an override, directory, local extension, or URL path.
   pub(crate) fn resolve(location: &str, explicit_format: Option<Self>) -> Result<Self, InputError> {
@@ -88,6 +65,31 @@ impl SourceFormat {
         "unable to determine input format for '{location}'; pass --input-format gpkg or --input-format parquet"
       ))),
     }
+  }
+}
+
+impl FromStr for SourceFormat {
+  type Err = InputError;
+
+  /// Parse a supported source-format name without regard to case.
+  fn from_str(value: &str) -> Result<Self, InputError> {
+    match value.to_ascii_lowercase().as_str() {
+      "gpkg" | "geopackage" => Ok(Self::GeoPackage),
+      "parquet" | "geoparquet" => Ok(Self::Parquet),
+      _ => Err(InputError::Format(format!(
+        "unsupported input format '{value}'; expected gpkg or parquet"
+      ))),
+    }
+  }
+}
+
+impl fmt::Display for SourceFormat {
+  /// Write the canonical CLI name for this source format.
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    formatter.write_str(match self {
+      Self::GeoPackage => "gpkg",
+      Self::Parquet => "parquet",
+    })
   }
 }
 

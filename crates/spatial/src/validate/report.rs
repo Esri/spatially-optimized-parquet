@@ -25,6 +25,7 @@ pub enum ValidationSeverity {
 }
 
 impl fmt::Display for ValidationSeverity {
+  /// Render the lowercase severity label used in validation output.
   fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
       Self::Error => formatter.write_str("error"),
@@ -143,6 +144,7 @@ impl ValidationRule {
 }
 
 impl fmt::Display for ValidationRule {
+  /// Render the rule's stable SOP identifier.
   fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
     formatter.write_str(self.id())
   }
@@ -158,6 +160,7 @@ pub struct ValidationLocation {
 }
 
 impl ValidationLocation {
+  /// Locate a finding within one dataset-relative file.
   pub(crate) fn file(path: impl Into<PathBuf>) -> Self {
     Self {
       file: Some(path.into()),
@@ -165,16 +168,19 @@ impl ValidationLocation {
     }
   }
 
+  /// Attach the zero-based row-group index to this finding location.
   pub(crate) fn with_row_group(mut self, row_group: usize) -> Self {
     self.row_group = Some(row_group);
     self
   }
 
+  /// Attach the zero-based row index within its row group.
   pub(crate) fn with_row(mut self, row: u64) -> Self {
     self.row = Some(row);
     self
   }
 
+  /// Attach an Arrow or metadata column path to this finding location.
   pub(crate) fn with_column(mut self, column: impl Into<String>) -> Self {
     self.column = Some(column.into());
     self
@@ -202,6 +208,7 @@ impl ValidationLocation {
 }
 
 impl fmt::Display for ValidationLocation {
+  /// Render available location components in file, row-group, row, and column order.
   fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
     let mut wrote_value = false;
     if let Some(file) = &self.file {
@@ -242,6 +249,7 @@ pub struct ValidationFinding {
 }
 
 impl ValidationFinding {
+  /// Build a finding from its stable rule, severity, location, and contextual message.
   pub(crate) fn new(
     rule: ValidationRule,
     severity: ValidationSeverity,
@@ -285,6 +293,7 @@ pub struct ValidationReport {
 }
 
 impl ValidationReport {
+  /// Initialize an empty report for the supplied dataset path.
   pub(crate) fn new(dataset_path: PathBuf) -> Self {
     Self {
       dataset_path,
@@ -292,6 +301,7 @@ impl ValidationReport {
     }
   }
 
+  /// Append a finding without changing the order of existing findings.
   pub(crate) fn push(
     &mut self,
     rule: ValidationRule,
@@ -304,6 +314,7 @@ impl ValidationReport {
       .push(ValidationFinding::new(rule, severity, location, message));
   }
 
+  /// Order findings deterministically by severity, location, rule, and message.
   pub(crate) fn sort_findings(&mut self) {
     self.findings.sort_by(|left, right| {
       (
@@ -371,6 +382,7 @@ impl ValidationReport {
 }
 
 impl fmt::Display for ValidationReport {
+  /// Render dataset validity, finding counts, and each contextual finding.
   fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
     let status = if self.has_errors() {
       "invalid"
@@ -415,6 +427,7 @@ impl ValidationFailure {
 }
 
 impl fmt::Display for ValidationFailure {
+  /// Render the complete report that caused dataset validation to fail.
   fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
     self.report.fmt(formatter)
   }

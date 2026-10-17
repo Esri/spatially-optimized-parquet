@@ -39,7 +39,7 @@ pub(crate) struct MultiscaleLevel {
   pub(crate) resolution: f64,
   /// Defines the map scale denominator at this level.
   pub(crate) scale: f64,
-  /// Provides the quantization transform applied before Esri PBF encoding.
+  /// Provides the XY, XYZ, XYM, or XYZM transform applied before payload encoding.
   pub(crate) transform: QuantizationTransform,
   /// Defines the minimum retained vertex count for the geometry family.
   pub(crate) min_length: usize,
@@ -78,6 +78,7 @@ impl MultiscaleLevel {
     levels
   }
 
+  /// Resolve the minimum retained part length for one geometry family.
   fn min_vertex_count(geometry_type: GeometryFamily) -> usize {
     match geometry_type {
       GeometryFamily::MultiPoint | GeometryFamily::Point => 1,

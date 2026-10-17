@@ -98,6 +98,7 @@ pub struct SpatialPipelineOptions {
 }
 
 impl Default for SpatialPipelineOptions {
+  /// Build an unconfigured request with default input, output, and execution settings.
   fn default() -> Self {
     Self {
       input: InputOptions::default(),
@@ -134,6 +135,7 @@ pub struct InputOptions {
 }
 
 impl Default for InputOptions {
+  /// Build input settings that select every row without metadata overrides.
   fn default() -> Self {
     Self {
       location: String::new(),
@@ -187,6 +189,7 @@ pub struct OutputOptions {
 }
 
 impl Default for OutputOptions {
+  /// Build optimized-output settings without enabling overwrite or dimension stripping.
   fn default() -> Self {
     Self {
       path: PathBuf::new(),
@@ -255,6 +258,7 @@ impl Pipeline {
     Self::new(options).await?.execute().await
   }
 
+  /// Validate the request, open its source and destination, and select the output writer.
   async fn new(options: SpatialPipelineOptions) -> Result<Self, PipelineError> {
     let SpatialPipelineOptions {
       input: input_options,
@@ -332,6 +336,7 @@ impl Pipeline {
     }
   }
 
+  /// Dispatch prepared state to the selected GeoParquet writer.
   async fn execute(self) -> Result<SpatialPipelineResult, PipelineError> {
     match self.0 {
       PipelineExecution::Plain(state) => Self::write_plain(state).await,
@@ -342,6 +347,7 @@ impl Pipeline {
     }
   }
 
+  /// Write one plain GeoParquet file from the resolved spatial context.
   async fn write_plain(
     state: SpatialPipelineState,
   ) -> Result<SpatialPipelineResult, PipelineError> {
@@ -359,6 +365,7 @@ impl Pipeline {
     Ok(state.finish(rows_written))
   }
 
+  /// Write one optimized GeoParquet file using the resolved layout.
   async fn write_optimized_single(
     state: SpatialPipelineState,
   ) -> Result<SpatialPipelineResult, PipelineError> {
@@ -379,6 +386,7 @@ impl Pipeline {
     Ok(state.finish(rows_written))
   }
 
+  /// Write optimized GeoParquet partitions using the shared spatial layout.
   async fn write_optimized_partitioned(
     state: SpatialPipelineState,
   ) -> Result<SpatialPipelineResult, PipelineError> {
@@ -399,6 +407,7 @@ impl Pipeline {
     Ok(state.finish(rows_written))
   }
 
+  /// Resolve geometry, target extent, and coordinate normalization for the selected writer.
   async fn resolve_spatial_write_context(
     state: &SpatialPipelineState,
   ) -> Result<SpatialWriteContext, PipelineError> {
@@ -418,6 +427,7 @@ impl Pipeline {
     .map_err(|error| PipelineError::InvalidRequest(error.to_string()))
   }
 
+  /// Cache explicitly limited input so metadata analysis and writing reuse the same rows.
   async fn prepare_input_dataframe(
     input: &dyn InputSource,
     session: &SessionContext,
@@ -439,6 +449,7 @@ impl Pipeline {
 }
 
 impl SpatialPipelineState {
+  /// Build the final row-count result with deduplicated execution warnings.
   fn finish(&self, rows_written: u64) -> SpatialPipelineResult {
     SpatialPipelineResult::new(self.total_input_rows, rows_written, &self.warnings)
   }

@@ -15,14 +15,11 @@
 use arrow_array::{Array, Float64Array};
 use arrow_schema::DataType;
 
-use crate::geometry::{
-  Extent2D, GeometryFamily, NativeGeometryArrayBuilder, PbfGeometry, WkbCoordinate,
-};
+use crate::geometry::{Coord, Extent2D, GeometryFamily, NativeGeometryArrayBuilder, PbfGeometry};
 use crate::input::parquet::PartitionFamily;
 use crate::optimized::{ClusterKey, GeometryPartRole, GeometryPartSink};
 use crate::optimized::{ClusteringIndexXZ, GeodisplayEncoding};
 
-use super::ValidationError;
 use super::dataset_validator::ClusteringRange;
 use super::file_validator::FileValidator;
 use super::geometry_validator::GeometryValidator;
@@ -34,6 +31,7 @@ const PBF_SEARCH_LIMIT: usize = 512;
 pub(crate) struct XzValidator;
 
 impl XzValidator {
+  /// Validate XZ code fields and multiscale column types for the declared encoding.
   pub(crate) fn validate_schema(
     index: &ClusteringIndexXZ,
     file: &FileValidator,
@@ -81,38 +79,7 @@ impl XzValidator {
     }
   }
 
-  fn validate_field(
-    file: &FileValidator,
-    path: &str,
-    expected_type: &DataType,
-    nullable: Option<bool>,
-    report: &mut ValidationReport,
-  ) {
-    let location =
-      ValidationLocation::file(file.file.relative_path.clone()).with_column(path.to_string());
-    match FileValidator::field_at_path(file.metadata.schema().as_ref(), path) {
-      Some(field)
-        if field.data_type() == expected_type
-          && nullable.is_none_or(|nullable| field.is_nullable() == nullable) => {}
-      Some(field) => report.push(
-        ValidationRule::XzSchema,
-        ValidationSeverity::Error,
-        location,
-        format!(
-          "XZ column must be {expected_type}, found {} with nullable={}",
-          field.data_type(),
-          field.is_nullable()
-        ),
-      ),
-      None => report.push(
-        ValidationRule::XzSchema,
-        ValidationSeverity::Error,
-        location,
-        "required XZ column is missing",
-      ),
-    }
-  }
-
+  /// Validate XZ ordering, bounded multiscale payload samples, and sampled source geometry.
   pub(crate) fn validate_file(
     index: &ClusteringIndexXZ,
     file: &FileValidator,
@@ -120,15 +87,13 @@ impl XzValidator {
     report: &mut ValidationReport,
   ) -> Option<ClusteringRange> {
     let code_path = index.code.dotted();
-    let level_paths = index
-      .levels
-      .iter()
-      .map(|level| level.column.dotted())
-      .collect::<Vec<_>>();
-    let projected_columns = std::iter::once(contract.geometry_column().to_string())
-      .chain(std::iter::once(code_path.clone()))
-      .chain(level_paths.iter().cloned())
-      .collect::<Vec<_>>();
+    let mut level_paths = Vec::with_capacity(index.levels.len());
+    let mut projected_columns = vec![contract.geometry_column().to_string(), code_path.clone()];
+    for level in &index.levels {
+      let path = level.column.dotted();
+      projected_columns.push(path.clone());
+      level_paths.push(path);
+    }
     let mut previous_code = None;
     let mut minimum = None::<u64>;
     let mut maximum = None::<u64>;
@@ -145,10 +110,10 @@ impl XzValidator {
     let read_result = file.read_row_groups(&projected_columns, |row_group, row_offset, batch| {
       let geometry = FileValidator::array_at_path(batch, contract.geometry_column())?;
       let code_values = FileValidator::uint64_array_at_path(batch, &code_path)?;
-      let level_values = level_paths
-        .iter()
-        .map(|path| FileValidator::array_at_path(batch, path))
-        .collect::<Result<Vec<_>, ValidationError>>()?;
+      let mut level_values = Vec::with_capacity(level_paths.len());
+      for path in &level_paths {
+        level_values.push(FileValidator::array_at_path(batch, path)?);
+      }
       let covering_view = CoveringExtentView::from_batch(batch, contract);
 
       for row_index in 0..batch.num_rows() {
@@ -400,25 +365,14 @@ impl XzValidator {
             inspection.extent
           }
         };
-        let Some(feature_extent) = feature_extent else {
-          report.push(
-            ValidationRule::Extent,
-            ValidationSeverity::Error,
-            geometry_location,
-            "unable to resolve sampled feature extent",
-          );
-          continue;
-        };
-        let expected_code =
-          ClusterKey::from_xz_extent(index.full_extent, feature_extent, index.max_level).value();
-        if code != expected_code {
-          report.push(
-            ValidationRule::XzCode,
-            ValidationSeverity::Error,
-            code_location,
-            format!("stored XZ code {code} does not match recomputed code {expected_code}"),
-          );
-        }
+        Self::validate_sampled_code(
+          index,
+          feature_extent,
+          code,
+          code_location,
+          geometry_location,
+          report,
+        );
       }
       Ok(())
     });
@@ -461,6 +415,7 @@ impl XzValidator {
     }
   }
 
+  /// Resolve non-point display geometry families and reject point clustering metadata.
   fn optimized_geometry_type(index: &ClusteringIndexXZ) -> Option<GeometryFamily> {
     match index.geometry_type {
       GeometryFamily::MultiPoint | GeometryFamily::Polyline | GeometryFamily::Polygon => {
@@ -470,252 +425,40 @@ impl XzValidator {
     }
   }
 
-  fn validate_sampled_code(
-    index: &ClusteringIndexXZ,
-    feature_extent: Option<Extent2D>,
-    code: u64,
-    code_location: ValidationLocation,
-    geometry_location: ValidationLocation,
+  /// Require an XZ field with the expected Arrow type and optional nullability constraint.
+  fn validate_field(
+    file: &FileValidator,
+    path: &str,
+    expected_type: &DataType,
+    nullable: Option<bool>,
     report: &mut ValidationReport,
   ) {
-    let Some(feature_extent) = feature_extent else {
-      report.push(
-        ValidationRule::Extent,
+    let location =
+      ValidationLocation::file(file.file.relative_path.clone()).with_column(path.to_string());
+    match FileValidator::field_at_path(file.metadata.schema().as_ref(), path) {
+      Some(field)
+        if field.data_type() == expected_type
+          && nullable.is_none_or(|nullable| field.is_nullable() == nullable) => {}
+      Some(field) => report.push(
+        ValidationRule::XzSchema,
         ValidationSeverity::Error,
-        geometry_location,
-        "unable to resolve sampled feature extent",
-      );
-      return;
-    };
-    let expected_code =
-      ClusterKey::from_xz_extent(index.full_extent, feature_extent, index.max_level).value();
-    if code != expected_code {
-      report.push(
-        ValidationRule::XzCode,
+        location,
+        format!(
+          "XZ column must be {expected_type}, found {} with nullable={}",
+          field.data_type(),
+          field.is_nullable()
+        ),
+      ),
+      None => report.push(
+        ValidationRule::XzSchema,
         ValidationSeverity::Error,
-        code_location,
-        format!("stored XZ code {code} does not match recomputed code {expected_code}"),
-      );
+        location,
+        "required XZ column is missing",
+      ),
     }
   }
 
-  #[allow(clippy::too_many_arguments)]
-  fn validate_pbf_vertex_provenance(
-    wkb: &[u8],
-    geometry_type: GeometryFamily,
-    lengths: &[u32],
-    coords: &[i64],
-    level: &crate::optimized::MultiscaleLevel,
-    has_z: bool,
-    has_m: bool,
-    location: &ValidationLocation,
-    report: &mut ValidationReport,
-  ) {
-    let stride = 2 + usize::from(has_z) + usize::from(has_m);
-    let expected_coordinate_count = lengths
-      .iter()
-      .try_fold(0usize, |total, length| total.checked_add(*length as usize))
-      .and_then(|count| count.checked_mul(stride));
-    if expected_coordinate_count != Some(coords.len()) {
-      return;
-    }
-    let mut collector = CoordinateCollector::default();
-    if geometry_type
-      .visit_wkb_for_display(wkb, &mut collector)
-      .is_err()
-    {
-      return;
-    }
-    let source_coordinates = collector
-      .coordinates
-      .into_iter()
-      .filter_map(|coordinate| {
-        Some((
-          Self::quantized_value(
-            coordinate.x,
-            level.transform.scale[0],
-            level.transform.translate[0],
-          )?,
-          Self::quantized_value(
-            coordinate.y,
-            level.transform.scale[1],
-            level.transform.translate[1],
-          )?,
-          has_z.then(|| {
-            Self::quantized_component(
-              coordinate.z,
-              level.transform.scale[2],
-              level.transform.translate[2],
-            )
-          }),
-          has_m.then(|| {
-            Self::quantized_component(
-              coordinate.m,
-              level.transform.scale[3],
-              level.transform.translate[3],
-            )
-          }),
-        ))
-      })
-      .collect::<Vec<_>>();
-    let mut offset = 0usize;
-    for length in lengths {
-      let mut x = 0i64;
-      let mut y = 0i64;
-      for vertex_index in 0..*length as usize {
-        let encoded_x = coords[offset];
-        let encoded_y = coords[offset + 1];
-        if vertex_index == 0 {
-          x = encoded_x;
-          y = encoded_y;
-        } else {
-          let Some(next_x) = x.checked_add(encoded_x) else {
-            return;
-          };
-          let Some(next_y) = y.checked_add(encoded_y) else {
-            return;
-          };
-          x = next_x;
-          y = next_y;
-        }
-        let mut dimension_offset = 2;
-        let z = has_z.then(|| {
-          let value = coords[offset + dimension_offset];
-          dimension_offset += 1;
-          value
-        });
-        let m = has_m.then(|| coords[offset + dimension_offset]);
-        if !source_coordinates.contains(&(x, y, z, m)) {
-          report.push(
-            ValidationRule::Pbf,
-            ValidationSeverity::Error,
-            location.clone(),
-            "Esri PBF coordinate does not match any quantized source WKB vertex",
-          );
-          return;
-        }
-        offset += stride;
-      }
-    }
-  }
-
-  fn quantized_component(value: Option<f64>, scale: f64, translate: f64) -> i64 {
-    value
-      .filter(|value| value.is_finite())
-      .and_then(|value| Self::quantized_value(value, scale, translate))
-      .unwrap_or(0)
-  }
-
-  fn quantized_value(value: f64, scale: f64, translate: f64) -> Option<i64> {
-    let quantized = ((value - translate) / scale).round();
-    (quantized.is_finite() && quantized >= i64::MIN as f64 && quantized <= i64::MAX as f64)
-      .then_some(quantized as i64)
-  }
-}
-
-#[derive(Default)]
-struct CoordinateCollector {
-  coordinates: Vec<WkbCoordinate>,
-}
-
-impl GeometryPartSink for CoordinateCollector {
-  fn start_part(&mut self, _: GeometryPartRole) {}
-
-  fn push_coord(&mut self, coordinate: WkbCoordinate) {
-    self.coordinates.push(coordinate);
-  }
-
-  fn finish_part(&mut self) {}
-}
-
-struct CoveringExtentView<'array> {
-  xmin: CoveringField<'array>,
-  ymin: CoveringField<'array>,
-  xmax: CoveringField<'array>,
-  ymax: CoveringField<'array>,
-}
-
-struct CoveringField<'array> {
-  array: &'array Float64Array,
-  path: String,
-}
-
-impl<'array> CoveringExtentView<'array> {
-  fn from_batch(
-    batch: &'array arrow_array::RecordBatch,
-    contract: &ValidatedMetadata,
-  ) -> Result<Option<Self>, String> {
-    let Some(column) = contract.geo.columns.get(contract.geometry_column()) else {
-      return Ok(None);
-    };
-    let Some(covering) = &column.covering else {
-      return Ok(None);
-    };
-    let paths = [
-      covering.bbox.xmin.join("."),
-      covering.bbox.ymin.join("."),
-      covering.bbox.xmax.join("."),
-      covering.bbox.ymax.join("."),
-    ];
-    let fields: [Result<CoveringField<'array>, String>; 4] = paths.map(|path| {
-      let array = FileValidator::array_at_path(batch, &path).map_err(|error| error.to_string())?;
-      let array = array
-        .as_any()
-        .downcast_ref::<Float64Array>()
-        .ok_or_else(|| format!("covering field '{path}' is not Float64"))?;
-      Ok(CoveringField { array, path })
-    });
-    let [xmin, ymin, xmax, ymax] = fields;
-    Ok(Some(Self {
-      xmin: xmin?,
-      ymin: ymin?,
-      xmax: xmax?,
-      ymax: ymax?,
-    }))
-  }
-
-  fn resolve(
-    view: &Result<Option<Self>, String>,
-    row_index: usize,
-  ) -> Result<Option<Extent2D>, String> {
-    let view = view.as_ref().map_err(Clone::clone)?;
-    let Some(view) = view else {
-      return Ok(None);
-    };
-    view.extent_at(row_index)
-  }
-
-  fn extent_at(&self, row_index: usize) -> Result<Option<Extent2D>, String> {
-    let values = [&self.xmin, &self.ymin, &self.xmax, &self.ymax];
-    let mut extent_values = [0.0; 4];
-    for (value, extent_value) in values.into_iter().zip(extent_values.iter_mut()) {
-      if value.array.is_null(row_index) {
-        return Err(format!(
-          "covering field '{}' is null for a non-null geometry",
-          value.path
-        ));
-      }
-      *extent_value = value.array.value(row_index);
-    }
-    let extent = Extent2D {
-      xmin: extent_values[0],
-      ymin: extent_values[1],
-      xmax: extent_values[2],
-      ymax: extent_values[3],
-    };
-    if [extent.xmin, extent.ymin, extent.xmax, extent.ymax]
-      .iter()
-      .any(|value| !value.is_finite())
-      || extent.xmin > extent.xmax
-      || extent.ymin > extent.ymax
-    {
-      return Err("covering extent must contain finite ordered bounds".to_string());
-    }
-    Ok(Some(extent))
-  }
-}
-
-impl XzValidator {
+  /// Validate PBF part lengths and XY/XYZ/XYM/XYZM stride against source nullability.
   fn validate_pbf_structure(
     lengths: &[u32],
     coords: &[i64],
@@ -725,14 +468,9 @@ impl XzValidator {
     location: &ValidationLocation,
     report: &mut ValidationReport,
   ) -> bool {
-    let vertex_count = lengths
-      .iter()
-      .try_fold(0usize, |total, length| total.checked_add(*length as usize));
     let stride = 2 + usize::from(has_z) + usize::from(has_m);
     let valid_width = coords.len() % stride == 0;
-    let lengths_match = vertex_count
-      .and_then(|count| count.checked_mul(stride))
-      .is_some_and(|coordinate_count| coordinate_count == coords.len());
+    let lengths_match = Self::pbf_coordinate_count(lengths, stride) == Some(coords.len());
     if !valid_width || !lengths_match || lengths.contains(&0) {
       report.push(
         ValidationRule::Pbf,
@@ -771,6 +509,16 @@ impl XzValidator {
     non_empty
   }
 
+  /// Count encoded PBF components while rejecting overflow in vertex totals or layout stride.
+  fn pbf_coordinate_count(lengths: &[u32], stride: usize) -> Option<usize> {
+    let mut vertex_count = 0usize;
+    for length in lengths {
+      vertex_count = vertex_count.checked_add(*length as usize)?;
+    }
+    vertex_count.checked_mul(stride)
+  }
+
+  /// Decode XY deltas and report overflow or unexpected single-polygon ring winding.
   fn warn_pbf_winding(
     lengths: &[u32],
     coords: &[i64],
@@ -838,6 +586,7 @@ impl XzValidator {
     warned
   }
 
+  /// Compute twice the signed XY ring area in i128 with implicit closure.
   fn signed_area(coordinates: &[(i64, i64)]) -> i128 {
     if coordinates.len() < 3 {
       return 0;
@@ -852,6 +601,244 @@ impl XzValidator {
       twice_area += last.0 as i128 * first.1 as i128 - first.0 as i128 * last.1 as i128;
     }
     twice_area
+  }
+
+  /// Compare an observed XZ code with the code recomputed from a sampled feature extent.
+  fn validate_sampled_code(
+    index: &ClusteringIndexXZ,
+    feature_extent: Option<Extent2D>,
+    code: u64,
+    code_location: ValidationLocation,
+    geometry_location: ValidationLocation,
+    report: &mut ValidationReport,
+  ) {
+    let Some(feature_extent) = feature_extent else {
+      report.push(
+        ValidationRule::Extent,
+        ValidationSeverity::Error,
+        geometry_location,
+        "unable to resolve sampled feature extent",
+      );
+      return;
+    };
+    let expected_code =
+      ClusterKey::from_xz_extent(index.full_extent, feature_extent, index.max_level).value();
+    if code != expected_code {
+      report.push(
+        ValidationRule::XzCode,
+        ValidationSeverity::Error,
+        code_location,
+        format!("stored XZ code {code} does not match recomputed code {expected_code}"),
+      );
+    }
+  }
+
+  /// Require each PBF vertex to match a quantized source XY and any declared Z/M components.
+  #[allow(clippy::too_many_arguments)]
+  fn validate_pbf_vertex_provenance(
+    wkb: &[u8],
+    geometry_type: GeometryFamily,
+    lengths: &[u32],
+    coords: &[i64],
+    level: &crate::optimized::MultiscaleLevel,
+    has_z: bool,
+    has_m: bool,
+    location: &ValidationLocation,
+    report: &mut ValidationReport,
+  ) {
+    let stride = 2 + usize::from(has_z) + usize::from(has_m);
+    let expected_coordinate_count = Self::pbf_coordinate_count(lengths, stride);
+    if expected_coordinate_count != Some(coords.len()) {
+      return;
+    }
+    let mut collector = CoordinateCollector::default();
+    if geometry_type
+      .visit_wkb_for_display(wkb, &mut collector)
+      .is_err()
+    {
+      return;
+    }
+    let mut source_coordinates = Vec::new();
+    let transform = &level.transform;
+    for coordinate in collector.coordinates {
+      let Some(x) = Self::quantized_value(coordinate.x, transform.scale[0], transform.translate[0])
+      else {
+        continue;
+      };
+      let Some(y) = Self::quantized_value(coordinate.y, transform.scale[1], transform.translate[1])
+      else {
+        continue;
+      };
+      let z = has_z.then(|| {
+        Self::quantized_component(coordinate.z, transform.scale[2], transform.translate[2])
+      });
+      let m = has_m.then(|| {
+        Self::quantized_component(coordinate.m, transform.scale[3], transform.translate[3])
+      });
+      source_coordinates.push((x, y, z, m));
+    }
+    let mut offset = 0usize;
+    for length in lengths {
+      let mut x = 0i64;
+      let mut y = 0i64;
+      for vertex_index in 0..*length as usize {
+        let encoded_x = coords[offset];
+        let encoded_y = coords[offset + 1];
+        if vertex_index == 0 {
+          x = encoded_x;
+          y = encoded_y;
+        } else {
+          let Some(next_x) = x.checked_add(encoded_x) else {
+            return;
+          };
+          let Some(next_y) = y.checked_add(encoded_y) else {
+            return;
+          };
+          x = next_x;
+          y = next_y;
+        }
+        let mut dimension_offset = 2;
+        let z = has_z.then(|| {
+          let value = coords[offset + dimension_offset];
+          dimension_offset += 1;
+          value
+        });
+        let m = has_m.then(|| coords[offset + dimension_offset]);
+        if !source_coordinates.contains(&(x, y, z, m)) {
+          report.push(
+            ValidationRule::Pbf,
+            ValidationSeverity::Error,
+            location.clone(),
+            "Esri PBF coordinate does not match any quantized source WKB vertex",
+          );
+          return;
+        }
+        offset += stride;
+      }
+    }
+  }
+
+  /// Quantize an optional Z/M component and zero-fill missing or unrepresentable values.
+  fn quantized_component(value: Option<f64>, scale: f64, translate: f64) -> i64 {
+    value
+      .filter(|value| value.is_finite())
+      .and_then(|value| Self::quantized_value(value, scale, translate))
+      .unwrap_or(0)
+  }
+
+  /// Round a transformed coordinate only when its quantized value fits the finite i64 range.
+  fn quantized_value(value: f64, scale: f64, translate: f64) -> Option<i64> {
+    let quantized = ((value - translate) / scale).round();
+    (quantized.is_finite() && quantized >= i64::MIN as f64 && quantized <= i64::MAX as f64)
+      .then_some(quantized as i64)
+  }
+}
+
+#[derive(Default)]
+struct CoordinateCollector {
+  coordinates: Vec<Coord>,
+}
+
+impl GeometryPartSink for CoordinateCollector {
+  /// Ignore part boundaries while collecting source vertices for provenance checks.
+  fn start_part(&mut self, _: GeometryPartRole) {}
+
+  /// Retain the source XY and optional Z/M components in visitation order.
+  fn push_coord(&mut self, coordinate: Coord) {
+    self.coordinates.push(coordinate);
+  }
+
+  /// Preserve collected vertices when a source geometry part ends.
+  fn finish_part(&mut self) {}
+}
+
+struct CoveringExtentView<'array> {
+  xmin: CoveringField<'array>,
+  ymin: CoveringField<'array>,
+  xmax: CoveringField<'array>,
+  ymax: CoveringField<'array>,
+}
+
+struct CoveringField<'array> {
+  array: &'array Float64Array,
+  path: String,
+}
+
+impl<'array> CoveringExtentView<'array> {
+  /// Resolve optional GeoParquet covering paths into borrowed Float64 arrays.
+  fn from_batch(
+    batch: &'array arrow_array::RecordBatch,
+    contract: &ValidatedMetadata,
+  ) -> Result<Option<Self>, String> {
+    let Some(column) = contract.geo.columns.get(contract.geometry_column()) else {
+      return Ok(None);
+    };
+    let Some(covering) = &column.covering else {
+      return Ok(None);
+    };
+    let paths = [
+      covering.bbox.xmin.join("."),
+      covering.bbox.ymin.join("."),
+      covering.bbox.xmax.join("."),
+      covering.bbox.ymax.join("."),
+    ];
+    let fields: [Result<CoveringField<'array>, String>; 4] = paths.map(|path| {
+      let array = FileValidator::array_at_path(batch, &path).map_err(|error| error.to_string())?;
+      let array = array
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .ok_or_else(|| format!("covering field '{path}' is not Float64"))?;
+      Ok(CoveringField { array, path })
+    });
+    let [xmin, ymin, xmax, ymax] = fields;
+    Ok(Some(Self {
+      xmin: xmin?,
+      ymin: ymin?,
+      xmax: xmax?,
+      ymax: ymax?,
+    }))
+  }
+
+  /// Resolve one row's covering extent while preserving any batch-level path failure.
+  fn resolve(
+    view: &Result<Option<Self>, String>,
+    row_index: usize,
+  ) -> Result<Option<Extent2D>, String> {
+    let view = view.as_ref().map_err(Clone::clone)?;
+    let Some(view) = view else {
+      return Ok(None);
+    };
+    view.extent_at(row_index)
+  }
+
+  /// Read finite ordered XY bounds and reject null covering values for non-null geometry.
+  fn extent_at(&self, row_index: usize) -> Result<Option<Extent2D>, String> {
+    let values = [&self.xmin, &self.ymin, &self.xmax, &self.ymax];
+    let mut extent_values = [0.0; 4];
+    for (value, extent_value) in values.into_iter().zip(extent_values.iter_mut()) {
+      if value.array.is_null(row_index) {
+        return Err(format!(
+          "covering field '{}' is null for a non-null geometry",
+          value.path
+        ));
+      }
+      *extent_value = value.array.value(row_index);
+    }
+    let extent = Extent2D {
+      xmin: extent_values[0],
+      ymin: extent_values[1],
+      xmax: extent_values[2],
+      ymax: extent_values[3],
+    };
+    if [extent.xmin, extent.ymin, extent.xmax, extent.ymax]
+      .iter()
+      .any(|value| !value.is_finite())
+      || extent.xmin > extent.xmax
+      || extent.ymin > extent.ymax
+    {
+      return Err("covering extent must contain finite ordered bounds".to_string());
+    }
+    Ok(Some(extent))
   }
 }
 

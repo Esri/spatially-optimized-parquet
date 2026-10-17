@@ -29,68 +29,6 @@ use tokio::runtime::Runtime;
 use crate::input::{InputOpenOptions, RowRange, SourceFormat, open_input};
 use crate::session::DataFusionSession;
 
-fn runtime() -> Runtime {
-  Runtime::new().unwrap()
-}
-
-fn sample_schema_with_geometry() -> SchemaRef {
-  Arc::new(Schema::new(vec![
-    Field::new("id", DataType::Int32, false),
-    Field::new("geometry", DataType::Binary, true),
-  ]))
-}
-
-fn sample_batch_with_geometry(wkb_values: Vec<Option<Vec<u8>>>) -> RecordBatch {
-  let ids = Int32Array::from_iter_values(1..=wkb_values.len() as i32);
-  let values = wkb_values
-    .iter()
-    .map(|value| value.as_deref())
-    .collect::<Vec<_>>();
-  RecordBatch::try_new(
-    sample_schema_with_geometry(),
-    vec![Arc::new(ids), Arc::new(BinaryArray::from(values))],
-  )
-  .unwrap()
-}
-
-fn write_parquet(
-  path: &Path,
-  schema: &SchemaRef,
-  batches: &[RecordBatch],
-  compression: Compression,
-  metadata: &[KeyValue],
-) {
-  let properties = WriterProperties::builder()
-    .set_compression(compression)
-    .build();
-  let mut writer = ArrowWriter::try_new(
-    File::create(path).unwrap(),
-    schema.clone(),
-    Some(properties),
-  )
-  .unwrap();
-  for batch in batches {
-    writer.write(batch).unwrap();
-  }
-  for entry in metadata {
-    writer.append_key_value_metadata(entry.clone());
-  }
-  writer.close().unwrap();
-}
-
-fn string_value(array: &dyn arrow_array::Array, index: usize) -> String {
-  if let Some(array) = array.as_any().downcast_ref::<arrow_array::StringArray>() {
-    return array.value(index).to_string();
-  }
-  if let Some(array) = array
-    .as_any()
-    .downcast_ref::<arrow_array::StringViewArray>()
-  {
-    return array.value(index).to_string();
-  }
-  panic!("unexpected string array type: {:?}", array.data_type());
-}
-
 #[test]
 fn open_input_accepts_directory_of_parquet_files() {
   let temp = TempDir::new().unwrap();
@@ -203,14 +141,81 @@ fn parquet_input_can_produce_dataframe_for_execution() {
   let session = DataFusionSession::new(None, None).unwrap();
 
   let rows = runtime().block_on(async {
-    let df = input
+    let dataframe = input
       .to_dataframe(session.context(), RowRange::new(1, Some(1)))
       .await
       .unwrap();
-    let batches = df.collect().await.unwrap();
+    let batches = dataframe.collect().await.unwrap();
     let rows = batches.iter().map(|batch| batch.num_rows()).sum::<usize>();
     let name = string_value(batches[0].column_by_name("name").unwrap().as_ref(), 0);
     (rows, name)
   });
   assert_eq!(rows, (1, "b".to_string()));
+}
+
+/// Pair fixture WKB values with sequential identifiers in an Arrow batch.
+fn sample_batch_with_geometry(wkb_values: Vec<Option<Vec<u8>>>) -> RecordBatch {
+  let ids = Int32Array::from_iter_values(1..=wkb_values.len() as i32);
+  let values = wkb_values
+    .iter()
+    .map(|value| value.as_deref())
+    .collect::<Vec<_>>();
+  RecordBatch::try_new(
+    sample_schema_with_geometry(),
+    vec![Arc::new(ids), Arc::new(BinaryArray::from(values))],
+  )
+  .unwrap()
+}
+
+/// Build the fixture schema with integer identifiers and nullable WKB geometry.
+fn sample_schema_with_geometry() -> SchemaRef {
+  Arc::new(Schema::new(vec![
+    Field::new("id", DataType::Int32, false),
+    Field::new("geometry", DataType::Binary, true),
+  ]))
+}
+
+/// Write fixture batches with the selected compression and footer entries.
+fn write_parquet(
+  path: &Path,
+  schema: &SchemaRef,
+  batches: &[RecordBatch],
+  compression: Compression,
+  metadata: &[KeyValue],
+) {
+  let properties = WriterProperties::builder()
+    .set_compression(compression)
+    .build();
+  let mut writer = ArrowWriter::try_new(
+    File::create(path).unwrap(),
+    schema.clone(),
+    Some(properties),
+  )
+  .unwrap();
+  for batch in batches {
+    writer.write(batch).unwrap();
+  }
+  for entry in metadata {
+    writer.append_key_value_metadata(entry.clone());
+  }
+  writer.close().unwrap();
+}
+
+/// Read one string from either Arrow string representation emitted by Parquet scans.
+fn string_value(array: &dyn arrow_array::Array, index: usize) -> String {
+  if let Some(array) = array.as_any().downcast_ref::<arrow_array::StringArray>() {
+    return array.value(index).to_string();
+  }
+  if let Some(array) = array
+    .as_any()
+    .downcast_ref::<arrow_array::StringViewArray>()
+  {
+    return array.value(index).to_string();
+  }
+  panic!("unexpected string array type: {:?}", array.data_type());
+}
+
+/// Create an async runtime for Parquet source-opening and scan tests.
+fn runtime() -> Runtime {
+  Runtime::new().unwrap()
 }

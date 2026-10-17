@@ -53,97 +53,6 @@ pub(super) struct ParsedGeometryType {
   has_m: bool,
 }
 
-impl ParquetGeoMetadata {
-  pub(super) fn primary_geometry(&self) -> Option<&ParquetGeoColumnMetadata> {
-    self.columns.get(&self.primary_column)
-  }
-
-  fn merge(&mut self, other: Self) -> Result<(), InputError> {
-    if self.primary_column != other.primary_column {
-      return Err(InputError::Metadata(format!(
-        "inconsistent geoparquet primary column across input files: {} != {}",
-        self.primary_column, other.primary_column
-      )));
-    }
-
-    let primary_column = self.primary_column.clone();
-    let Some(current) = self.columns.get_mut(&primary_column) else {
-      return Err(InputError::Metadata(format!(
-        "geoparquet primary column is missing metadata: {primary_column}"
-      )));
-    };
-    let Some(incoming) = other.columns.get(&primary_column) else {
-      return Err(InputError::Metadata(format!(
-        "geoparquet primary column is missing metadata: {primary_column}"
-      )));
-    };
-    current.merge(incoming)
-  }
-}
-
-impl ParquetGeoColumnMetadata {
-  pub(super) fn is_wkb(&self) -> bool {
-    self.encoding == "WKB"
-  }
-
-  pub(super) fn parsed_geometry_types(&self) -> Result<Vec<ParsedGeometryType>, InputError> {
-    self
-      .geometry_types
-      .iter()
-      .map(|geometry_type| ParsedGeometryType::parse(geometry_type))
-      .collect::<Result<Vec<_>, InputError>>()
-  }
-
-  fn merge(&mut self, other: &Self) -> Result<(), InputError> {
-    if self.encoding != other.encoding {
-      return Err(InputError::Metadata(format!(
-        "inconsistent geoparquet geometry encoding across input files: {} != {}",
-        self.encoding, other.encoding
-      )));
-    }
-    if self.crs != other.crs {
-      return Err(InputError::Metadata(
-        "inconsistent geoparquet CRS across input files".to_string(),
-      ));
-    }
-
-    let mut geometry_types = self.geometry_types.iter().cloned().collect::<BTreeSet<_>>();
-    geometry_types.extend(other.geometry_types.iter().cloned());
-    self.geometry_types = geometry_types.into_iter().collect();
-    self.bbox = merge_bbox(self.bbox.as_deref(), other.bbox.as_deref());
-    Ok(())
-  }
-}
-
-impl ParsedGeometryType {
-  fn parse(value: &str) -> Result<Self, InputError> {
-    let (base, has_z, has_m) = if let Some(base) = value.strip_suffix(" ZM") {
-      (base, true, true)
-    } else if let Some(base) = value.strip_suffix(" Z") {
-      (base, true, false)
-    } else if let Some(base) = value.strip_suffix(" M") {
-      (base, false, true)
-    } else {
-      (value, false, false)
-    };
-    let ty = match base {
-      "Point" => GeometryType::Point,
-      "LineString" => GeometryType::LineString,
-      "MultiPoint" => GeometryType::MultiPoint,
-      "MultiLineString" => GeometryType::MultiLineString,
-      "Polygon" => GeometryType::Polygon,
-      "MultiPolygon" => GeometryType::MultiPolygon,
-      "GeometryCollection" => GeometryType::GeometryCollection,
-      _ => {
-        return Err(InputError::Metadata(format!(
-          "unsupported geoparquet geometry type: {value}"
-        )));
-      }
-    };
-    Ok(Self { ty, has_z, has_m })
-  }
-}
-
 impl ParquetInputSource {
   /// Parse and require consistent GeoParquet metadata across all discovered files.
   pub(super) fn geo_metadata(&self) -> Result<Option<ParquetGeoMetadata>, InputError> {
@@ -171,6 +80,7 @@ impl ParquetInputSource {
     Ok(geo_meta)
   }
 
+  /// Resolve one compatible covering column shared by every input file.
   pub(super) fn covering_metadata(
     &self,
     geometry_column: &str,
@@ -223,6 +133,7 @@ impl ParquetInputSource {
     out
   }
 
+  /// Decode one GeoParquet contract with defaults for omitted coordinate references.
   fn parse_geo_metadata(
     metadata: &ArrowReaderMetadata,
   ) -> Result<Option<ParquetGeoMetadata>, InputError> {
@@ -238,6 +149,7 @@ impl ParquetInputSource {
       })
   }
 
+  /// Decode the first footer entry matching a metadata key when its value exists.
   fn metadata_json(metadata: &ArrowReaderMetadata, key: &str) -> Result<Option<Value>, InputError> {
     let Some(value) = metadata
       .metadata()
@@ -256,6 +168,7 @@ impl ParquetInputSource {
       })
   }
 
+  /// Resolve a covering struct only when all four XY paths share one column.
   fn covering_column(json: &Value, geometry_column: &str) -> Option<SourceCoveringMetadata> {
     let bbox = json
       .get("columns")?
@@ -284,8 +197,7 @@ impl ParquetInputSource {
     covering_column.map(|column| SourceCoveringMetadata { column })
   }
 
-  /// Apply the GeoParquet OGC:CRS84 default when a geometry column omits `crs`.
-  /// Preserve explicit `null` because it declares an unknown coordinate reference system.
+  /// Apply OGC:CRS84 to omitted CRS values while preserving explicitly unknown references.
   fn apply_default_crs(json: &mut Value) -> Result<(), InputError> {
     let Some(columns) = json.get_mut("columns").and_then(Value::as_object_mut) else {
       return Ok(());
@@ -332,10 +244,14 @@ impl SourceGeometryMetadata {
     }
 
     let parsed_geometry_types = column_meta.parsed_geometry_types()?;
-    let geometry_types = parsed_geometry_types
-      .iter()
-      .map(|geometry_type| geometry_type.ty)
-      .collect();
+    let mut geometry_types = Vec::with_capacity(parsed_geometry_types.len());
+    let mut has_z = false;
+    let mut has_m = false;
+    for geometry_type in parsed_geometry_types {
+      geometry_types.push(geometry_type.ty);
+      has_z |= geometry_type.has_z;
+      has_m |= geometry_type.has_m;
+    }
 
     Ok(Some(SourceGeometryMetadata {
       column: geo_meta.primary_column.clone(),
@@ -344,16 +260,110 @@ impl SourceGeometryMetadata {
       bbox: bbox_from_geoparquet(column_meta.bbox.as_deref()),
       covering,
       projjson: column_meta.crs.clone(),
-      has_z: parsed_geometry_types
-        .iter()
-        .any(|geometry_type| geometry_type.has_z),
-      has_m: parsed_geometry_types
-        .iter()
-        .any(|geometry_type| geometry_type.has_m),
+      has_z,
+      has_m,
     }))
   }
 }
 
+impl ParquetGeoMetadata {
+  /// Return metadata for the declared primary geometry column.
+  pub(super) fn primary_geometry(&self) -> Option<&ParquetGeoColumnMetadata> {
+    self.columns.get(&self.primary_column)
+  }
+
+  /// Merge primary-column metadata while rejecting inconsistent file contracts.
+  fn merge(&mut self, other: Self) -> Result<(), InputError> {
+    if self.primary_column != other.primary_column {
+      return Err(InputError::Metadata(format!(
+        "inconsistent geoparquet primary column across input files: {} != {}",
+        self.primary_column, other.primary_column
+      )));
+    }
+
+    let primary_column = self.primary_column.clone();
+    let Some(current) = self.columns.get_mut(&primary_column) else {
+      return Err(InputError::Metadata(format!(
+        "geoparquet primary column is missing metadata: {primary_column}"
+      )));
+    };
+    let Some(incoming) = other.columns.get(&primary_column) else {
+      return Err(InputError::Metadata(format!(
+        "geoparquet primary column is missing metadata: {primary_column}"
+      )));
+    };
+    current.merge(incoming)
+  }
+}
+
+impl ParquetGeoColumnMetadata {
+  /// Identify the WKB encoding supported by input geometry scans.
+  pub(super) fn is_wkb(&self) -> bool {
+    self.encoding == "WKB"
+  }
+
+  /// Parse geometry kinds and their XY, XYZ, XYM, or XYZM layouts in metadata order.
+  pub(super) fn parsed_geometry_types(&self) -> Result<Vec<ParsedGeometryType>, InputError> {
+    let mut parsed = Vec::with_capacity(self.geometry_types.len());
+    for geometry_type in &self.geometry_types {
+      parsed.push(ParsedGeometryType::parse(geometry_type)?);
+    }
+    Ok(parsed)
+  }
+
+  /// Union geometry kinds and XY bounds after validating encoding and CRS agreement.
+  fn merge(&mut self, other: &Self) -> Result<(), InputError> {
+    if self.encoding != other.encoding {
+      return Err(InputError::Metadata(format!(
+        "inconsistent geoparquet geometry encoding across input files: {} != {}",
+        self.encoding, other.encoding
+      )));
+    }
+    if self.crs != other.crs {
+      return Err(InputError::Metadata(
+        "inconsistent geoparquet CRS across input files".to_string(),
+      ));
+    }
+
+    let mut geometry_types = self.geometry_types.iter().cloned().collect::<BTreeSet<_>>();
+    geometry_types.extend(other.geometry_types.iter().cloned());
+    self.geometry_types = geometry_types.into_iter().collect();
+    self.bbox = merge_bbox(self.bbox.as_deref(), other.bbox.as_deref());
+    Ok(())
+  }
+}
+
+impl ParsedGeometryType {
+  /// Decode a GeoParquet geometry name and its optional Z, M, or ZM suffix.
+  fn parse(value: &str) -> Result<Self, InputError> {
+    let (base, has_z, has_m) = if let Some(base) = value.strip_suffix(" ZM") {
+      (base, true, true)
+    } else if let Some(base) = value.strip_suffix(" Z") {
+      (base, true, false)
+    } else if let Some(base) = value.strip_suffix(" M") {
+      (base, false, true)
+    } else {
+      (value, false, false)
+    };
+    let ty = match base {
+      "Point" => GeometryType::Point,
+      "LineString" => GeometryType::LineString,
+      "MultiPoint" => GeometryType::MultiPoint,
+      "MultiLineString" => GeometryType::MultiLineString,
+      "Polygon" => GeometryType::Polygon,
+      "MultiPolygon" => GeometryType::MultiPolygon,
+      "GeometryCollection" => GeometryType::GeometryCollection,
+      _ => {
+        return Err(InputError::Metadata(format!(
+          "unsupported geoparquet geometry type: {value}"
+        )));
+      }
+    };
+    Ok(Self { ty, has_z, has_m })
+  }
+}
+
+/// Extract outer XY bounds from a complete GeoParquet bounding box.
 fn bbox_from_geoparquet(bbox: Option<&[Option<f64>]>) -> Option<Extent2D> {
   let bbox = bbox?;
   if bbox.len() < 4 {
@@ -367,34 +377,30 @@ fn bbox_from_geoparquet(bbox: Option<&[Option<f64>]>) -> Option<Extent2D> {
   })
 }
 
+/// Union available XY bounds while preserving an absent result for two missing extents.
 fn merge_bbox(
   current: Option<&[Option<f64>]>,
   incoming: Option<&[Option<f64>]>,
 ) -> Option<Vec<Option<f64>>> {
-  match (
+  let extent = match (
     bbox_from_geoparquet(current),
     bbox_from_geoparquet(incoming),
   ) {
-    (Some(current), Some(incoming)) => Some(vec![
-      Some(current.xmin.min(incoming.xmin)),
-      Some(current.ymin.min(incoming.ymin)),
-      Some(current.xmax.max(incoming.xmax)),
-      Some(current.ymax.max(incoming.ymax)),
-    ]),
-    (Some(current), None) => Some(vec![
-      Some(current.xmin),
-      Some(current.ymin),
-      Some(current.xmax),
-      Some(current.ymax),
-    ]),
-    (None, Some(incoming)) => Some(vec![
-      Some(incoming.xmin),
-      Some(incoming.ymin),
-      Some(incoming.xmax),
-      Some(incoming.ymax),
-    ]),
-    (None, None) => None,
-  }
+    (Some(current), Some(incoming)) => Extent2D {
+      xmin: current.xmin.min(incoming.xmin),
+      ymin: current.ymin.min(incoming.ymin),
+      xmax: current.xmax.max(incoming.xmax),
+      ymax: current.ymax.max(incoming.ymax),
+    },
+    (Some(extent), None) | (None, Some(extent)) => extent,
+    (None, None) => return None,
+  };
+  Some(vec![
+    Some(extent.xmin),
+    Some(extent.ymin),
+    Some(extent.xmax),
+    Some(extent.ymax),
+  ])
 }
 
 #[cfg(test)]
@@ -404,10 +410,6 @@ mod tests {
   use crate::geometry::{Extent2D, GeometryType};
 
   use super::{ParquetGeoMetadata, ParquetInputSource, ParsedGeometryType, bbox_from_geoparquet};
-
-  fn metadata(value: serde_json::Value) -> ParquetGeoMetadata {
-    serde_json::from_value(value).unwrap()
-  }
 
   #[test]
   fn omitted_crs_uses_geoparquet_default() {
@@ -653,5 +655,10 @@ mod tests {
 
     assert!(ParquetInputSource::covering_column(&mixed, "geometry").is_none());
     assert!(ParquetInputSource::covering_column(&deep, "geometry").is_none());
+  }
+
+  /// Decode a JSON fixture into the input GeoParquet metadata contract.
+  fn metadata(value: serde_json::Value) -> ParquetGeoMetadata {
+    serde_json::from_value(value).unwrap()
   }
 }

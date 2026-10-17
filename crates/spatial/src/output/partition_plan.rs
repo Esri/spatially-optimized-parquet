@@ -42,6 +42,7 @@ pub(super) struct PartitionPlan {
 }
 
 impl PartitionPlan {
+  /// Configure a concurrent partition sink that returns one aggregate row count.
   pub(super) fn new(input: Arc<dyn ExecutionPlan>, sink: Arc<TrackingSink>) -> Self {
     let count_schema = Self::count_schema();
     let cache = PlanProperties::new(
@@ -60,6 +61,7 @@ impl PartitionPlan {
     }
   }
 
+  /// Write all input partitions concurrently and return the first error after draining tasks.
   async fn run_concurrent_partition_writes(
     input: Arc<dyn ExecutionPlan>,
     sink: Arc<TrackingSink>,
@@ -100,6 +102,7 @@ impl PartitionPlan {
     first_error.map_or(Ok(rows_written), Err)
   }
 
+  /// Build the single-column schema for the aggregate written-row count.
   fn count_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![Field::new(
       "count",
@@ -108,6 +111,7 @@ impl PartitionPlan {
     )]))
   }
 
+  /// Build the one-row batch reporting the completed partition write count.
   fn make_count_batch(count: u64) -> RecordBatch {
     RecordBatch::try_new(
       Self::count_schema(),
@@ -118,6 +122,7 @@ impl PartitionPlan {
 }
 
 impl DisplayAs for PartitionPlan {
+  /// Display the tracked Parquet sink behind the partition writer.
   fn fmt_as(
     &self,
     format_type: DisplayFormatType,
@@ -128,26 +133,32 @@ impl DisplayAs for PartitionPlan {
 }
 
 impl ExecutionPlan for PartitionPlan {
+  /// Return the physical plan name for concurrent partition writes.
   fn name(&self) -> &'static str {
     "PartitionPlan"
   }
 
+  /// Return cached execution properties for the single count-result partition.
   fn properties(&self) -> &Arc<PlanProperties> {
     &self.cache
   }
 
+  /// Accept the partition distribution prepared by the sorting plan.
   fn required_input_distribution(&self) -> Vec<Distribution> {
     vec![Distribution::UnspecifiedDistribution]
   }
 
+  /// Preserve input ordering within each independently written partition.
   fn maintains_input_order(&self) -> Vec<bool> {
     vec![true]
   }
 
+  /// Expose the partitioned input plan for optimizer traversal.
   fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
     vec![&self.input]
   }
 
+  /// Rebuild concurrent writing around the replacement input and shared sink.
   fn with_new_children(
     self: Arc<Self>,
     children: Vec<Arc<dyn ExecutionPlan>>,
@@ -158,6 +169,7 @@ impl ExecutionPlan for PartitionPlan {
     )))
   }
 
+  /// Execute all sink writes from partition zero and stream their aggregate count.
   fn execute(
     &self,
     partition: usize,

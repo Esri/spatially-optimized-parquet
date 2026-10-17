@@ -29,6 +29,7 @@ use super::{
   GeodisplayMetadata, MultiscaleLevelInput, OptimizedLayout,
 };
 
+/// Build a WGS84 reference with authority, WKT, and PROJJSON metadata.
 fn spatial_reference() -> SpatialReference {
   SpatialReference {
     wkid: Some(4326),
@@ -44,6 +45,7 @@ fn spatial_reference() -> SpatialReference {
   }
 }
 
+/// Build XYZM GeoParquet inputs with optional covering metadata.
 fn geo_input<'a>(
   geometry_types: &'a [GeometryType],
   spatial_reference: &'a SpatialReference,
@@ -68,6 +70,7 @@ fn geo_input<'a>(
   }
 }
 
+/// Decode metadata entries as JSON while retaining non-JSON string values.
 fn metadata_values(entries: Vec<KeyValue>) -> HashMap<String, Value> {
   entries
     .into_iter()
@@ -82,6 +85,7 @@ fn metadata_values(entries: Vec<KeyValue>) -> HashMap<String, Value> {
     .collect()
 }
 
+/// Build XY point-index inputs with nested coordinate and Z-order columns.
 fn point_index_input() -> ClusteringIndexZInput {
   ClusteringIndexZInput {
     code: ColumnPath::nested("geodisplay", "zCode"),

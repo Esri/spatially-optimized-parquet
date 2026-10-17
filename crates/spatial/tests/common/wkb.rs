@@ -14,6 +14,7 @@
 
 pub type XyzmCoordinate = (f64, f64, Option<f64>, Option<f64>);
 
+/// Encode an XY point with little-endian WKB coordinates.
 pub fn point(x: f64, y: f64) -> Vec<u8> {
   let mut output = Vec::with_capacity(21);
   header(&mut output, 1);
@@ -21,6 +22,7 @@ pub fn point(x: f64, y: f64) -> Vec<u8> {
   output
 }
 
+/// Encode an XY, XYZ, XYM, or XYZM point according to its present components.
 pub fn xyzm_point(x: f64, y: f64, z: Option<f64>, m: Option<f64>) -> Vec<u8> {
   let mut output = Vec::with_capacity(37);
   header(&mut output, xyzm_type(1, z.is_some(), m.is_some()));
@@ -28,6 +30,7 @@ pub fn xyzm_point(x: f64, y: f64, z: Option<f64>, m: Option<f64>) -> Vec<u8> {
   output
 }
 
+/// Encode a multipoint with shared layout flags and a WKB header for each point.
 pub fn xyzm_multi_point(coordinates: &[XyzmCoordinate]) -> Vec<u8> {
   let (has_z, has_m) = dimensions(coordinates);
   let coordinate_size = (2 + usize::from(has_z) + usize::from(has_m)) * 8;
@@ -41,6 +44,7 @@ pub fn xyzm_multi_point(coordinates: &[XyzmCoordinate]) -> Vec<u8> {
   output
 }
 
+/// Encode a line string with layout flags inferred from its optional Z/M components.
 pub fn xyzm_line_string(coordinates: &[XyzmCoordinate]) -> Vec<u8> {
   let (has_z, has_m) = dimensions(coordinates);
   let coordinate_size = (2 + usize::from(has_z) + usize::from(has_m)) * 8;
@@ -53,6 +57,7 @@ pub fn xyzm_line_string(coordinates: &[XyzmCoordinate]) -> Vec<u8> {
   output
 }
 
+/// Encode a single-ring XY polygon without changing coordinate order or closure.
 pub fn polygon(coordinates: &[(f64, f64)]) -> Vec<u8> {
   let mut output = Vec::with_capacity(13 + coordinates.len() * 16);
   header(&mut output, 3);
@@ -68,19 +73,23 @@ pub fn polygon(coordinates: &[(f64, f64)]) -> Vec<u8> {
   output
 }
 
+/// Encode a polygon from one ring with its supplied optional Z/M components.
 pub fn xyzm_polygon(coordinates: &[(f64, f64, Option<f64>, Option<f64>)]) -> Vec<u8> {
   xyzm_polygon_rings(&[coordinates])
 }
 
+/// Encode exterior and interior rings with layout flags shared across the polygon.
 pub fn xyzm_polygon_rings(rings: &[&[XyzmCoordinate]]) -> Vec<u8> {
-  let coordinates = rings
-    .iter()
-    .flat_map(|ring| ring.iter())
-    .copied()
-    .collect::<Vec<_>>();
-  let (has_z, has_m) = dimensions(&coordinates);
+  let mut has_z = false;
+  let mut has_m = false;
+  let mut total_coordinate_count = 0;
+  for ring in rings {
+    let (ring_has_z, ring_has_m) = dimensions(ring);
+    has_z |= ring_has_z;
+    has_m |= ring_has_m;
+    total_coordinate_count += ring.len();
+  }
   let coordinate_size = (2 + usize::from(has_z) + usize::from(has_m)) * 8;
-  let total_coordinate_count = coordinates.len();
   let mut output =
     Vec::with_capacity(9 + rings.len() * 4 + total_coordinate_count * coordinate_size);
   header(&mut output, xyzm_type(3, has_z, has_m));
@@ -94,11 +103,13 @@ pub fn xyzm_polygon_rings(rings: &[&[XyzmCoordinate]]) -> Vec<u8> {
   output
 }
 
+/// Read XY coordinates after requiring a little-endian point WKB header.
 pub fn read_point(bytes: &[u8]) -> Result<(f64, f64), String> {
   require_little_endian_type(bytes, 1)?;
   Ok((read_f64(bytes, 5)?, read_f64(bytes, 13)?))
 }
 
+/// Read exterior-ring XY bounds while rejecting missing rings and truncated coordinates.
 pub fn read_polygon_extent(bytes: &[u8]) -> Result<[f64; 4], String> {
   require_little_endian_type(bytes, 3)?;
   let ring_count = read_u32(bytes, 5)?;
@@ -124,16 +135,19 @@ pub fn read_polygon_extent(bytes: &[u8]) -> Result<[f64; 4], String> {
   Ok(extent)
 }
 
+/// Append the little-endian marker and ISO WKB geometry type.
 fn header(output: &mut Vec<u8>, geometry_type: u32) {
   output.push(1);
   output.extend_from_slice(&geometry_type.to_le_bytes());
 }
 
+/// Append one XY pair as little-endian Float64 components.
 fn coordinate(output: &mut Vec<u8>, x: f64, y: f64) {
   output.extend_from_slice(&x.to_le_bytes());
   output.extend_from_slice(&y.to_le_bytes());
 }
 
+/// Append a fixture part or coordinate count after requiring it to fit UInt32.
 fn coordinate_count(output: &mut Vec<u8>, count: usize) {
   output.extend_from_slice(
     &u32::try_from(count)
@@ -142,6 +156,7 @@ fn coordinate_count(output: &mut Vec<u8>, count: usize) {
   );
 }
 
+/// Append XY followed by each present Z/M component without filling absent values.
 fn xyzm_coordinate(output: &mut Vec<u8>, x: f64, y: f64, z: Option<f64>, m: Option<f64>) {
   coordinate(output, x, y);
   if let Some(z) = z {
@@ -152,6 +167,7 @@ fn xyzm_coordinate(output: &mut Vec<u8>, x: f64, y: f64, z: Option<f64>, m: Opti
   }
 }
 
+/// Detect whether any fixture coordinate supplies a Z component or an M component.
 fn dimensions(coordinates: &[XyzmCoordinate]) -> (bool, bool) {
   (
     coordinates.iter().any(|coordinate| coordinate.2.is_some()),
@@ -159,6 +175,7 @@ fn dimensions(coordinates: &[XyzmCoordinate]) -> (bool, bool) {
   )
 }
 
+/// Apply the ISO WKB type offset for XY, XYZ, XYM, or XYZM layout.
 fn xyzm_type(base_type: u32, has_z: bool, has_m: bool) -> u32 {
   base_type
     + match (has_z, has_m) {
@@ -169,6 +186,7 @@ fn xyzm_type(base_type: u32, has_z: bool, has_m: bool) -> u32 {
     }
 }
 
+/// Reject fixture WKB with an unexpected byte order, geometry type, or truncated header.
 fn require_little_endian_type(bytes: &[u8], expected_type: u32) -> Result<(), String> {
   if bytes.first() != Some(&1) {
     return Err("expected little-endian WKB".to_string());
@@ -182,6 +200,7 @@ fn require_little_endian_type(bytes: &[u8], expected_type: u32) -> Result<(), St
   Ok(())
 }
 
+/// Read a little-endian UInt32 at the requested offset or report truncated WKB.
 fn read_u32(bytes: &[u8], offset: usize) -> Result<u32, String> {
   let value = bytes
     .get(offset..offset + 4)
@@ -191,6 +210,7 @@ fn read_u32(bytes: &[u8], offset: usize) -> Result<u32, String> {
   Ok(u32::from_le_bytes(value))
 }
 
+/// Read a little-endian Float64 at the requested offset or report truncated WKB.
 fn read_f64(bytes: &[u8], offset: usize) -> Result<f64, String> {
   let value = bytes
     .get(offset..offset + 8)

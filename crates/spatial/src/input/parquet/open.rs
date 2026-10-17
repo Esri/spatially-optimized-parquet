@@ -30,7 +30,7 @@ use url::Url;
 use crate::input::{InputError, InputOpenOptions, InputSource};
 
 use super::source::{ParquetInputLocation, ParquetInputSource};
-use super::{DiscoveryMode, ParquetDataset, ParquetDatasetFile};
+use super::{DiscoveryMode, ParquetDataset};
 
 impl ParquetInputSource {
   /// Open a local Parquet file set or one direct HTTP Parquet object.
@@ -53,11 +53,10 @@ impl ParquetInputSource {
         path.display()
       ))
     })?;
-    let metadata = dataset
-      .files()
-      .iter()
-      .map(|file| Self::load_arrow_metadata(file))
-      .collect::<Result<Vec<_>, InputError>>()?;
+    let mut metadata = Vec::with_capacity(dataset.files().len());
+    for file in dataset.files() {
+      metadata.push(file.load_metadata()?);
+    }
 
     Ok(Arc::new(Self::new(
       ParquetInputLocation::Local {
@@ -123,11 +122,6 @@ impl ParquetInputSource {
       vec![metadata],
     )))
   }
-
-  /// Load Arrow and Parquet metadata from one local file footer.
-  fn load_arrow_metadata(file: &ParquetDatasetFile) -> Result<ArrowReaderMetadata, InputError> {
-    file.load_metadata()
-  }
 }
 
 #[cfg(test)]
@@ -136,7 +130,7 @@ mod tests {
 
   use tempfile::TempDir;
 
-  use super::{DiscoveryMode, ParquetDataset, ParquetInputSource};
+  use super::{DiscoveryMode, ParquetDataset};
 
   #[test]
   fn parquet_discovery_sorts_files_and_ignores_other_extensions() {
@@ -168,7 +162,7 @@ mod tests {
     let dataset = ParquetDataset::discover(&path, DiscoveryMode::Flat)
       .unwrap()
       .unwrap();
-    let error = ParquetInputSource::load_arrow_metadata(&dataset.files()[0]).unwrap_err();
+    let error = dataset.files()[0].load_metadata().unwrap_err();
 
     assert!(error.to_string().contains("read arrow metadata"));
   }

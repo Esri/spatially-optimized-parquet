@@ -38,14 +38,16 @@ impl ClusterRangeBoundaries {
     }
 
     let mut aggregate_expressions = vec![min(ident(cluster_key_column)).alias("range_min")];
-    aggregate_expressions.extend((1..bucket_count).map(|index| {
-      approx_percentile_cont(
-        ident(cluster_key_column).sort(true, false),
-        lit(index as f64 / bucket_count as f64),
-        None,
-      )
-      .alias(format!("range_boundary_{index}"))
-    }));
+    for index in 1..bucket_count {
+      aggregate_expressions.push(
+        approx_percentile_cont(
+          ident(cluster_key_column).sort(true, false),
+          lit(index as f64 / bucket_count as f64),
+          None,
+        )
+        .alias(format!("range_boundary_{index}")),
+      );
+    }
     let aggregate_dataframe =
       dataframe
         .aggregate(vec![], aggregate_expressions)
@@ -79,6 +81,7 @@ impl ClusterRangeBoundaries {
   }
 }
 
+/// Read the first aggregate value as a nullable unsigned range boundary.
 fn aggregate_u64(values: &ArrayRef) -> Result<Option<u64>, OutputError> {
   if values.is_null(0) {
     return Ok(None);

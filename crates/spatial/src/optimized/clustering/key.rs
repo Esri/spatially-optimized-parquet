@@ -31,12 +31,14 @@ impl ClusterKey {
 }
 
 impl From<u64> for ClusterKey {
+  /// Wrap an encoded Z-order or XZ-order value as a sortable key.
   fn from(value: u64) -> Self {
     Self::new(value)
   }
 }
 
 impl From<ClusterKey> for u64 {
+  /// Extract the encoded Z-order or XZ-order value from a key.
   fn from(key: ClusterKey) -> Self {
     key.value()
   }

@@ -41,8 +41,8 @@ pub(crate) use quantization::{
 pub use types::GeometryType;
 pub(crate) use types::{CoordinateDimensions, GeometryColumn, GeometryEncoding};
 pub(crate) use wkb::{
-  PolygonRingOrder, WkbArrayBuilder, WkbCoordinate, WkbHeader, WkbPartRole, WkbSink,
-  strip_wkb_dimensions, visit_wkb_geometry,
+  PolygonRingOrder, WkbArrayBuilder, WkbHeader, WkbPartRole, WkbSink, strip_wkb_dimensions,
+  visit_wkb_geometry,
 };
 #[cfg(test)]
 pub(crate) use wkb::{write_test_point, write_test_polygon};

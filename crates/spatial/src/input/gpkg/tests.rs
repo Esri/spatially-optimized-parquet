@@ -16,7 +16,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 
-use arrow_array::{Int32Array, StringArray, StringViewArray};
+use arrow_array::{Int32Array, RecordBatch, StringArray, StringViewArray};
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
 use datafusion::physical_plan::ExecutionPlanProperties;
 use futures_util::StreamExt;
@@ -28,16 +28,12 @@ use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
 use crate::geometry::{
-  CoordinateDimensions, Extent2D, GeometryArray, GeometryType, PolygonRingOrder, WkbCoordinate,
+  Coord, CoordinateDimensions, Extent2D, GeometryArray, GeometryType, PolygonRingOrder,
   WkbPartRole, WkbSink, visit_wkb_geometry,
 };
 use crate::input::{InputOpenOptions, InputSource, RowRange, SourceFormat, open_input};
 use crate::session::DataFusionSession;
 use crate::{InputOptions, OutputMode, OutputOptions, Pipeline, SpatialPipelineOptions, validate};
-
-fn runtime() -> Runtime {
-  Runtime::new().unwrap()
-}
 
 struct GpkgFeature<'a> {
   id: i32,
@@ -52,97 +48,21 @@ struct GpkgLayer<'a> {
   features: &'a [GpkgFeature<'a>],
 }
 
-fn write_gpkg(path: &Path, layers: &[GpkgLayer<'_>]) {
-  if path.exists() {
-    std::fs::remove_file(path).unwrap();
-  }
-  let driver = DriverManager::get_driver_by_name("GPKG")
-    .expect("GDAL GPKG driver is required for GeoPackage tests");
-  let mut dataset = driver.create_vector_only(path).unwrap();
-  for layer_spec in layers {
-    let spatial_ref = layer_spec
-      .epsg
-      .map(|epsg| SpatialRef::from_epsg(epsg).unwrap());
-    let geometry_options = ["GEOMETRY_NAME=geometry"];
-    let layer = dataset
-      .create_layer(LayerOptions {
-        name: layer_spec.name,
-        srs: spatial_ref.as_ref(),
-        ty: layer_spec.geometry_type,
-        options: Some(&geometry_options),
-      })
-      .unwrap();
-    layer
-      .create_defn_fields(&[
-        ("id", OGRFieldType::OFTInteger),
-        ("name", OGRFieldType::OFTString),
-      ])
-      .unwrap();
-    let id_index = layer.defn().field_index("id").unwrap();
-    let name_index = layer.defn().field_index("name").unwrap();
-    for feature_spec in layer_spec.features {
-      let mut feature = Feature::new(layer.defn()).unwrap();
-      feature
-        .set_field_integer(id_index, feature_spec.id)
-        .unwrap();
-      if let Some(name) = feature_spec.name {
-        feature.set_field_string(name_index, name).unwrap();
-      }
-      feature
-        .set_geometry(Geometry::from_wkt(feature_spec.geometry_wkt).unwrap())
-        .unwrap();
-      feature.create(&layer).unwrap();
-    }
-  }
-  dataset.flush_cache().unwrap();
-}
-
-fn open_gpkg_dataset(path: &Path) -> Dataset {
-  Dataset::open(path).unwrap()
-}
-
-fn open_gpkg_input(path: &Path, layer: Option<&str>) -> Arc<dyn InputSource> {
-  runtime()
-    .block_on(open_input(
-      SourceFormat::GeoPackage,
-      &InputOpenOptions::new(
-        path.to_string_lossy().into_owned(),
-        layer.map(str::to_string),
-      ),
-    ))
-    .unwrap()
-}
-
-fn string_value(array: &dyn arrow_array::Array, index: usize) -> String {
-  if let Some(array) = array.as_any().downcast_ref::<StringArray>() {
-    return array.value(index).to_string();
-  }
-  if let Some(array) = array.as_any().downcast_ref::<StringViewArray>() {
-    return array.value(index).to_string();
-  }
-  panic!("unexpected string array type: {:?}", array.data_type());
-}
-
-fn binary_value(array: &dyn arrow_array::Array, index: usize) -> Vec<u8> {
-  GeometryArray::try_new(array)
-    .unwrap()
-    .value(index)
-    .unwrap()
-    .to_vec()
-}
-
 #[derive(Default)]
 struct CoordinateSink {
-  coordinates: Vec<WkbCoordinate>,
+  coordinates: Vec<Coord>,
 }
 
 impl WkbSink for CoordinateSink {
+  /// Ignore part boundaries while collecting fixture coordinates.
   fn start_part(&mut self, _role: WkbPartRole) {}
 
-  fn push_coord(&mut self, coordinate: WkbCoordinate) {
+  /// Retain each visited coordinate with its optional Z/M components.
+  fn push_coord(&mut self, coordinate: Coord) {
     self.coordinates.push(coordinate);
   }
 
+  /// Leave collected coordinates unchanged when a geometry part ends.
   fn finish_part(&mut self) {}
 }
 
@@ -172,7 +92,7 @@ fn open_input_accepts_single_layer_geopackage_and_reads_metadata() {
     }],
   );
 
-  let dataset = open_gpkg_dataset(&path);
+  let dataset = Dataset::open(&path).unwrap();
   let layer = dataset.layer_by_name("cities").unwrap();
   assert_eq!(layer.feature_count(), 2);
   assert_eq!(
@@ -352,11 +272,11 @@ fn geopackage_input_can_produce_dataframe_for_execution() {
   let input = open_gpkg_input(&path, None);
   let session = DataFusionSession::new(None, None).unwrap();
   let rows = runtime().block_on(async {
-    let df = input
+    let dataframe = input
       .to_dataframe(session.context(), RowRange::new(0, Some(1)))
       .await
       .unwrap();
-    let batches = df.collect().await.unwrap();
+    let batches = dataframe.collect().await.unwrap();
     batches.iter().map(|batch| batch.num_rows()).sum::<usize>()
   });
   assert_eq!(rows, 1);
@@ -401,11 +321,11 @@ fn geopackage_dataframe_uses_partitioned_scan_for_full_reads() {
   let input = open_gpkg_input(&path, None);
   let session = DataFusionSession::new(None, None).unwrap();
   let (ids, saw_partitioned_node) = runtime().block_on(async {
-    let df = input
+    let dataframe = input
       .to_dataframe(session.context(), RowRange::default())
       .await
       .unwrap();
-    let physical_plan = df.clone().create_physical_plan().await.unwrap();
+    let physical_plan = dataframe.clone().create_physical_plan().await.unwrap();
     let mut saw_partitioned_node = false;
     physical_plan
       .apply(|plan| {
@@ -416,21 +336,8 @@ fn geopackage_dataframe_uses_partitioned_scan_for_full_reads() {
       })
       .unwrap();
 
-    let batches = df.collect().await.unwrap();
-    let ids = batches
-      .iter()
-      .flat_map(|batch| {
-        let ids = batch
-          .column_by_name("id")
-          .unwrap()
-          .as_any()
-          .downcast_ref::<Int32Array>()
-          .unwrap();
-        (0..batch.num_rows())
-          .map(|index| ids.value(index))
-          .collect::<Vec<_>>()
-      })
-      .collect::<BTreeSet<_>>();
+    let batches = dataframe.collect().await.unwrap();
+    let ids = record_ids(&batches);
     (ids, saw_partitioned_node)
   });
 
@@ -490,11 +397,11 @@ fn geopackage_dataframe_limit_uses_partitioned_scan_path() {
   let input = open_gpkg_input(&path, None);
   let session = DataFusionSession::new(None, None).unwrap();
   let (row_count, ids, saw_partitioned_node) = runtime().block_on(async {
-    let df = input
+    let dataframe = input
       .to_dataframe(session.context(), RowRange::new(0, Some(3)))
       .await
       .unwrap();
-    let physical_plan = df.clone().create_physical_plan().await.unwrap();
+    let physical_plan = dataframe.clone().create_physical_plan().await.unwrap();
     let mut saw_partitioned_node = false;
     physical_plan
       .apply(|plan| {
@@ -505,21 +412,8 @@ fn geopackage_dataframe_limit_uses_partitioned_scan_path() {
       })
       .unwrap();
 
-    let batches = df.collect().await.unwrap();
-    let ids = batches
-      .iter()
-      .flat_map(|batch| {
-        let ids = batch
-          .column_by_name("id")
-          .unwrap()
-          .as_any()
-          .downcast_ref::<Int32Array>()
-          .unwrap();
-        (0..batch.num_rows())
-          .map(|index| ids.value(index))
-          .collect::<Vec<_>>()
-      })
-      .collect::<BTreeSet<_>>();
+    let batches = dataframe.collect().await.unwrap();
+    let ids = record_ids(&batches);
     (
       batches.iter().map(|batch| batch.num_rows()).sum::<usize>(),
       ids,
@@ -810,28 +704,6 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
   }
 }
 
-fn xyzm_geometry_wkt(name: &str, suffix: &str, dimension_values: &str) -> String {
-  let first = format!("1 2 {dimension_values}");
-  let second = format!("5 2 {dimension_values}");
-  let third = format!("5 6 {dimension_values}");
-  match name {
-    "point" => format!("POINT {suffix} ({first})"),
-    "line_string" => format!("LINESTRING {suffix} ({first}, {second})"),
-    "polygon" => format!("POLYGON {suffix} (({first}, {second}, {third}, {first}))"),
-    "multi_point" => format!("MULTIPOINT {suffix} (({first}), ({second}))"),
-    "multi_line_string" => {
-      format!("MULTILINESTRING {suffix} (({first}, {second}), ({second}, {third}))")
-    }
-    "multi_polygon" => {
-      format!("MULTIPOLYGON {suffix} ((({first}, {second}, {third}, {first})))")
-    }
-    "geometry_collection" => {
-      format!("GEOMETRYCOLLECTION {suffix} (POINT {suffix} ({first}))")
-    }
-    _ => unreachable!("unsupported XYZM geometry fixture: {name}"),
-  }
-}
-
 #[test]
 fn gpkg_input_respects_batch_limit() {
   let temp = TempDir::new().unwrap();
@@ -879,4 +751,128 @@ fn gpkg_input_respects_batch_limit() {
   });
 
   assert_eq!(rows, 2);
+}
+
+/// Write GeoPackage fixture layers with their declared geometry layouts and attributes.
+fn write_gpkg(path: &Path, layers: &[GpkgLayer<'_>]) {
+  if path.exists() {
+    std::fs::remove_file(path).unwrap();
+  }
+  let driver = DriverManager::get_driver_by_name("GPKG")
+    .expect("GDAL GPKG driver is required for GeoPackage tests");
+  let mut dataset = driver.create_vector_only(path).unwrap();
+  for layer_spec in layers {
+    let spatial_ref = layer_spec
+      .epsg
+      .map(|epsg| SpatialRef::from_epsg(epsg).unwrap());
+    let geometry_options = ["GEOMETRY_NAME=geometry"];
+    let layer = dataset
+      .create_layer(LayerOptions {
+        name: layer_spec.name,
+        srs: spatial_ref.as_ref(),
+        ty: layer_spec.geometry_type,
+        options: Some(&geometry_options),
+      })
+      .unwrap();
+    layer
+      .create_defn_fields(&[
+        ("id", OGRFieldType::OFTInteger),
+        ("name", OGRFieldType::OFTString),
+      ])
+      .unwrap();
+    let id_index = layer.defn().field_index("id").unwrap();
+    let name_index = layer.defn().field_index("name").unwrap();
+    for feature_spec in layer_spec.features {
+      let mut feature = Feature::new(layer.defn()).unwrap();
+      feature
+        .set_field_integer(id_index, feature_spec.id)
+        .unwrap();
+      if let Some(name) = feature_spec.name {
+        feature.set_field_string(name_index, name).unwrap();
+      }
+      feature
+        .set_geometry(Geometry::from_wkt(feature_spec.geometry_wkt).unwrap())
+        .unwrap();
+      feature.create(&layer).unwrap();
+    }
+  }
+  dataset.flush_cache().unwrap();
+}
+
+/// Open a fixture through the format-neutral GeoPackage input boundary.
+fn open_gpkg_input(path: &Path, layer: Option<&str>) -> Arc<dyn InputSource> {
+  runtime()
+    .block_on(open_input(
+      SourceFormat::GeoPackage,
+      &InputOpenOptions::new(
+        path.to_string_lossy().into_owned(),
+        layer.map(str::to_string),
+      ),
+    ))
+    .unwrap()
+}
+
+/// Read one string from either Arrow string representation emitted by input scans.
+fn string_value(array: &dyn arrow_array::Array, index: usize) -> String {
+  if let Some(array) = array.as_any().downcast_ref::<StringArray>() {
+    return array.value(index).to_string();
+  }
+  if let Some(array) = array.as_any().downcast_ref::<StringViewArray>() {
+    return array.value(index).to_string();
+  }
+  panic!("unexpected string array type: {:?}", array.data_type());
+}
+
+/// Copy one non-null WKB value from an Arrow geometry array.
+fn binary_value(array: &dyn arrow_array::Array, index: usize) -> Vec<u8> {
+  GeometryArray::try_new(array)
+    .unwrap()
+    .value(index)
+    .unwrap()
+    .to_vec()
+}
+
+/// Collect distinct feature identifiers without depending on partition execution order.
+fn record_ids(batches: &[RecordBatch]) -> BTreeSet<i32> {
+  let mut ids = BTreeSet::new();
+  for batch in batches {
+    let values = batch
+      .column_by_name("id")
+      .unwrap()
+      .as_any()
+      .downcast_ref::<Int32Array>()
+      .unwrap();
+    for index in 0..batch.num_rows() {
+      ids.insert(values.value(index));
+    }
+  }
+  ids
+}
+
+/// Build a geometry-kind fixture with the requested XYZ, XYM, or XYZM coordinate layout.
+fn xyzm_geometry_wkt(name: &str, suffix: &str, dimension_values: &str) -> String {
+  let first = format!("1 2 {dimension_values}");
+  let second = format!("5 2 {dimension_values}");
+  let third = format!("5 6 {dimension_values}");
+  match name {
+    "point" => format!("POINT {suffix} ({first})"),
+    "line_string" => format!("LINESTRING {suffix} ({first}, {second})"),
+    "polygon" => format!("POLYGON {suffix} (({first}, {second}, {third}, {first}))"),
+    "multi_point" => format!("MULTIPOINT {suffix} (({first}), ({second}))"),
+    "multi_line_string" => {
+      format!("MULTILINESTRING {suffix} (({first}, {second}), ({second}, {third}))")
+    }
+    "multi_polygon" => {
+      format!("MULTIPOLYGON {suffix} ((({first}, {second}, {third}, {first})))")
+    }
+    "geometry_collection" => {
+      format!("GEOMETRYCOLLECTION {suffix} (POINT {suffix} ({first}))")
+    }
+    _ => unreachable!("unsupported XYZM geometry fixture: {name}"),
+  }
+}
+
+/// Create an async runtime for source-opening and scan execution tests.
+fn runtime() -> Runtime {
+  Runtime::new().unwrap()
 }

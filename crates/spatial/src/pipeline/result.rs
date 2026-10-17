@@ -25,6 +25,7 @@ pub struct SpatialPipelineResult {
 }
 
 impl SpatialPipelineResult {
+  /// Capture completed row counts and a stable snapshot of execution warnings.
   pub(super) fn new(rows_expected: u64, rows_written: u64, warnings: &PipelineWarnings) -> Self {
     Self {
       rows_expected,

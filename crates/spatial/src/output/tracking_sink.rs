@@ -75,6 +75,7 @@ impl TrackingSink {
     Ok(Arc::new(Self::new(config, writer_options, reporter)))
   }
 
+  /// Retain sink configuration for cleanup alongside the Parquet writer and row reporter.
   fn new(
     config: FileSinkConfig,
     parquet_options: TableParquetOptions,
@@ -87,6 +88,7 @@ impl TrackingSink {
     }
   }
 
+  /// Delete every tracked output file and return the first cleanup failure.
   pub(super) async fn cleanup_written_files(
     &self,
     context: &Arc<TaskContext>,
@@ -107,6 +109,7 @@ impl TrackingSink {
 }
 
 impl fmt::Debug for TrackingSink {
+  /// Format the sink without exposing writer internals.
   fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
     formatter
       .debug_struct("TrackingSink")
@@ -115,6 +118,7 @@ impl fmt::Debug for TrackingSink {
 }
 
 impl DisplayAs for TrackingSink {
+  /// Display the underlying Parquet sink in physical plans.
   fn fmt_as(
     &self,
     format_type: DisplayFormatType,
@@ -126,10 +130,12 @@ impl DisplayAs for TrackingSink {
 
 #[async_trait]
 impl DataSink for TrackingSink {
+  /// Return the underlying Parquet sink's output schema.
   fn schema(&self) -> &SchemaRef {
     self.inner.schema()
   }
 
+  /// Report each successful input batch before forwarding it to the Parquet sink.
   async fn write_all(
     &self,
     data: SendableRecordBatchStream,

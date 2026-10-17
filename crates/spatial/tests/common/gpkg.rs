@@ -32,6 +32,7 @@ pub struct GpkgLayer<'a> {
   pub features: &'a [GpkgFeature<'a>],
 }
 
+/// Replace a GeoPackage fixture with the supplied layers, attributes, and WKT geometry.
 pub fn write_gpkg(path: &Path, layers: &[GpkgLayer<'_>]) {
   if path.exists() {
     std::fs::remove_file(path).unwrap();

@@ -16,6 +16,7 @@ mod support;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 
+/// Run the small writer benchmark suite with approximately 512 MiB input fixtures.
 fn benchmark_writer(criterion: &mut Criterion) {
   support::suite::benchmark_writer(criterion, 512, "small");
 }

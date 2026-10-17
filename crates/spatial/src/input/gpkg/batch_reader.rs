@@ -36,56 +36,11 @@ use crate::input::InputError;
 const GEOMETRY_EXTENSION_NAME: &str = "ARROW:extension:name";
 const GEOMETRY_EXTENSION_VALUE: &str = "ogc.wkb";
 
-/// Owns the GDAL layer and Arrow reader that share one stream lifetime.
-struct GpkgArrowReader {
-  _layer: OwnedLayer,
-  reader: ArrowArrayStreamReader,
-}
-
 /// Owns one GDAL Arrow stream and its batch normalization state.
 pub(super) struct GpkgBatchReader {
   arrow_reader: GpkgArrowReader,
   schema: SchemaRef,
   remaining: Option<usize>,
-}
-
-impl GpkgArrowReader {
-  /// Open a GDAL Arrow stream while retaining the layer that owns its lifetime.
-  fn open(
-    path: &Path,
-    layer_name: &str,
-    attribute_filter: Option<&str>,
-  ) -> Result<Self, InputError> {
-    let mut layer = open_gpkg_layer(path, layer_name)?;
-    if let Some(attribute_filter) = attribute_filter {
-      layer
-        .set_attribute_filter(attribute_filter)
-        .map_err(|source| InputError::GeoPackage {
-          operation: "apply GeoPackage attribute filter",
-          source,
-        })?;
-    }
-    let options = CslStringList::from_iter(["INCLUDE_FID=NO", "GEOMETRY_ENCODING=WKB"]);
-    let mut stream = FFI_ArrowArrayStream::empty();
-    unsafe {
-      layer.read_arrow_stream(
-        (&mut stream as *mut FFI_ArrowArrayStream).cast::<ArrowArrayStream>(),
-        &options,
-      )
-    }
-    .map_err(|source| InputError::GeoPackage {
-      operation: "open GeoPackage Arrow stream",
-      source,
-    })?;
-    let reader = ArrowArrayStreamReader::try_new(stream).map_err(|source| InputError::Arrow {
-      operation: "create GeoPackage Arrow reader",
-      source,
-    })?;
-    Ok(Self {
-      _layer: layer,
-      reader,
-    })
-  }
 }
 
 impl GpkgBatchReader {
@@ -148,6 +103,7 @@ impl GpkgBatchReader {
     })
   }
 
+  /// Preserve an input failure as an external DataFusion execution error.
   pub(super) fn to_datafusion_error(error: InputError) -> DataFusionError {
     DataFusionError::External(Box::new(error))
   }
@@ -161,36 +117,37 @@ impl GpkgBatchReader {
       return schema;
     }
 
-    let fields: Vec<_> = schema
-      .fields()
-      .iter()
-      .map(|field| {
-        if field.name() == source_geometry_name {
-          Arc::new(
-            Field::new(
-              geometry_column,
-              field.data_type().clone(),
-              field.is_nullable(),
-            )
-            .with_metadata(field.metadata().clone()),
+    let mut fields = Vec::with_capacity(schema.fields().len());
+    for field in schema.fields().iter() {
+      if field.name() == source_geometry_name {
+        fields.push(Arc::new(
+          Field::new(
+            geometry_column,
+            field.data_type().clone(),
+            field.is_nullable(),
           )
-        } else {
-          field.clone()
-        }
-      })
-      .collect();
+          .with_metadata(field.metadata().clone()),
+        ));
+      } else {
+        fields.push(field.clone());
+      }
+    }
 
     Arc::new(Schema::new_with_metadata(fields, schema.metadata().clone()))
   }
 
+  /// Find the first Arrow field marked with the OGC WKB extension.
   fn find_geometry_field_name(schema: &Schema) -> Option<&str> {
-    schema.fields().iter().find_map(|field| {
-      field
+    for field in schema.fields().iter() {
+      if field
         .metadata()
         .get(GEOMETRY_EXTENSION_NAME)
-        .filter(|value| value.as_str() == GEOMETRY_EXTENSION_VALUE)
-        .map(|_| field.name().as_str())
-    })
+        .is_some_and(|value| value == GEOMETRY_EXTENSION_VALUE)
+      {
+        return Some(field.name());
+      }
+    }
+    None
   }
 
   /// Replace a provider batch schema with the stable source schema after field normalization.
@@ -225,6 +182,51 @@ impl GpkgBatchReader {
   }
 }
 
+/// Owns the GDAL layer and Arrow reader that share one stream lifetime.
+struct GpkgArrowReader {
+  _layer: OwnedLayer,
+  reader: ArrowArrayStreamReader,
+}
+
+impl GpkgArrowReader {
+  /// Open a GDAL Arrow stream while retaining the layer that owns its lifetime.
+  fn open(
+    path: &Path,
+    layer_name: &str,
+    attribute_filter: Option<&str>,
+  ) -> Result<Self, InputError> {
+    let mut layer = open_gpkg_layer(path, layer_name)?;
+    if let Some(attribute_filter) = attribute_filter {
+      layer
+        .set_attribute_filter(attribute_filter)
+        .map_err(|source| InputError::GeoPackage {
+          operation: "apply GeoPackage attribute filter",
+          source,
+        })?;
+    }
+    let options = CslStringList::from_iter(["INCLUDE_FID=NO", "GEOMETRY_ENCODING=WKB"]);
+    let mut stream = FFI_ArrowArrayStream::empty();
+    unsafe {
+      layer.read_arrow_stream(
+        (&mut stream as *mut FFI_ArrowArrayStream).cast::<ArrowArrayStream>(),
+        &options,
+      )
+    }
+    .map_err(|source| InputError::GeoPackage {
+      operation: "open GeoPackage Arrow stream",
+      source,
+    })?;
+    let reader = ArrowArrayStreamReader::try_new(stream).map_err(|source| InputError::Arrow {
+      operation: "create GeoPackage Arrow reader",
+      source,
+    })?;
+    Ok(Self {
+      _layer: layer,
+      reader,
+    })
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use std::collections::HashMap;
@@ -234,16 +236,6 @@ mod tests {
   use arrow_schema::{DataType, Field, Schema};
 
   use super::{GEOMETRY_EXTENSION_NAME, GEOMETRY_EXTENSION_VALUE, GpkgBatchReader};
-
-  fn provider_schema(geometry_name: &str) -> Arc<Schema> {
-    Arc::new(Schema::new(vec![
-      Field::new("id", DataType::Int32, false),
-      Field::new(geometry_name, DataType::Binary, true).with_metadata(HashMap::from([(
-        GEOMETRY_EXTENSION_NAME.to_string(),
-        GEOMETRY_EXTENSION_VALUE.to_string(),
-      )])),
-    ]))
-  }
 
   #[test]
   fn schema_normalization_renames_only_the_geometry_extension_field() {
@@ -287,5 +279,16 @@ mod tests {
 
     assert_eq!(truncated.num_rows(), 2);
     assert_eq!(remaining, Some(0));
+  }
+
+  /// Build a provider schema with an extension-marked WKB geometry column.
+  fn provider_schema(geometry_name: &str) -> Arc<Schema> {
+    Arc::new(Schema::new(vec![
+      Field::new("id", DataType::Int32, false),
+      Field::new(geometry_name, DataType::Binary, true).with_metadata(HashMap::from([(
+        GEOMETRY_EXTENSION_NAME.to_string(),
+        GEOMETRY_EXTENSION_VALUE.to_string(),
+      )])),
+    ]))
   }
 }

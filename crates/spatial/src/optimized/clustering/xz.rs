@@ -50,36 +50,7 @@ use crate::optimized::multiscale::GEOKEY_COLUMN;
 use super::ClusterKey;
 
 impl ClusterKey {
-  /// Assign one XZ key to a feature's bounding extent.
-  ///
-  /// This implements the insertion algorithm from section 4.1 of the paper. It chooses the
-  /// smallest enlarged element that contains `feature_extent`, then encodes that element's
-  /// Z-order quadrant sequence with the sequence code from definition 2.
-  ///
-  /// First, estimate the finer candidate level allowed by lemma 1:
-  ///
-  /// ```text
-  /// floor(min(log2(W / w), log2(H / h))) + 1
-  /// ```
-  ///
-  /// `W` and `H` are the full extent dimensions. `w` and `h` are the feature dimensions.
-  /// Grid alignment decides whether that level fits. If the feature touches more than two
-  /// cells along either axis, use the parent level instead.
-  ///
-  /// Finally, locate the feature's lower-left corner in the selected Z-order grid and encode
-  /// its quadrant sequence. The key identifies the containing enlarged element, not the exact
-  /// feature bounds.
-  ///
-  /// # Example
-  ///
-  /// ```ignore
-  /// let full_extent = Extent2D { xmin: 0.0, ymin: 0.0, xmax: 8.0, ymax: 8.0 };
-  /// let feature_extent = Extent2D { xmin: 6.8, ymin: 0.0, xmax: 7.9, ymax: 0.1 };
-  ///
-  /// let key = ClusterKey::from_xz_extent(full_extent, feature_extent, 3);
-  ///
-  /// assert_eq!(key, ClusterKey::new(29));
-  /// ```
+  /// Encode the smallest enlarged XZ element containing the feature's XY extent.
   pub(crate) fn from_xz_extent(
     full_extent: Extent2D,
     feature_extent: Extent2D,
@@ -317,27 +288,6 @@ impl ComplexGeometryClusterKeyUdf {
       )
     })
   }
-
-  /// Read one extent from four scalar function arguments.
-  fn extent_from_args(arrays: &[ArrayRef], start: usize) -> DataFusionResult<Extent2D> {
-    Ok(Extent2D {
-      xmin: Self::first_f64(&arrays[start])?,
-      ymin: Self::first_f64(&arrays[start + 1])?,
-      xmax: Self::first_f64(&arrays[start + 2])?,
-      ymax: Self::first_f64(&arrays[start + 3])?,
-    })
-  }
-
-  /// Read the first non-null floating-point scalar from an argument array.
-  fn first_f64(array: &ArrayRef) -> DataFusionResult<f64> {
-    let array = as_float64_array(array.as_ref())?;
-    if array.is_empty() || array.is_null(0) {
-      return Err(DataFusionError::Execution(
-        "missing full extent argument for XZ clustering".to_string(),
-      ));
-    }
-    Ok(array.value(0))
-  }
 }
 
 impl ScalarUDFImpl for ComplexGeometryClusterKeyUdf {
@@ -367,22 +317,21 @@ impl ScalarUDFImpl for ComplexGeometryClusterKeyUdf {
     let geometry = arrays
       .first()
       .ok_or_else(|| DataFusionError::Execution("missing geometry argument".to_string()))?;
-    let full_extent = Self::extent_from_args(&arrays, 1)?;
+    let full_extent = xz_extent_from_args(&arrays, 1)?;
     let geometry = GeometryArray::try_new(geometry.as_ref())?;
-    let values = geometry
-      .values()
-      .map(|value| match value {
-        Some(bytes) => Ok(
-          ClusterKey::from_xz_extent(
-            full_extent,
-            Extent2D::from_wkb(bytes).map_err(to_datafusion_error)?,
-            self.cluster_depth,
-          )
-          .value(),
-        ),
-        None => Ok(0),
-      })
-      .collect::<DataFusionResult<Vec<_>>>()?;
+    let mut values = Vec::with_capacity(geometry.len());
+    for value in geometry.values() {
+      let key = match value {
+        Some(bytes) => ClusterKey::from_xz_extent(
+          full_extent,
+          Extent2D::from_wkb(bytes).map_err(to_datafusion_error)?,
+          self.cluster_depth,
+        )
+        .value(),
+        None => 0,
+      };
+      values.push(key);
+    }
     let output = UInt64Array::from(values);
     Ok(ColumnarValue::Array(Arc::new(output) as ArrayRef))
   }
@@ -427,27 +376,6 @@ impl ComplexGeometryBoundsClusterKeyUdf {
     static SIGNATURE: OnceLock<Signature> = OnceLock::new();
     SIGNATURE.get_or_init(|| Signature::exact(vec![DataType::Float64; 8], Volatility::Immutable))
   }
-
-  /// Read one extent from four scalar function arguments.
-  fn extent_from_args(arrays: &[ArrayRef], start: usize) -> DataFusionResult<Extent2D> {
-    Ok(Extent2D {
-      xmin: Self::first_f64(&arrays[start])?,
-      ymin: Self::first_f64(&arrays[start + 1])?,
-      xmax: Self::first_f64(&arrays[start + 2])?,
-      ymax: Self::first_f64(&arrays[start + 3])?,
-    })
-  }
-
-  /// Read the first non-null floating-point scalar from an argument array.
-  fn first_f64(array: &ArrayRef) -> DataFusionResult<f64> {
-    let array = as_float64_array(array.as_ref())?;
-    if array.is_empty() || array.is_null(0) {
-      return Err(DataFusionError::Execution(
-        "missing full extent argument for XZ clustering".to_string(),
-      ));
-    }
-    Ok(array.value(0))
-  }
 }
 
 impl ScalarUDFImpl for ComplexGeometryBoundsClusterKeyUdf {
@@ -478,7 +406,7 @@ impl ScalarUDFImpl for ComplexGeometryBoundsClusterKeyUdf {
     let ymin = as_float64_array(arrays[1].as_ref())?;
     let xmax = as_float64_array(arrays[2].as_ref())?;
     let ymax = as_float64_array(arrays[3].as_ref())?;
-    let full_extent = Self::extent_from_args(&arrays, 4)?;
+    let full_extent = xz_extent_from_args(&arrays, 4)?;
     let mut values = Vec::with_capacity(xmin.len());
     for index in 0..xmin.len() {
       values.push(
@@ -504,6 +432,27 @@ impl ScalarUDFImpl for ComplexGeometryBoundsClusterKeyUdf {
       Arc::new(UInt64Array::from(values)) as ArrayRef
     ))
   }
+}
+
+/// Read the full XY extent from four consecutive XZ clustering arguments.
+fn xz_extent_from_args(arrays: &[ArrayRef], start: usize) -> DataFusionResult<Extent2D> {
+  Ok(Extent2D {
+    xmin: first_xz_extent_value(&arrays[start])?,
+    ymin: first_xz_extent_value(&arrays[start + 1])?,
+    xmax: first_xz_extent_value(&arrays[start + 2])?,
+    ymax: first_xz_extent_value(&arrays[start + 3])?,
+  })
+}
+
+/// Read the first extent value while rejecting empty or null XZ arguments.
+fn first_xz_extent_value(array: &ArrayRef) -> DataFusionResult<f64> {
+  let array = as_float64_array(array.as_ref())?;
+  if array.is_empty() || array.is_null(0) {
+    return Err(DataFusionError::Execution(
+      "missing full extent argument for XZ clustering".to_string(),
+    ));
+  }
+  Ok(array.value(0))
 }
 
 #[cfg(test)]

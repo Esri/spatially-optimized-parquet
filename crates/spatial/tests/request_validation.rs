@@ -25,10 +25,6 @@ use tokio::runtime::Runtime;
 use common::fixture::wkb_point;
 use common::parquet::{geoparquet_kv_with_epsg, kv_map, write_parquet};
 
-fn runtime() -> Runtime {
-  Runtime::new().unwrap()
-}
-
 #[test]
 fn output_rejects_unsupported_crs_before_filesystem_mutation() {
   for mode in [OutputMode::Plain, OutputMode::Optimized] {
@@ -337,4 +333,9 @@ fn output_rejects_input_wkid_when_crs_metadata_exists() {
       .contains("already has spatial-reference metadata"),
     "{error:#}"
   );
+}
+
+/// Create the Tokio runtime used to verify request validation before output changes.
+fn runtime() -> Runtime {
+  Runtime::new().unwrap()
 }

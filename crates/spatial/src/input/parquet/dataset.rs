@@ -20,6 +20,19 @@ use std::path::{Component, Path, PathBuf};
 use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions};
 
 use crate::input::InputError;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DiscoveryMode {
+  Flat,
+  Recursive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum PartitionFamily {
+  Z,
+  Xz,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ParquetDataset {
   root: PathBuf,
@@ -65,27 +78,25 @@ impl ParquetDataset {
       )));
     }
     paths.sort();
-    let files = paths
-      .into_iter()
-      .map(|path| {
-        let relative_path = path
-          .strip_prefix(&root)
-          .map_err(|error| {
-            InputError::Metadata(format!(
-              "resolve relative parquet path {} from {}: {error}",
-              path.display(),
-              root.display()
-            ))
-          })?
-          .to_path_buf();
-        let partition = PartitionDescriptor::parse(&relative_path)?;
-        Ok(ParquetDatasetFile {
-          path,
-          relative_path,
-          partition,
-        })
-      })
-      .collect::<Result<Vec<_>, InputError>>()?;
+    let mut files = Vec::with_capacity(paths.len());
+    for path in paths {
+      let relative_path = path
+        .strip_prefix(&root)
+        .map_err(|error| {
+          InputError::Metadata(format!(
+            "resolve relative parquet path {} from {}: {error}",
+            path.display(),
+            root.display()
+          ))
+        })?
+        .to_path_buf();
+      let partition = PartitionDescriptor::parse(&relative_path)?;
+      files.push(ParquetDatasetFile {
+        path,
+        relative_path,
+        partition,
+      });
+    }
 
     Ok(Some(Self {
       root: input.to_path_buf(),
@@ -103,6 +114,7 @@ impl ParquetDataset {
     &self.files
   }
 
+  /// Collect Parquet paths without following symlinks, descending only in recursive mode.
   fn discover_directory_files(
     directory: &Path,
     mode: DiscoveryMode,
@@ -137,12 +149,14 @@ impl ParquetDataset {
     Ok(())
   }
 
+  /// Match the Parquet file extension without regard to case.
   fn has_parquet_extension(path: &Path) -> bool {
     path
       .extension()
       .is_some_and(|extension| extension.eq_ignore_ascii_case("parquet"))
   }
 
+  /// Resolve a relative input path against the current working directory.
   fn to_absolute_path(path: &Path) -> Result<PathBuf, InputError> {
     if path.is_absolute() {
       Ok(path.to_path_buf())
@@ -161,33 +175,13 @@ impl ParquetDataset {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DiscoveryMode {
-  Flat,
-  Recursive,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum PartitionFamily {
-  Z,
-  Xz,
-}
-
-impl PartitionFamily {
-  pub(crate) const fn directory_prefix(self) -> &'static str {
-    match self {
-      Self::Z => "z_order",
-      Self::Xz => "xz_order",
-    }
-  }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PartitionDescriptor {
   pub(crate) family: PartitionFamily,
   pub(crate) lower_bound: u64,
 }
 
 impl PartitionDescriptor {
+  /// Resolve at most one clustering partition from a relative dataset path.
   pub(crate) fn parse(relative_path: &Path) -> Result<Option<Self>, InputError> {
     let mut descriptor = None;
     for component in relative_path.components() {
@@ -209,6 +203,7 @@ impl PartitionDescriptor {
     Ok(descriptor)
   }
 
+  /// Parse one clustering directory name and its unsigned lower bound.
   fn parse_component(component: &str) -> Result<Option<Self>, InputError> {
     for family in [PartitionFamily::Z, PartitionFamily::Xz] {
       let prefix = format!("{}=", family.directory_prefix());
@@ -226,6 +221,16 @@ impl PartitionDescriptor {
       }
     }
     Ok(None)
+  }
+}
+
+impl PartitionFamily {
+  /// Return the directory key used by this clustering family.
+  pub(crate) const fn directory_prefix(self) -> &'static str {
+    match self {
+      Self::Z => "z_order",
+      Self::Xz => "xz_order",
+    }
   }
 }
 

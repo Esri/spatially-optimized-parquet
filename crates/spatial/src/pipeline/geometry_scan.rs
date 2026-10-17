@@ -19,6 +19,7 @@ use futures_util::StreamExt;
 use crate::geometry::{Extent2D, GeometryArray, GeometryType, WkbHeader};
 use crate::pipeline::PipelineError;
 
+/// Scan selected WKB rows for distinct geometry kinds and their combined XY extent.
 pub(super) async fn scan_geometry_metadata(
   dataframe: datafusion::dataframe::DataFrame,
   geometry_column: &str,
@@ -67,6 +68,7 @@ pub(super) async fn scan_geometry_metadata(
   ))
 }
 
+/// Accumulate geometry kinds and XY bounds from the non-null values of one WKB array.
 fn scan_binary_values(
   geometry: &GeometryArray<'_>,
   geometry_types: &mut Vec<GeometryType>,

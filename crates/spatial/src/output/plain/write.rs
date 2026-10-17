@@ -56,13 +56,12 @@ impl<'a> PlainWriter<'a> {
     covering: bool,
     compression: Option<&str>,
   ) -> Result<u64, OutputError> {
-    let mut expressions: Vec<Expr> = self
-      .source_schema
-      .fields()
-      .iter()
-      .filter(|field| field.name() != COVERING_BBOX_COLUMN)
-      .map(|field| ident(field.name()))
-      .collect();
+    let mut expressions = Vec::new();
+    for field in self.source_schema.fields() {
+      if field.name() != COVERING_BBOX_COLUMN {
+        expressions.push(ident(field.name()));
+      }
+    }
     if covering {
       expressions.push(ident(COVERING_BBOX_COLUMN));
     }

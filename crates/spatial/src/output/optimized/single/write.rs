@@ -15,7 +15,7 @@
 //! Persists globally ordered optimized output into one Parquet file.
 
 use crate::optimized::OptimizedLayout;
-use crate::output::{OutputError, OutputPath, Writer, WriterOptions};
+use crate::output::{OutputError, OutputPath, Writer};
 use crate::pipeline::{PipelineWarnings, SharedWriteReporter, SpatialWriteContext};
 
 use super::dataframe;
@@ -33,22 +33,7 @@ pub(crate) async fn write(
   warnings: PipelineWarnings,
 ) -> Result<u64, OutputError> {
   let dataframe = dataframe::dataframe(source_schema, context, layout, covering, warnings)?;
-  let metadata = layout
-    .parquet_metadata(context, covering)
-    .map_err(|error| OutputError::Configuration(format!("build optimized metadata: {error}")))?;
-  let geometry_crs = format!(
-    "srid:{}",
-    context
-      .reprojection()
-      .target_spatial_reference()
-      .wkid
-      .ok_or_else(|| {
-        OutputError::Configuration("missing output spatial-reference WKID".to_string())
-      })?
-  );
-  let writer_options = WriterOptions::new(compression.unwrap_or("snappy"), &metadata)?
-    .with_byte_stream_split_columns(layout.byte_stream_split_column_paths())
-    .with_geometry_column(&layout.geometry().geometry.column, geometry_crs);
+  let writer_options = super::super::writer_options(context, layout, covering, compression)?;
   let output_path = output_path
     .paths()?
     .into_iter()

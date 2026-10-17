@@ -43,77 +43,7 @@ pub(super) struct GpkgScanPartition {
 }
 
 impl GpkgScanPartition {
-  pub(super) fn attribute_filter(&self) -> Option<String> {
-    match (self.lower_rowid, self.upper_rowid) {
-      (None, None) => None,
-      (Some(lower_rowid), None) => Some(format!("rowid >= {lower_rowid}")),
-      (None, Some(upper_rowid)) => Some(format!("rowid < {upper_rowid}")),
-      (Some(lower_rowid), Some(upper_rowid)) => {
-        Some(format!("rowid >= {lower_rowid} AND rowid < {upper_rowid}"))
-      }
-    }
-  }
-}
-
-#[derive(Debug)]
-/// Opens and streams one independently executable GeoPackage rowid partition.
-pub(super) struct GpkgPartitionStream {
-  input_path: PathBuf,
-  layer_name: String,
-  schema: SchemaRef,
-  attribute_filter: Option<String>,
-}
-
-impl GpkgPartitionStream {
-  pub(super) fn new(
-    input_path: PathBuf,
-    layer_name: String,
-    schema: SchemaRef,
-    attribute_filter: Option<String>,
-  ) -> Self {
-    Self {
-      input_path,
-      layer_name,
-      schema,
-      attribute_filter,
-    }
-  }
-}
-
-impl PartitionStream for GpkgPartitionStream {
-  fn schema(&self) -> &SchemaRef {
-    &self.schema
-  }
-
-  fn execute(&self, _ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
-    let result = GpkgBatchReader::open(
-      &self.input_path,
-      &self.layer_name,
-      self.schema.clone(),
-      self.attribute_filter.as_deref(),
-      None,
-    );
-
-    match result {
-      Ok(reader) => Box::pin(RecordBatchStreamAdapter::new(
-        self.schema.clone(),
-        reader
-          .into_stream()
-          .map_err(GpkgBatchReader::to_datafusion_error),
-      )),
-      Err(err) => Box::pin(RecordBatchStreamAdapter::new(
-        self.schema.clone(),
-        stream::once(async { Err(GpkgBatchReader::to_datafusion_error(err)) }),
-      )),
-    }
-  }
-}
-
-impl GpkgScanPartition {
-  /// Resolve rowid boundaries that divide a requested row range across DataFusion partitions.
-  ///
-  /// Boundary discovery issues SQLite offset queries before execution. If any boundary
-  /// cannot be resolved, the planner falls back to one contiguous partition.
+  /// Divide selected rows by rowid boundaries, falling back to one scan for unresolved boundaries.
   pub(super) fn plan(
     path: &Path,
     layer_name: &str,
@@ -151,6 +81,19 @@ impl GpkgScanPartition {
     Ok(partitions)
   }
 
+  /// Build the SQLite filter for this partition's inclusive and exclusive rowid bounds.
+  pub(super) fn attribute_filter(&self) -> Option<String> {
+    match (self.lower_rowid, self.upper_rowid) {
+      (None, None) => None,
+      (Some(lower_rowid), None) => Some(format!("rowid >= {lower_rowid}")),
+      (None, Some(upper_rowid)) => Some(format!("rowid < {upper_rowid}")),
+      (Some(lower_rowid), Some(upper_rowid)) => {
+        Some(format!("rowid >= {lower_rowid} AND rowid < {upper_rowid}"))
+      }
+    }
+  }
+
+  /// Clamp the requested partition count to the number of selected features.
   fn effective_count(total_rows: u64, row_range: RowRange, target_partitions: usize) -> usize {
     let effective_rows = row_range.effective_rows(total_rows);
     if effective_rows <= 1 {
@@ -159,8 +102,33 @@ impl GpkgScanPartition {
     target_partitions.max(1).min(effective_rows as usize)
   }
 
-  fn quoted_sqlite_identifier(identifier: &str) -> String {
-    format!("\"{}\"", identifier.replace('"', "\"\""))
+  /// Build one contiguous rowid partition for the requested source range.
+  fn fallback(
+    dataset: &Dataset,
+    layer_name: &str,
+    total_rows: u64,
+    row_range: RowRange,
+  ) -> Result<Vec<Self>, InputError> {
+    let start = row_range.start() as u64;
+    let end = start + row_range.effective_rows(total_rows);
+    Ok(vec![Self {
+      lower_rowid: Self::rowid_at_offset(dataset, layer_name, total_rows, start)?,
+      upper_rowid: Self::rowid_at_offset(dataset, layer_name, total_rows, end)?,
+    }])
+  }
+
+  /// Resolve a rowid boundary only when its offset lies inside the dataset.
+  fn rowid_at_offset(
+    dataset: &Dataset,
+    layer_name: &str,
+    total_rows: u64,
+    offset: u64,
+  ) -> Result<Option<i64>, InputError> {
+    if offset < total_rows {
+      Self::query_rowid_at_offset(dataset, layer_name, offset)
+    } else {
+      Ok(None)
+    }
   }
 
   /// Query the rowid at one logical feature offset for partition-boundary discovery.
@@ -200,31 +168,66 @@ impl GpkgScanPartition {
       })
   }
 
-  fn rowid_at_offset(
-    dataset: &Dataset,
-    layer_name: &str,
-    total_rows: u64,
-    offset: u64,
-  ) -> Result<Option<i64>, InputError> {
-    if offset < total_rows {
-      Self::query_rowid_at_offset(dataset, layer_name, offset)
-    } else {
-      Ok(None)
+  /// Quote a SQLite identifier while escaping embedded double quotes.
+  fn quoted_sqlite_identifier(identifier: &str) -> String {
+    format!("\"{}\"", identifier.replace('"', "\"\""))
+  }
+}
+
+#[derive(Debug)]
+/// Opens and streams one independently executable GeoPackage rowid partition.
+pub(super) struct GpkgPartitionStream {
+  input_path: PathBuf,
+  layer_name: String,
+  schema: SchemaRef,
+  attribute_filter: Option<String>,
+}
+
+impl GpkgPartitionStream {
+  /// Retain the layer location, normalized schema, and partition filter for execution.
+  pub(super) fn new(
+    input_path: PathBuf,
+    layer_name: String,
+    schema: SchemaRef,
+    attribute_filter: Option<String>,
+  ) -> Self {
+    Self {
+      input_path,
+      layer_name,
+      schema,
+      attribute_filter,
     }
   }
+}
 
-  fn fallback(
-    dataset: &Dataset,
-    layer_name: &str,
-    total_rows: u64,
-    row_range: RowRange,
-  ) -> Result<Vec<Self>, InputError> {
-    let start = row_range.start() as u64;
-    let end = start + row_range.effective_rows(total_rows);
-    Ok(vec![Self {
-      lower_rowid: Self::rowid_at_offset(dataset, layer_name, total_rows, start)?,
-      upper_rowid: Self::rowid_at_offset(dataset, layer_name, total_rows, end)?,
-    }])
+impl PartitionStream for GpkgPartitionStream {
+  /// Return the normalized schema shared by every scan partition.
+  fn schema(&self) -> &SchemaRef {
+    &self.schema
+  }
+
+  /// Open the partition's GDAL stream and expose opening failures through the batch stream.
+  fn execute(&self, _ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
+    let result = GpkgBatchReader::open(
+      &self.input_path,
+      &self.layer_name,
+      self.schema.clone(),
+      self.attribute_filter.as_deref(),
+      None,
+    );
+
+    match result {
+      Ok(reader) => Box::pin(RecordBatchStreamAdapter::new(
+        self.schema.clone(),
+        reader
+          .into_stream()
+          .map_err(GpkgBatchReader::to_datafusion_error),
+      )),
+      Err(err) => Box::pin(RecordBatchStreamAdapter::new(
+        self.schema.clone(),
+        stream::once(async { Err(GpkgBatchReader::to_datafusion_error(err)) }),
+      )),
+    }
   }
 }
 

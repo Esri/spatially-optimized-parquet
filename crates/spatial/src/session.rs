@@ -34,11 +34,6 @@ use datafusion_execution::runtime_env::{RuntimeEnv, RuntimeEnvBuilder};
 use sysinfo::System;
 use tempfile::TempDir;
 
-const DEFAULT_SORT_SPILL_RESERVATION_BYTES: usize = 10 * 1024 * 1024;
-const TRACKED_MEMORY_CONSUMER_COUNT: usize = 5;
-const NO_IN_PLACE_SORT_THRESHOLD_BYTES: usize = 1;
-const SORT_SPILL_RESERVATION_ENV: &str = "OPT_PARQUET_DF_SORT_SPILL_RESERVATION_BYTES";
-
 /// Represents failures while configuring one DataFusion execution session.
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
@@ -58,6 +53,11 @@ pub enum SessionError {
   #[error("{0}")]
   Memory(String),
 }
+
+const DEFAULT_SORT_SPILL_RESERVATION_BYTES: usize = 10 * 1024 * 1024;
+const TRACKED_MEMORY_CONSUMER_COUNT: usize = 5;
+const NO_IN_PLACE_SORT_THRESHOLD_BYTES: usize = 1;
+const SORT_SPILL_RESERVATION_ENV: &str = "OPT_PARQUET_DF_SORT_SPILL_RESERVATION_BYTES";
 
 /// Owns a DataFusion context and the temporary spill directory required by its runtime.
 ///
@@ -110,6 +110,7 @@ impl DataFusionSession {
     &self.ctx
   }
 
+  /// Build the spilling runtime with bounded memory and retained consumer diagnostics.
   fn new_runtime_env(
     spill_dir: &std::path::Path,
     memory_limit_bytes: usize,
@@ -119,21 +120,21 @@ impl DataFusionSession {
       NonZeroUsize::new(TRACKED_MEMORY_CONSUMER_COUNT)
         .expect("tracked memory consumer count must be non-zero"),
     ));
-    Ok(
-      RuntimeEnvBuilder::new()
-        .with_memory_pool(memory_pool)
-        .with_temp_file_path(spill_dir)
-        .build()
-        .map_err(SessionError::Runtime)?,
-    )
+    RuntimeEnvBuilder::new()
+      .with_memory_pool(memory_pool)
+      .with_temp_file_path(spill_dir)
+      .build()
+      .map_err(SessionError::Runtime)
   }
 
+  /// Resolve the default memory limit from the machine's physical memory.
   fn default_memory_limit_bytes() -> Result<usize, SessionError> {
     let mut system = System::new();
     system.refresh_memory();
     Self::half_physical_memory(system.total_memory())
   }
 
+  /// Resolve half of physical memory, rejecting zero or unaddressable limits.
   fn half_physical_memory(total_memory_bytes: u64) -> Result<usize, SessionError> {
     let memory_limit_bytes = total_memory_bytes / 2;
     if memory_limit_bytes == 0 {
@@ -148,14 +149,12 @@ impl DataFusionSession {
     })
   }
 
+  /// Resolve a positive sort spill reservation or retain the default for invalid overrides.
   fn configured_sort_spill_reservation_bytes() -> usize {
-    Self::env_usize(SORT_SPILL_RESERVATION_ENV).unwrap_or(DEFAULT_SORT_SPILL_RESERVATION_BYTES)
-  }
-
-  fn env_usize(name: &str) -> Option<usize> {
-    std::env::var(name)
+    std::env::var(SORT_SPILL_RESERVATION_ENV)
       .ok()
       .and_then(|value| value.parse::<usize>().ok())
       .filter(|value| *value > 0)
+      .unwrap_or(DEFAULT_SORT_SPILL_RESERVATION_BYTES)
   }
 }

@@ -30,6 +30,7 @@ use parquet::basic::Compression;
 use parquet::file::metadata::KeyValue;
 use parquet::file::properties::WriterProperties;
 
+/// Write fixture batches with explicit compression and append the supplied footer metadata.
 pub fn write_parquet(
   path: &Path,
   schema: &SchemaRef,
@@ -51,6 +52,7 @@ pub fn write_parquet(
   writer.close().unwrap();
 }
 
+/// Scan fixture Parquet output without collecting DataFusion statistics.
 pub async fn scan_parquet(input_path: &str) -> datafusion::common::Result<DataFrame> {
   let session_config = SessionConfig::new().with_collect_statistics(false);
   SessionContext::new_with_config(session_config)
@@ -58,10 +60,12 @@ pub async fn scan_parquet(input_path: &str) -> datafusion::common::Result<DataFr
     .await
 }
 
+/// Build WGS 84 GeoParquet metadata for the supplied primary geometry column and types.
 pub fn geoparquet_kv(primary_column: &str, geometry_types: &[&str]) -> KeyValue {
   geoparquet_kv_with_epsg(primary_column, geometry_types, 4326)
 }
 
+/// Build GeoParquet WKB metadata with the selected EPSG CRS encoded as PROJJSON.
 pub fn geoparquet_kv_with_epsg(
   primary_column: &str,
   geometry_types: &[&str],
@@ -87,27 +91,29 @@ pub fn geoparquet_kv_with_epsg(
   KeyValue::new("geo".to_string(), Some(value.to_string()))
 }
 
+/// Collect footer entries with values, retaining the last value for each repeated key.
 pub fn kv_map(path: &Path) -> HashMap<String, String> {
   let metadata = reader_metadata(path);
-  metadata
+  let entries = metadata
     .metadata()
     .file_metadata()
     .key_value_metadata()
-    .map_or(&[][..], |items| items.as_slice())
-    .iter()
-    .filter_map(|entry| {
-      entry
-        .value
-        .as_ref()
-        .map(|value| (entry.key.clone(), value.clone()))
-    })
-    .collect()
+    .map_or(&[][..], Vec::as_slice);
+  let mut values = HashMap::new();
+  for entry in entries {
+    if let Some(value) = &entry.value {
+      values.insert(entry.key.clone(), value.clone());
+    }
+  }
+  values
 }
 
+/// Copy the Arrow schema decoded from the fixture Parquet footer.
 pub fn raw_parquet_schema(path: &Path) -> Arc<Schema> {
   Arc::new(reader_metadata(path).schema().as_ref().clone())
 }
 
+/// Collect recursive Parquet fixture paths in deterministic sorted order.
 pub fn parquet_files(path: &Path) -> Vec<PathBuf> {
   let mut files = Vec::new();
   for entry in std::fs::read_dir(path).unwrap() {
@@ -125,6 +131,7 @@ pub fn parquet_files(path: &Path) -> Vec<PathBuf> {
   files
 }
 
+/// Load fixture Parquet footer metadata with the default Arrow reader options.
 pub fn reader_metadata(path: &Path) -> ArrowReaderMetadata {
   ArrowReaderMetadata::load(&File::open(path).unwrap(), ArrowReaderOptions::new()).unwrap()
 }

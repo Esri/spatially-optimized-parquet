@@ -16,6 +16,14 @@
 
 use std::sync::Arc;
 
+pub(crate) type SharedWriteReporter = Arc<dyn WriteReporter>;
+
+/// Receives cumulative row counts without coupling the library to terminal output.
+pub trait WriteReporter: Send + Sync {
+  /// Report cumulative progress for one durable output write.
+  fn report(&self, progress: WriteProgress);
+}
+
 /// Represents cumulative write progress for one spatial pipeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WriteProgress {
@@ -24,6 +32,7 @@ pub struct WriteProgress {
 }
 
 impl WriteProgress {
+  /// Build a cumulative progress snapshot from written and expected row counts.
   pub(crate) const fn new(rows_written: u64, total_rows: u64) -> Self {
     Self {
       rows_written,
@@ -42,19 +51,12 @@ impl WriteProgress {
   }
 }
 
-/// Receives cumulative row counts without coupling the library to terminal output.
-pub trait WriteReporter: Send + Sync {
-  /// Report cumulative progress for one durable output write.
-  fn report(&self, progress: WriteProgress);
-}
-
 impl<Callback> WriteReporter for Callback
 where
   Callback: Fn(WriteProgress) + Send + Sync,
 {
+  /// Forward a cumulative progress snapshot to the caller's callback.
   fn report(&self, progress: WriteProgress) {
     self(progress);
   }
 }
-
-pub(crate) type SharedWriteReporter = Arc<dyn WriteReporter>;

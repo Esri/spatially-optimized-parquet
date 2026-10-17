@@ -63,7 +63,7 @@ pub(crate) struct QuantizedGeometry {
   pub(crate) ty: GeometryType,
   pub(crate) coordinates: Vec<i64>,
   pub(crate) lengths: Vec<u32>,
-  /// Preserve WKB polygon boundaries for writing non-PBF outputs.
+  /// Defines the number of consecutive rings belonging to each polygon for WKB output.
   pub(crate) polygon_ring_counts: Vec<u32>,
   pub(crate) has_z: bool,
   pub(crate) has_m: bool,
@@ -1430,6 +1430,7 @@ mod tests {
     }
   }
 
+  /// Build a unit-grid simplification policy with the requested minimum length and Z/M.
   fn options(min_length: usize, has_z: bool, has_m: bool) -> QuantizationOptions {
     QuantizationOptions {
       transform: QuantizationTransform {
@@ -1443,6 +1444,7 @@ mod tests {
     }
   }
 
+  /// Build a single-part line fixture from ordered source vertices.
   fn polyline(coordinates: Vec<Coord>) -> Geometry {
     let length = u32::try_from(coordinates.len()).unwrap();
     Geometry::new(
@@ -1454,6 +1456,7 @@ mod tests {
     .unwrap()
   }
 
+  /// Build XY source vertices without Z/M components.
   fn xy(positions: &[(f64, f64)]) -> Vec<Coord> {
     positions
       .iter()
@@ -1461,6 +1464,7 @@ mod tests {
       .collect()
   }
 
+  /// Build one source vertex with explicit optional Z/M components.
   fn coordinate(x: f64, y: f64, z: Option<f64>, m: Option<f64>) -> Coord {
     Coord { x, y, z, m }
   }

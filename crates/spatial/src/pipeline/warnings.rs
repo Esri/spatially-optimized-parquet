@@ -24,6 +24,7 @@ pub(crate) struct PipelineWarnings {
 }
 
 impl PipelineWarnings {
+  /// Record a warning once across concurrent pipeline workers.
   pub(crate) fn record(&self, message: String) {
     self
       .messages
@@ -32,6 +33,7 @@ impl PipelineWarnings {
       .insert(message);
   }
 
+  /// Return deduplicated warning messages in deterministic sorted order.
   pub(crate) fn messages(&self) -> Vec<String> {
     self
       .messages

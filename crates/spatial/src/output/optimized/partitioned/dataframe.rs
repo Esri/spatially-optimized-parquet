@@ -56,15 +56,7 @@ pub(super) fn dataframe(
   let dataframe = context
     .frame()
     .dataframe()
-    .select(
-      source_schema
-        .fields()
-        .iter()
-        .filter(|field| field.name() != COVERING_BBOX_COLUMN)
-        .map(|field| ident(field.name()))
-        .chain(std::iter::once(ident(COVERING_BBOX_COLUMN)))
-        .collect::<Vec<_>>(),
-    )
+    .select(super::super::source_expressions(source_schema))
     .map_err(|source| OutputError::DataFusion {
       operation: "select partitioned output columns",
       source,

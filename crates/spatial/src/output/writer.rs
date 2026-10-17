@@ -69,8 +69,10 @@ impl WriterOptions {
     options.global.dictionary_enabled = Some(false);
     options.global.writer_version = DFParquetWriterVersion::V2_0;
     options.global.maximum_parallel_row_group_writers = Self::available_parallelism();
-    options.global.max_row_group_size = Self::configured_max_row_group_size();
-    options.global.write_batch_size = Self::configured_write_batch_size();
+    options.global.max_row_group_size =
+      Self::env_usize(ROW_GROUP_SIZE_ENV).unwrap_or(DEFAULT_MAX_ROW_GROUP_SIZE);
+    options.global.write_batch_size =
+      Self::env_usize(WRITE_BATCH_SIZE_ENV).unwrap_or(DEFAULT_WRITE_BATCH_SIZE);
     options.key_value_metadata = kv_metadata
       .iter()
       .map(|kv| (kv.key.clone(), kv.value.clone()))
@@ -87,35 +89,6 @@ impl WriterOptions {
     self.geometry_column = Some(column.to_string());
     self.geometry_crs = Some(crs);
     self
-  }
-
-  /// Enable adaptive dictionary encoding for physical string leaves.
-  fn into_table_options(mut self, schema: &Schema) -> DataFusionResult<TableParquetOptions> {
-    let parquet_schema = ArrowSchemaConverter::new().convert(schema)?;
-    for column in parquet_schema.columns() {
-      if matches!(column.logical_type_ref(), Some(LogicalType::String)) {
-        self
-          .options
-          .column_specific_options
-          .entry(column.path().string())
-          .or_default()
-          .dictionary_enabled = Some(true);
-      }
-    }
-    Ok(self.options)
-  }
-
-  fn apply_geometry_schema(
-    &self,
-    input: Arc<dyn ExecutionPlan>,
-  ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-    match (&self.geometry_column, &self.geometry_crs) {
-      (Some(column), Some(crs)) => Ok(Arc::new(GeometrySchemaExec::try_new(input, column, crs)?)),
-      (None, None) => Ok(input),
-      _ => Err(datafusion::common::DataFusionError::Plan(
-        "geometry column and CRS must be configured together".to_string(),
-      )),
-    }
   }
 
   /// Apply byte-stream splitting to selected floating-point coordinate leaves.
@@ -136,6 +109,37 @@ impl WriterOptions {
     self
   }
 
+  /// Enable adaptive dictionary encoding for physical string leaves.
+  fn into_table_options(mut self, schema: &Schema) -> DataFusionResult<TableParquetOptions> {
+    let parquet_schema = ArrowSchemaConverter::new().convert(schema)?;
+    for column in parquet_schema.columns() {
+      if matches!(column.logical_type_ref(), Some(LogicalType::String)) {
+        self
+          .options
+          .column_specific_options
+          .entry(column.path().string())
+          .or_default()
+          .dictionary_enabled = Some(true);
+      }
+    }
+    Ok(self.options)
+  }
+
+  /// Annotate the configured primary WKB field while rejecting incomplete geometry settings.
+  fn apply_geometry_schema(
+    &self,
+    input: Arc<dyn ExecutionPlan>,
+  ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
+    match (&self.geometry_column, &self.geometry_crs) {
+      (Some(column), Some(crs)) => Ok(Arc::new(GeometrySchemaExec::try_new(input, column, crs)?)),
+      (None, None) => Ok(input),
+      _ => Err(datafusion::common::DataFusionError::Plan(
+        "geometry column and CRS must be configured together".to_string(),
+      )),
+    }
+  }
+
+  /// Parse a supported compression name using the codec's default compression level.
   fn parse_compression(compression: &str) -> Result<Compression, OutputError> {
     let codec = match compression.to_ascii_lowercase().as_str() {
       "snappy" => Compression::SNAPPY,
@@ -154,6 +158,7 @@ impl WriterOptions {
     Ok(codec)
   }
 
+  /// Format the Parquet codec and compression level as a DataFusion option value.
   fn datafusion_compression_name(compression: Compression) -> String {
     match compression {
       Compression::UNCOMPRESSED => "uncompressed".to_string(),
@@ -167,20 +172,14 @@ impl WriterOptions {
     }
   }
 
-  fn configured_max_row_group_size() -> usize {
-    Self::env_usize(ROW_GROUP_SIZE_ENV).unwrap_or(DEFAULT_MAX_ROW_GROUP_SIZE)
-  }
-
-  fn configured_write_batch_size() -> usize {
-    Self::env_usize(WRITE_BATCH_SIZE_ENV).unwrap_or(DEFAULT_WRITE_BATCH_SIZE)
-  }
-
+  /// Resolve the available row-group writer concurrency with a single-thread fallback.
   fn available_parallelism() -> usize {
     std::thread::available_parallelism()
       .map(usize::from)
       .unwrap_or(1)
   }
 
+  /// Read a positive writer-size override while ignoring missing or invalid values.
   fn env_usize(name: &str) -> Option<usize> {
     std::env::var(name)
       .ok()
@@ -261,29 +260,6 @@ impl Writer {
     Ok(rows_written)
   }
 
-  fn project_without_columns(
-    input: Arc<dyn ExecutionPlan>,
-    hidden_columns: &[&str],
-  ) -> Result<Arc<dyn ExecutionPlan>, OutputError> {
-    let expressions = input
-      .schema()
-      .fields()
-      .iter()
-      .enumerate()
-      .filter(|(_, field)| !hidden_columns.contains(&field.name().as_str()))
-      .map(|(index, field)| ProjectionExpr {
-        expr: Arc::new(PhysicalColumn::new(field.name(), index)),
-        alias: field.name().to_string(),
-      })
-      .collect::<Vec<_>>();
-    ProjectionExec::try_new(expressions, input)
-      .map(|plan| Arc::new(plan) as Arc<dyn ExecutionPlan>)
-      .map_err(|source| OutputError::DataFusion {
-        operation: "project output columns",
-        source,
-      })
-  }
-
   /// Write one DataFrame through partition-local Parquet sinks.
   pub(crate) async fn write_partitioned<RewritePlan>(
     self,
@@ -334,6 +310,29 @@ impl Writer {
     Ok(rows_written)
   }
 
+  /// Remove hidden fields from the physical output while retaining source column order.
+  fn project_without_columns(
+    input: Arc<dyn ExecutionPlan>,
+    hidden_columns: &[&str],
+  ) -> Result<Arc<dyn ExecutionPlan>, OutputError> {
+    let mut expressions = Vec::new();
+    for (index, field) in input.schema().fields().iter().enumerate() {
+      if !hidden_columns.contains(&field.name().as_str()) {
+        expressions.push(ProjectionExpr {
+          expr: Arc::new(PhysicalColumn::new(field.name(), index)),
+          alias: field.name().to_string(),
+        });
+      }
+    }
+    ProjectionExec::try_new(expressions, input)
+      .map(|plan| Arc::new(plan) as Arc<dyn ExecutionPlan>)
+      .map_err(|source| OutputError::DataFusion {
+        operation: "project output columns",
+        source,
+      })
+  }
+
+  /// Execute a sink plan, clean up failed writes, and decode its authoritative row count.
   async fn execute_sink_plan(
     label: &str,
     plan: Arc<dyn ExecutionPlan>,

@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::geometry::{Coord, WkbHeader};
 use crate::geometry::{CoordinateDimensions, Extent2D, GeometryFamily, GeometryType};
-use crate::geometry::{WkbCoordinate, WkbHeader};
 use crate::optimized::{GeometryPartRole, GeometryPartSink};
 use arrow_array::{Array, BinaryArray, BinaryViewArray, LargeBinaryArray};
 
@@ -40,6 +40,7 @@ pub(crate) struct GeometryValidationInfo {
 pub(crate) struct GeometryValidator;
 
 impl GeometryValidator {
+  /// Inspect WKB dimensions, finite XY bounds, and polygon ring closure and winding.
   pub(crate) fn inspect(bytes: &[u8]) -> Result<GeometryValidationInfo, ValidationError> {
     let mut sink = InspectionSink::default();
     let header = WkbHeader::visit(bytes, &mut sink)?;
@@ -52,6 +53,7 @@ impl GeometryValidator {
     })
   }
 
+  /// Compare sampled WKB geometry with metadata and report coordinate and ring violations.
   pub(crate) fn validate(
     inspection: &GeometryValidationInfo,
     expected_geometry_type: GeometryFamily,
@@ -128,6 +130,7 @@ impl GeometryValidator {
     }
   }
 
+  /// Copy a non-null value from any supported Arrow binary array representation.
   pub(crate) fn binary_value(
     array: &dyn Array,
     index: usize,
@@ -150,6 +153,7 @@ impl GeometryValidator {
     )))
   }
 
+  /// Match WKB single and multipart types against their declared geometry family.
   fn matches_geometry_type(inspection: &GeometryValidationInfo, expected: GeometryFamily) -> bool {
     match expected {
       GeometryFamily::Point => inspection.ty == GeometryType::Point,
@@ -176,6 +180,7 @@ struct InspectionSink {
 }
 
 impl Default for InspectionSink {
+  /// Initialize an empty inspection whose finiteness flag accumulates every visited XY pair.
   fn default() -> Self {
     Self {
       extent: None,
@@ -188,31 +193,15 @@ impl Default for InspectionSink {
   }
 }
 
-impl InspectionSink {
-  fn signed_area(coordinates: &[(f64, f64)]) -> f64 {
-    if coordinates.len() < 3 {
-      return 0.0;
-    }
-    let mut twice_area = 0.0;
-    for pair in coordinates.windows(2) {
-      twice_area += pair[0].0 * pair[1].1 - pair[1].0 * pair[0].1;
-    }
-    if coordinates.first() != coordinates.last() {
-      let first = coordinates[0];
-      let last = coordinates[coordinates.len() - 1];
-      twice_area += last.0 * first.1 - first.0 * last.1;
-    }
-    twice_area / 2.0
-  }
-}
-
 impl GeometryPartSink for InspectionSink {
+  /// Start a geometry part with an empty coordinate sequence and its ring role.
   fn start_part(&mut self, role: GeometryPartRole) {
     self.current_role = Some(role);
     self.current_coordinates.clear();
   }
 
-  fn push_coord(&mut self, coordinate: WkbCoordinate) {
+  /// Accumulate finite XY bounds and retain every XY pair for ring inspection.
+  fn push_coord(&mut self, coordinate: Coord) {
     let x = coordinate.x;
     let y = coordinate.y;
     self.has_coordinate = true;
@@ -238,6 +227,7 @@ impl GeometryPartSink for InspectionSink {
     self.current_coordinates.push((x, y));
   }
 
+  /// Record polygon ring closure, winding, and degeneracy before clearing the part.
   fn finish_part(&mut self) {
     let role = self.current_role.take().unwrap_or(GeometryPartRole::Other);
     if role == GeometryPartRole::Other {
@@ -255,6 +245,25 @@ impl GeometryPartSink for InspectionSink {
       degenerated,
     });
     self.current_coordinates.clear();
+  }
+}
+
+impl InspectionSink {
+  /// Compute signed XY ring area while closing an open coordinate sequence implicitly.
+  fn signed_area(coordinates: &[(f64, f64)]) -> f64 {
+    if coordinates.len() < 3 {
+      return 0.0;
+    }
+    let mut twice_area = 0.0;
+    for pair in coordinates.windows(2) {
+      twice_area += pair[0].0 * pair[1].1 - pair[1].0 * pair[0].1;
+    }
+    if coordinates.first() != coordinates.last() {
+      let first = coordinates[0];
+      let last = coordinates[coordinates.len() - 1];
+      twice_area += last.0 * first.1 - first.0 * last.1;
+    }
+    twice_area / 2.0
   }
 }
 

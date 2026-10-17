@@ -44,6 +44,7 @@ impl DatasetValidator {
     Ok(report)
   }
 
+  /// Validate file metadata, schema, row data, and dataset clustering boundaries in order.
   fn validate_dataset(dataset: &ParquetDataset, report: &mut ValidationReport) {
     let validated_files = FileValidator::load_all(dataset.files(), report);
     let validated_dataset_files = MetadataValidator::validate_dataset(&validated_files, report);
@@ -52,12 +53,14 @@ impl DatasetValidator {
     Self::validate_clustering_ranges(&ranges, report);
   }
 
+  /// Validate clustering families and partition bounds before reporting range overlap.
   fn validate_clustering_ranges(ranges: &[ClusteringRange], report: &mut ValidationReport) {
     Self::validate_clustering_families(ranges, report);
     Self::validate_partition_bounds(ranges, report);
     Self::warn_overlapping_ranges(ranges, report);
   }
 
+  /// Reject datasets that mix point Z and non-point XZ clustering.
   fn validate_clustering_families(ranges: &[ClusteringRange], report: &mut ValidationReport) {
     let mut families = BTreeSet::new();
     for range in ranges {
@@ -73,6 +76,7 @@ impl DatasetValidator {
     }
   }
 
+  /// Validate observed codes against each partition's inclusive lower and exclusive upper bounds.
   fn validate_partition_bounds(ranges: &[ClusteringRange], report: &mut ValidationReport) {
     let mut lower_bounds = BTreeMap::<PartitionFamily, BTreeSet<u64>>::new();
     for range in ranges {
@@ -126,12 +130,15 @@ impl DatasetValidator {
     }
   }
 
+  /// Report overlapping file ranges independently within each clustering family.
   fn warn_overlapping_ranges(ranges: &[ClusteringRange], report: &mut ValidationReport) {
     for family in [PartitionFamily::Z, PartitionFamily::Xz] {
-      let mut family_ranges = ranges
-        .iter()
-        .filter(|range| range.family == family)
-        .collect::<Vec<_>>();
+      let mut family_ranges = Vec::new();
+      for range in ranges {
+        if range.family == family {
+          family_ranges.push(range);
+        }
+      }
       family_ranges.sort_by_key(|range| (range.minimum, range.maximum, &range.file));
       let mut maximum = None::<(u64, &PathBuf)>;
       for range in family_ranges {
@@ -213,10 +220,7 @@ mod tests {
     assert_eq!(report.findings()[0].rule(), ValidationRule::RangeOverlap);
   }
 
-  fn wkb_point(x: f64, y: f64) -> Vec<u8> {
-    crate::geometry::write_test_point(x, y)
-  }
-
+  /// Write fixture batches with explicit compression and footer metadata.
   fn write_parquet(
     path: &Path,
     schema: &SchemaRef,
@@ -366,6 +370,7 @@ mod tests {
     }
   }
 
+  /// Write valid UInt64 Z codes while varying CRS and reserved metadata entries.
   fn write_z_fixture(
     path: &std::path::Path,
     geo_epsg: u32,
@@ -384,6 +389,7 @@ mod tests {
     );
   }
 
+  /// Write point clustering metadata with optional schema and vocabulary violations.
   fn write_z_fixture_with_code_type(
     path: &std::path::Path,
     geo_epsg: u32,
@@ -399,7 +405,7 @@ mod tests {
       xmax: 10.0,
       ymax: 10.0,
     };
-    let geometry = wkb_point(1.0, 1.0);
+    let geometry = crate::geometry::write_test_point(1.0, 1.0);
     let code = ClusterKey::from_z_coordinates(extent, 1.0, 1.0, 20).value();
     let schema = Arc::new(Schema::new(vec![
       Field::new("geometry", DataType::Binary, true),

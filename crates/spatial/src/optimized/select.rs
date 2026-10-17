@@ -35,18 +35,17 @@ impl OptimizedLayout {
     covering: bool,
     warnings: PipelineWarnings,
   ) -> Vec<Expr> {
-    let mut expressions = source_schema
-      .fields()
-      .iter()
-      .filter(|field| {
-        field.name() != COVERING_BBOX_COLUMN
-          && !self
-            .geometry()
-            .clustering_family
-            .is_generated_output_column(field.name())
-      })
-      .map(|field| ident(field.name()))
-      .collect::<Vec<_>>();
+    let geometry = self.geometry();
+    let mut expressions = Vec::new();
+    for field in source_schema.fields() {
+      if field.name() != COVERING_BBOX_COLUMN
+        && !geometry
+          .clustering_family
+          .is_generated_output_column(field.name())
+      {
+        expressions.push(ident(field.name()));
+      }
+    }
     if covering {
       expressions.push(ident(COVERING_BBOX_COLUMN));
     }
@@ -78,6 +77,7 @@ impl OptimizedLayout {
 }
 
 impl ClusteringFamily {
+  /// Identify generated output columns that must not be copied from source data.
   fn is_generated_output_column(self, name: &str) -> bool {
     if matches!(name, GEOKEY_COLUMN | GEOLOD_COLUMN | GEODISPLAY_COLUMN) {
       return true;

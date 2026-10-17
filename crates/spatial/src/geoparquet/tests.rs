@@ -31,105 +31,13 @@ use parquet::file::properties::WriterProperties;
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
-use crate::geometry::{Extent2D, GeometryColumn, GeometryEncoding, GeometryType};
+use crate::geometry::{Extent2D, GeometryColumn, GeometryEncoding, GeometryType, write_test_point};
 use crate::input::{
   InputError, InputOpenOptions, InputSource, RowRange, SourceDatasetMetadata, SourceFormat,
   SourceGeometryMetadata, open_input,
 };
 
 use crate::pipeline::{SpatialWriteContext, resolve_source};
-
-fn runtime() -> Runtime {
-  Runtime::new().unwrap()
-}
-
-fn sample_schema_with_geometry() -> SchemaRef {
-  Arc::new(Schema::new(vec![
-    Field::new("id", DataType::Int32, false),
-    Field::new("geometry", DataType::Binary, true),
-  ]))
-}
-
-fn sample_batch_with_geometry(wkb_values: Vec<Option<Vec<u8>>>) -> RecordBatch {
-  let ids = Int32Array::from_iter_values(1..=wkb_values.len() as i32);
-  let values = wkb_values
-    .iter()
-    .map(|value| value.as_deref())
-    .collect::<Vec<_>>();
-  RecordBatch::try_new(
-    sample_schema_with_geometry(),
-    vec![Arc::new(ids), Arc::new(BinaryArray::from(values))],
-  )
-  .unwrap()
-}
-
-fn wkb_point(x: f64, y: f64) -> Vec<u8> {
-  crate::geometry::write_test_point(x, y)
-}
-
-fn write_parquet(
-  path: &Path,
-  schema: &SchemaRef,
-  batches: &[RecordBatch],
-  compression: Compression,
-  metadata: &[KeyValue],
-) {
-  let properties = WriterProperties::builder()
-    .set_compression(compression)
-    .build();
-  let mut writer = ArrowWriter::try_new(
-    File::create(path).unwrap(),
-    schema.clone(),
-    Some(properties),
-  )
-  .unwrap();
-  for batch in batches {
-    writer.write(batch).unwrap();
-  }
-  for entry in metadata {
-    writer.append_key_value_metadata(entry.clone());
-  }
-  writer.close().unwrap();
-}
-
-fn geoparquet_kv(primary_column: &str, geometry_types: &[&str]) -> KeyValue {
-  geoparquet_kv_with_bbox(primary_column, geometry_types, None)
-}
-
-fn geoparquet_kv_with_bbox(
-  primary_column: &str,
-  geometry_types: &[&str],
-  bbox: Option<[f64; 4]>,
-) -> KeyValue {
-  let spatial_reference = SpatialRef::from_epsg(4326).unwrap().to_projjson().unwrap();
-  let spatial_reference: serde_json::Value = serde_json::from_str(&spatial_reference).unwrap();
-  let geometry_types = geometry_types
-    .iter()
-    .map(|item| serde_json::Value::String((*item).to_string()))
-    .collect::<Vec<_>>();
-  let value = serde_json::json!({
-    "version": "1.1.0",
-    "primary_column": primary_column,
-    "columns": {
-      primary_column: {
-        "encoding": "WKB",
-        "geometry_types": geometry_types,
-        "crs": spatial_reference,
-        "bbox": bbox
-      }
-    }
-  });
-  KeyValue::new("geo".to_string(), Some(value.to_string()))
-}
-
-fn open_parquet_input(path: &Path) -> Arc<dyn InputSource> {
-  runtime()
-    .block_on(open_input(
-      SourceFormat::Parquet,
-      &InputOpenOptions::new(path.to_string_lossy().into_owned(), None),
-    ))
-    .unwrap()
-}
 
 struct MetadataInputSource {
   schema: SchemaRef,
@@ -138,14 +46,17 @@ struct MetadataInputSource {
 }
 
 impl InputSource for MetadataInputSource {
+  /// Return the schema configured by the metadata-only fixture.
   fn schema(&self) -> Result<SchemaRef, InputError> {
     Ok(self.schema.clone())
   }
 
+  /// Return the fixed feature count used by metadata-only fixtures.
   fn total_rows(&self) -> Result<u64, InputError> {
     Ok(3)
   }
 
+  /// Declare the fixture's primary WKB point column.
   fn inferred_geometry_column(&self) -> Result<Option<GeometryColumn>, InputError> {
     Ok(Some(GeometryColumn {
       column: "geometry".into(),
@@ -154,10 +65,12 @@ impl InputSource for MetadataInputSource {
     }))
   }
 
+  /// Return the geometry facts configured for metadata fast-path tests.
   fn source_metadata(&self) -> Result<SourceDatasetMetadata, InputError> {
     Ok(self.metadata.clone())
   }
 
+  /// Count scan requests and provide an empty frame for metadata-only tests.
   fn to_dataframe<'a>(
     &'a self,
     ctx: &'a SessionContext,
@@ -175,29 +88,12 @@ impl InputSource for MetadataInputSource {
   }
 }
 
-fn epsg_projjson(wkid: u32) -> serde_json::Value {
-  serde_json::from_str(&SpatialRef::from_epsg(wkid).unwrap().to_projjson().unwrap()).unwrap()
-}
-
-fn source_dataframe(input: &dyn InputSource) -> DataFrame {
-  let context = SessionContext::new();
-  runtime()
-    .block_on(input.to_dataframe(&context, RowRange::default()))
-    .unwrap()
-}
-
-fn empty_dataframe(schema: SchemaRef) -> DataFrame {
-  SessionContext::new()
-    .read_batch(RecordBatch::new_empty(schema))
-    .unwrap()
-}
-
 #[test]
 fn inferred_geometry_column_reads_geoparquet_primary_column() {
   let temp = TempDir::new().unwrap();
   let path = temp.path().join("data.parquet");
   let schema = sample_schema_with_geometry();
-  let batch = sample_batch_with_geometry(vec![Some(wkb_point(0.0, 0.0)), None, None]);
+  let batch = sample_batch_with_geometry(vec![Some(write_test_point(0.0, 0.0)), None, None]);
   let kv = vec![geoparquet_kv("geometry", &["Point"])];
   write_parquet(
     &path,
@@ -247,7 +143,7 @@ fn source_metadata_returns_none_when_geo_metadata_missing() {
   let temp = TempDir::new().unwrap();
   let path = temp.path().join("data.parquet");
   let schema = sample_schema_with_geometry();
-  let batch = sample_batch_with_geometry(vec![Some(wkb_point(0.0, 0.0)), None, None]);
+  let batch = sample_batch_with_geometry(vec![Some(write_test_point(0.0, 0.0)), None, None]);
   write_parquet(
     &path,
     &schema,
@@ -266,7 +162,7 @@ fn source_metadata_tolerates_null_bbox_metadata() {
   let temp = TempDir::new().unwrap();
   let path = temp.path().join("data.parquet");
   let schema = sample_schema_with_geometry();
-  let batch = sample_batch_with_geometry(vec![Some(wkb_point(0.0, 0.0)), None, None]);
+  let batch = sample_batch_with_geometry(vec![Some(write_test_point(0.0, 0.0)), None, None]);
   let kv = vec![KeyValue::new(
         "geo".to_string(),
         Some(
@@ -298,13 +194,13 @@ fn source_metadata_merges_multifile_geometry_types_and_extent() {
       "first.parquet",
       "Point Z",
       [-10.0, -5.0, 1.0, 2.0],
-      wkb_point(0.0, 0.0),
+      write_test_point(0.0, 0.0),
     ),
     (
       "second.parquet",
       "MultiPoint Z",
       [-20.0, 0.0, 30.0, 40.0],
-      wkb_point(5.0, 5.0),
+      write_test_point(5.0, 5.0),
     ),
   ] {
     write_parquet(
@@ -346,8 +242,8 @@ fn resolved_source_retains_spatial_reference_and_extent_in_source_metadata() {
   let path = temp.path().join("data.parquet");
   let schema = sample_schema_with_geometry();
   let batch = sample_batch_with_geometry(vec![
-    Some(wkb_point(-10.0, 5.0)),
-    Some(wkb_point(20.0, 30.0)),
+    Some(write_test_point(-10.0, 5.0)),
+    Some(write_test_point(20.0, 30.0)),
     None,
   ]);
   write_parquet(
@@ -559,4 +455,119 @@ fn resolved_source_preserves_projjson_for_unknown_spatial_reference_authority() 
 
   assert_eq!(context.source_spatial_reference.wkid, None);
   assert_eq!(context.source_spatial_reference.projjson, Some(projjson));
+}
+
+/// Pair fixture WKB values with sequential identifiers in an Arrow batch.
+fn sample_batch_with_geometry(wkb_values: Vec<Option<Vec<u8>>>) -> RecordBatch {
+  let ids = Int32Array::from_iter_values(1..=wkb_values.len() as i32);
+  let values = wkb_values
+    .iter()
+    .map(|value| value.as_deref())
+    .collect::<Vec<_>>();
+  RecordBatch::try_new(
+    sample_schema_with_geometry(),
+    vec![Arc::new(ids), Arc::new(BinaryArray::from(values))],
+  )
+  .unwrap()
+}
+
+/// Build the fixture schema with integer identifiers and nullable WKB geometry.
+fn sample_schema_with_geometry() -> SchemaRef {
+  Arc::new(Schema::new(vec![
+    Field::new("id", DataType::Int32, false),
+    Field::new("geometry", DataType::Binary, true),
+  ]))
+}
+
+/// Write fixture batches with the requested compression and footer metadata.
+fn write_parquet(
+  path: &Path,
+  schema: &SchemaRef,
+  batches: &[RecordBatch],
+  compression: Compression,
+  metadata: &[KeyValue],
+) {
+  let properties = WriterProperties::builder()
+    .set_compression(compression)
+    .build();
+  let mut writer = ArrowWriter::try_new(
+    File::create(path).unwrap(),
+    schema.clone(),
+    Some(properties),
+  )
+  .unwrap();
+  for batch in batches {
+    writer.write(batch).unwrap();
+  }
+  for entry in metadata {
+    writer.append_key_value_metadata(entry.clone());
+  }
+  writer.close().unwrap();
+}
+
+/// Build a GeoParquet fixture entry without declared bounds.
+fn geoparquet_kv(primary_column: &str, geometry_types: &[&str]) -> KeyValue {
+  geoparquet_kv_with_bbox(primary_column, geometry_types, None)
+}
+
+/// Build a WGS84 GeoParquet fixture contract with optional XY bounds.
+fn geoparquet_kv_with_bbox(
+  primary_column: &str,
+  geometry_types: &[&str],
+  bbox: Option<[f64; 4]>,
+) -> KeyValue {
+  let spatial_reference = SpatialRef::from_epsg(4326).unwrap().to_projjson().unwrap();
+  let spatial_reference: serde_json::Value = serde_json::from_str(&spatial_reference).unwrap();
+  let geometry_types = geometry_types
+    .iter()
+    .map(|item| serde_json::Value::String((*item).to_string()))
+    .collect::<Vec<_>>();
+  let value = serde_json::json!({
+    "version": "1.1.0",
+    "primary_column": primary_column,
+    "columns": {
+      primary_column: {
+        "encoding": "WKB",
+        "geometry_types": geometry_types,
+        "crs": spatial_reference,
+        "bbox": bbox
+      }
+    }
+  });
+  KeyValue::new("geo".to_string(), Some(value.to_string()))
+}
+
+/// Open a fixture through the format-neutral Parquet input boundary.
+fn open_parquet_input(path: &Path) -> Arc<dyn InputSource> {
+  runtime()
+    .block_on(open_input(
+      SourceFormat::Parquet,
+      &InputOpenOptions::new(path.to_string_lossy().into_owned(), None),
+    ))
+    .unwrap()
+}
+
+/// Export an EPSG fixture reference as parsed PROJJSON.
+fn epsg_projjson(wkid: u32) -> serde_json::Value {
+  serde_json::from_str(&SpatialRef::from_epsg(wkid).unwrap().to_projjson().unwrap()).unwrap()
+}
+
+/// Build a full-source fixture frame in a fresh DataFusion session.
+fn source_dataframe(input: &dyn InputSource) -> DataFrame {
+  let context = SessionContext::new();
+  runtime()
+    .block_on(input.to_dataframe(&context, RowRange::default()))
+    .unwrap()
+}
+
+/// Build an empty fixture frame to verify metadata paths avoid geometry scans.
+fn empty_dataframe(schema: SchemaRef) -> DataFrame {
+  SessionContext::new()
+    .read_batch(RecordBatch::new_empty(schema))
+    .unwrap()
+}
+
+/// Create an async runtime for GeoParquet source and write-context tests.
+fn runtime() -> Runtime {
+  Runtime::new().unwrap()
 }

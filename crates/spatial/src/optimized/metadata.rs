@@ -59,14 +59,16 @@ impl OptimizedLayout {
       has_m: self.geometry().has_m,
       covering,
       covering_column: COVERING_BBOX_COLUMN,
-      ordering: self
-        .writes_extensions()
-        .then(|| self.ordering_metadata(context))
-        .flatten(),
-      lod: self
-        .writes_extensions()
-        .then(|| self.lod_metadata(context))
-        .flatten(),
+      ordering: if self.writes_extensions() {
+        self.ordering_metadata(context)
+      } else {
+        None
+      },
+      lod: if self.writes_extensions() {
+        self.lod_metadata()
+      } else {
+        None
+      },
     };
     let source_entries = context.source().source_metadata.passthrough_kv.clone();
     match self.geometry().clustering_family {
@@ -123,6 +125,7 @@ impl OptimizedLayout {
     }
   }
 
+  /// Select the canonical WKB type when source metadata omits geometry types.
   fn fallback_geometry_type(&self) -> GeometryType {
     match self.geometry().family {
       crate::geometry::GeometryFamily::Point => GeometryType::Point,
@@ -132,6 +135,7 @@ impl OptimizedLayout {
     }
   }
 
+  /// Describe the persisted Z-order or XZ-order key and its full XY extent.
   fn ordering_metadata(&self, context: &SpatialWriteContext) -> Option<OrderingMetadata> {
     let geometry_column = self.geometry().geometry.column.clone();
     let extent = [
@@ -154,7 +158,8 @@ impl OptimizedLayout {
     })
   }
 
-  fn lod_metadata(&self, _context: &SpatialWriteContext) -> Option<LodMetadata> {
+  /// Describe PBF multiscale columns when the geometry family supplies display levels.
+  fn lod_metadata(&self) -> Option<LodMetadata> {
     if !self.writes_extension_lod()
       || self.multiscale_encoding() != crate::optimized::MultiscaleEncoding::Pbf
     {
@@ -180,6 +185,7 @@ impl OptimizedLayout {
     })
   }
 
+  /// Serialize GeoParquet entries with optional point Z-order metadata.
   fn optimized_point_metadata(
     source_entries: Vec<KeyValue>,
     geo_input: GeoMetadataInput<'_>,
@@ -192,6 +198,7 @@ impl OptimizedLayout {
     )
   }
 
+  /// Serialize GeoParquet entries with optional complex-geometry XZ-order metadata.
   fn optimized_xz_metadata(
     source_entries: Vec<KeyValue>,
     geo_input: GeoMetadataInput<'_>,
@@ -204,6 +211,7 @@ impl OptimizedLayout {
     )
   }
 
+  /// Replace reserved metadata entries while preserving unrelated source entries.
   fn optimized_metadata(
     mut source_entries: Vec<KeyValue>,
     geo_input: GeoMetadataInput<'_>,
@@ -217,6 +225,7 @@ impl OptimizedLayout {
     Ok(source_entries)
   }
 
+  /// Replace all entries sharing a metadata key and append the new value.
   fn replace_metadata_entry(entries: &mut Vec<KeyValue>, replacement: KeyValue) {
     entries.retain(|entry| entry.key != replacement.key);
     entries.push(replacement);

@@ -139,6 +139,7 @@ impl SpatialReference {
     Ok(spatial_ref)
   }
 
+  /// Serialize PROJJSON and load a GDAL reference with traditional GIS axis order.
   fn spatial_ref_from_projjson(projjson: &Value) -> Result<SpatialRef, GeoParquetError> {
     let definition = serde_json::to_string(projjson).map_err(|source| GeoParquetError::Json {
       operation: "serialize spatial-reference PROJJSON",
@@ -148,17 +149,19 @@ impl SpatialReference {
   }
 }
 
+/// Parse a numeric or string authority code only for EPSG and ESRI references.
 fn supported_authority_code(value: &Value) -> Option<u32> {
-  let authority = value.get("authority").and_then(Value::as_str);
-  let code = value.get("code").and_then(|value| {
-    value
-      .as_u64()
-      .and_then(|value| u32::try_from(value).ok())
-      .or_else(|| value.as_str().and_then(|value| value.parse::<u32>().ok()))
-  });
-  matches!(authority, Some("EPSG" | "ESRI"))
-    .then_some(code)
-    .flatten()
+  if !matches!(
+    value.get("authority").and_then(Value::as_str),
+    Some("EPSG" | "ESRI")
+  ) {
+    return None;
+  }
+  let code = value.get("code")?;
+  code
+    .as_u64()
+    .and_then(|code| u32::try_from(code).ok())
+    .or_else(|| code.as_str().and_then(|code| code.parse::<u32>().ok()))
 }
 
 #[cfg(test)]

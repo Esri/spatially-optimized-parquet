@@ -27,14 +27,8 @@ pub(crate) struct StdoutWriteReporter {
   state: Arc<Mutex<ReporterState>>,
 }
 
-struct ReporterState {
-  live: bool,
-  highest_count: u64,
-  total_count: u64,
-  last_rendered_at: Option<Instant>,
-}
-
 impl StdoutWriteReporter {
+  /// Initialize shared write counts with optional throttled live stdout updates.
   pub(crate) fn new(live: bool) -> Self {
     Self {
       state: Arc::new(Mutex::new(ReporterState {
@@ -46,6 +40,7 @@ impl StdoutWriteReporter {
     }
   }
 
+  /// Render the final written count even when live progress reporting is disabled.
   pub(crate) fn finish(&self, rows_written: u64, total_rows: u64) {
     let mut state = self
       .state
@@ -55,24 +50,10 @@ impl StdoutWriteReporter {
     state.total_count = total_rows;
     Self::render(rows_written, total_rows, true);
   }
-
-  fn render(rows_written: u64, total_rows: u64, finished: bool) {
-    let stdout = io::stdout();
-    let mut stdout = stdout.lock();
-    Self::render_to(&mut stdout, rows_written, total_rows, finished);
-  }
-
-  fn render_to(writer: &mut dyn Write, rows_written: u64, total_rows: u64, finished: bool) {
-    if finished {
-      let _ = writeln!(writer, "\rWrote {rows_written}/{total_rows} features");
-    } else {
-      let _ = write!(writer, "\rWrote {rows_written}/{total_rows} features");
-    }
-    let _ = writer.flush();
-  }
 }
 
 impl WriteReporter for StdoutWriteReporter {
+  /// Keep write counts monotonic and throttle enabled live updates to the refresh interval.
   fn report(&self, progress: WriteProgress) {
     let mut state = self
       .state
@@ -96,4 +77,30 @@ impl WriteReporter for StdoutWriteReporter {
     state.last_rendered_at = Some(now);
     Self::render(state.highest_count, state.total_count, false);
   }
+}
+
+impl StdoutWriteReporter {
+  /// Lock stdout for one complete live or final progress update.
+  fn render(rows_written: u64, total_rows: u64, finished: bool) {
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+    Self::render_to(&mut stdout, rows_written, total_rows, finished);
+  }
+
+  /// Write and flush progress while adding a newline only for the final update.
+  fn render_to(writer: &mut dyn Write, rows_written: u64, total_rows: u64, finished: bool) {
+    if finished {
+      let _ = writeln!(writer, "\rWrote {rows_written}/{total_rows} features");
+    } else {
+      let _ = write!(writer, "\rWrote {rows_written}/{total_rows} features");
+    }
+    let _ = writer.flush();
+  }
+}
+
+struct ReporterState {
+  live: bool,
+  highest_count: u64,
+  total_count: u64,
+  last_rendered_at: Option<Instant>,
 }

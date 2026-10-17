@@ -42,6 +42,7 @@ const OPTIMIZED_PARTITIONED: BenchmarkCase = BenchmarkCase {
   covering: true,
 };
 
+/// Benchmark standard and wide fixtures with their selected single-file and partitioned cases.
 pub fn benchmark_writer(criterion: &mut Criterion, target_mib: u64, suite_name: &str) {
   let fixtures = BenchmarkFixtureSet::build(target_mib);
   let runtime = Runtime::new().expect("create benchmark runtime");
@@ -52,6 +53,7 @@ pub fn benchmark_writer(criterion: &mut Criterion, target_mib: u64, suite_name: 
     &fixtures.output_root,
     suite_name,
     "point",
+    &[OPTIMIZED_SINGLE, OPTIMIZED_PARTITIONED],
   );
   benchmark_geometry(
     criterion,
@@ -60,17 +62,28 @@ pub fn benchmark_writer(criterion: &mut Criterion, target_mib: u64, suite_name: 
     &fixtures.output_root,
     suite_name,
     "polygon",
+    &[OPTIMIZED_SINGLE, OPTIMIZED_PARTITIONED],
   );
-  benchmark_single_file(
+  benchmark_geometry(
     criterion,
     &runtime,
     &fixtures.wide_polygon,
     &fixtures.output_root,
     suite_name,
     "polygon_wide_4x",
+    &[OPTIMIZED_SINGLE],
   );
 }
 
+/// Configure ten samples with bounded warmup and measurement durations.
+pub fn criterion_config() -> Criterion {
+  Criterion::default()
+    .sample_size(10)
+    .warm_up_time(Duration::from_secs(2))
+    .measurement_time(Duration::from_secs(20))
+}
+
+/// Register the selected writer cases with byte throughput for one geometry fixture.
 fn benchmark_geometry(
   criterion: &mut Criterion,
   runtime: &Runtime,
@@ -78,31 +91,18 @@ fn benchmark_geometry(
   output_root: &Path,
   suite_name: &str,
   geometry_name: &str,
+  cases: &[BenchmarkCase],
 ) {
   let mut group = criterion.benchmark_group(format!("writer/{suite_name}/{geometry_name}"));
   group.sampling_mode(SamplingMode::Flat);
   group.throughput(Throughput::Bytes(fixture.file_bytes));
-  for case in [OPTIMIZED_SINGLE, OPTIMIZED_PARTITIONED] {
-    benchmark_case(&mut group, runtime, fixture, output_root, case);
+  for case in cases {
+    benchmark_case(&mut group, runtime, fixture, output_root, *case);
   }
   group.finish();
 }
 
-fn benchmark_single_file(
-  criterion: &mut Criterion,
-  runtime: &Runtime,
-  fixture: &BenchmarkFixture,
-  output_root: &Path,
-  suite_name: &str,
-  geometry_name: &str,
-) {
-  let mut group = criterion.benchmark_group(format!("writer/{suite_name}/{geometry_name}"));
-  group.sampling_mode(SamplingMode::Flat);
-  group.throughput(Throughput::Bytes(fixture.file_bytes));
-  benchmark_case(&mut group, runtime, fixture, output_root, OPTIMIZED_SINGLE);
-  group.finish();
-}
-
+/// Measure pipeline execution while excluding option construction and output cleanup.
 fn benchmark_case(
   group: &mut BenchmarkGroup<'_, criterion::measurement::WallTime>,
   runtime: &Runtime,
@@ -149,16 +149,10 @@ fn benchmark_case(
   );
 }
 
+/// Choose a unique directory or Parquet file path for one measured iteration.
 fn output_path(root: &Path, case: &BenchmarkCase, index: u64) -> PathBuf {
   match case.output_files {
     Some(_) => root.join(format!("{}-{index}", case.name)),
     None => root.join(format!("{}-{index}.parquet", case.name)),
   }
-}
-
-pub fn criterion_config() -> Criterion {
-  Criterion::default()
-    .sample_size(10)
-    .warm_up_time(Duration::from_secs(2))
-    .measurement_time(Duration::from_secs(20))
 }

@@ -22,53 +22,6 @@ use parquet::arrow::arrow_writer::ArrowWriter;
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use tempfile::TempDir;
 
-fn write_point_input(path: &std::path::Path) {
-  let schema = Arc::new(Schema::new(vec![Field::new(
-    "geometry",
-    DataType::Binary,
-    true,
-  )]));
-  let point_a = point_wkb(0.0, 0.0);
-  let point_b = point_wkb(1.0, 1.0);
-  let batch = RecordBatch::try_new(
-    schema.clone(),
-    vec![Arc::new(BinaryArray::from(vec![
-      Some(point_a.as_slice()),
-      Some(point_b.as_slice()),
-    ]))],
-  )
-  .unwrap();
-  let mut writer = ArrowWriter::try_new(File::create(path).unwrap(), schema, None).unwrap();
-  writer.write(&batch).unwrap();
-  writer.close().unwrap();
-}
-
-fn point_wkb(x: f64, y: f64) -> Vec<u8> {
-  let mut bytes = Vec::with_capacity(21);
-  bytes.push(1);
-  bytes.extend(1_u32.to_le_bytes());
-  bytes.extend(x.to_le_bytes());
-  bytes.extend(y.to_le_bytes());
-  bytes
-}
-
-fn normalized_stdout(output: &[u8]) -> String {
-  String::from_utf8_lossy(output).replace('\r', "")
-}
-
-fn parquet_metadata_value(path: &std::path::Path, key: &str) -> String {
-  SerializedFileReader::new(File::open(path).unwrap())
-    .unwrap()
-    .metadata()
-    .file_metadata()
-    .key_value_metadata()
-    .unwrap()
-    .iter()
-    .find(|entry| entry.key == key)
-    .and_then(|entry| entry.value.clone())
-    .unwrap()
-}
-
 #[test]
 fn validation_runs_only_through_validate_subcommand() {
   let temp = TempDir::new().unwrap();
@@ -301,4 +254,55 @@ fn validate_subcommand_exits_nonzero_for_errors_and_preserves_output() {
   assert!(stderr.contains("invalid:"));
   assert!(stderr.contains("SOP-META-001"));
   assert!(output.exists());
+}
+
+/// Write two XY points without metadata to exercise explicit CLI geometry and CRS options.
+fn write_point_input(path: &std::path::Path) {
+  let schema = Arc::new(Schema::new(vec![Field::new(
+    "geometry",
+    DataType::Binary,
+    true,
+  )]));
+  let point_a = point_wkb(0.0, 0.0);
+  let point_b = point_wkb(1.0, 1.0);
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![Arc::new(BinaryArray::from(vec![
+      Some(point_a.as_slice()),
+      Some(point_b.as_slice()),
+    ]))],
+  )
+  .unwrap();
+  let mut writer = ArrowWriter::try_new(File::create(path).unwrap(), schema, None).unwrap();
+  writer.write(&batch).unwrap();
+  writer.close().unwrap();
+}
+
+/// Encode one XY point as little-endian WKB.
+fn point_wkb(x: f64, y: f64) -> Vec<u8> {
+  let mut bytes = Vec::with_capacity(21);
+  bytes.push(1);
+  bytes.extend(1_u32.to_le_bytes());
+  bytes.extend(x.to_le_bytes());
+  bytes.extend(y.to_le_bytes());
+  bytes
+}
+
+/// Remove carriage returns so live and final progress output share stable assertions.
+fn normalized_stdout(output: &[u8]) -> String {
+  String::from_utf8_lossy(output).replace('\r', "")
+}
+
+/// Read a required footer metadata value from CLI-generated Parquet output.
+fn parquet_metadata_value(path: &std::path::Path, key: &str) -> String {
+  SerializedFileReader::new(File::open(path).unwrap())
+    .unwrap()
+    .metadata()
+    .file_metadata()
+    .key_value_metadata()
+    .unwrap()
+    .iter()
+    .find(|entry| entry.key == key)
+    .and_then(|entry| entry.value.clone())
+    .unwrap()
 }

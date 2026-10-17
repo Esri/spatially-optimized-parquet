@@ -52,95 +52,6 @@ struct PbfGeometry {
   coords: Vec<i64>,
 }
 
-fn runtime() -> Runtime {
-  Runtime::new().unwrap()
-}
-
-fn run_optimized(
-  input: &Path,
-  output: &Path,
-  row_range: RowRange,
-  layer: Option<String>,
-  geometry_column: Option<String>,
-  input_wkid: Option<u32>,
-  covering: bool,
-) -> Result<SpatialPipelineResult, PipelineError> {
-  run_optimized_with_stripping(
-    input,
-    output,
-    row_range,
-    layer,
-    geometry_column,
-    input_wkid,
-    covering,
-    false,
-    false,
-  )
-}
-
-fn run_optimized_native(
-  input: &Path,
-  output: &Path,
-) -> Result<SpatialPipelineResult, PipelineError> {
-  run_optimized_multiscale(input, output, MultiscaleEncoding::Native)
-}
-
-fn run_optimized_multiscale(
-  input: &Path,
-  output: &Path,
-  encoding: MultiscaleEncoding,
-) -> Result<SpatialPipelineResult, PipelineError> {
-  runtime().block_on(Pipeline::run(SpatialPipelineOptions {
-    input: InputOptions {
-      location: input.to_string_lossy().into_owned(),
-      ..Default::default()
-    },
-    output: OutputOptions {
-      path: output.to_path_buf(),
-      mode: OutputMode::Optimized,
-      overwrite: true,
-      multiscale_encoding: encoding,
-      write_extensions: encoding == MultiscaleEncoding::Pbf,
-      ..Default::default()
-    },
-    ..Default::default()
-  }))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_optimized_with_stripping(
-  input: &Path,
-  output: &Path,
-  row_range: RowRange,
-  layer: Option<String>,
-  geometry_column: Option<String>,
-  input_wkid: Option<u32>,
-  covering: bool,
-  strip_z: bool,
-  strip_m: bool,
-) -> Result<SpatialPipelineResult, PipelineError> {
-  runtime().block_on(Pipeline::run(SpatialPipelineOptions {
-    input: InputOptions {
-      location: input.to_string_lossy().into_owned(),
-      row_range,
-      layer,
-      geometry_column,
-      input_wkid,
-      ..Default::default()
-    },
-    output: OutputOptions {
-      path: output.to_path_buf(),
-      mode: OutputMode::Optimized,
-      covering,
-      overwrite: true,
-      strip_z,
-      strip_m,
-      ..Default::default()
-    },
-    ..Default::default()
-  }))
-}
-
 #[test]
 fn optimized_output_sorts_points_and_writes_metadata() {
   let temp = TempDir::new().unwrap();
@@ -1657,18 +1568,18 @@ fn optimized_output_sorts_complex_geometry_rows_across_input_batches() {
     .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let batches = runtime().block_on(dataframe.collect()).unwrap();
-  let xz_codes = batches
-    .iter()
-    .flat_map(|batch| {
-      let geokey = batch
-        .column_by_name("geokey")
-        .unwrap()
-        .as_any()
-        .downcast_ref::<UInt64Array>()
-        .unwrap();
-      (0..batch.num_rows()).map(move |index| geokey.value(index))
-    })
-    .collect::<Vec<_>>();
+  let mut xz_codes = Vec::new();
+  for batch in &batches {
+    let geokey = batch
+      .column_by_name("geokey")
+      .unwrap()
+      .as_any()
+      .downcast_ref::<UInt64Array>()
+      .unwrap();
+    for index in 0..batch.num_rows() {
+      xz_codes.push(geokey.value(index));
+    }
+  }
   assert!(xz_codes.windows(2).all(|pair| pair[0] <= pair[1]));
 }
 
@@ -1719,13 +1630,13 @@ fn optimized_output_applies_requested_row_range() {
     .unwrap();
   let batches = runtime().block_on(dataframe.collect()).unwrap();
   assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 1);
-  let names = batches
-    .iter()
-    .flat_map(|batch| {
-      let column = batch.column_by_name("name").unwrap();
-      (0..batch.num_rows()).map(move |index| string_value(column.as_ref(), index))
-    })
-    .collect::<Vec<_>>();
+  let mut names = Vec::new();
+  for batch in &batches {
+    let column = batch.column_by_name("name").unwrap();
+    for index in 0..batch.num_rows() {
+      names.push(string_value(column.as_ref(), index));
+    }
+  }
   assert_eq!(names, vec!["early".to_string()]);
 }
 
@@ -2128,4 +2039,98 @@ fn optimized_output_selects_requested_geopackage_layer() {
   assert_eq!(geodisplay["type"], "xz");
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["authority"], "EPSG");
   assert_eq!(geo["columns"]["geometry"]["crs"]["id"]["code"], 4326);
+}
+
+/// Run optimized output with the selected rows, geometry source, and covering option.
+fn run_optimized(
+  input: &Path,
+  output: &Path,
+  row_range: RowRange,
+  layer: Option<String>,
+  geometry_column: Option<String>,
+  input_wkid: Option<u32>,
+  covering: bool,
+) -> Result<SpatialPipelineResult, PipelineError> {
+  run_optimized_with_stripping(
+    input,
+    output,
+    row_range,
+    layer,
+    geometry_column,
+    input_wkid,
+    covering,
+    false,
+    false,
+  )
+}
+
+/// Run optimized output with independent Z/M stripping and explicit input selection.
+#[allow(clippy::too_many_arguments)]
+fn run_optimized_with_stripping(
+  input: &Path,
+  output: &Path,
+  row_range: RowRange,
+  layer: Option<String>,
+  geometry_column: Option<String>,
+  input_wkid: Option<u32>,
+  covering: bool,
+  strip_z: bool,
+  strip_m: bool,
+) -> Result<SpatialPipelineResult, PipelineError> {
+  runtime().block_on(Pipeline::run(SpatialPipelineOptions {
+    input: InputOptions {
+      location: input.to_string_lossy().into_owned(),
+      row_range,
+      layer,
+      geometry_column,
+      input_wkid,
+      ..Default::default()
+    },
+    output: OutputOptions {
+      path: output.to_path_buf(),
+      mode: OutputMode::Optimized,
+      covering,
+      overwrite: true,
+      strip_z,
+      strip_m,
+      ..Default::default()
+    },
+    ..Default::default()
+  }))
+}
+
+/// Run optimized output with native multiscale coordinate arrays.
+fn run_optimized_native(
+  input: &Path,
+  output: &Path,
+) -> Result<SpatialPipelineResult, PipelineError> {
+  run_optimized_multiscale(input, output, MultiscaleEncoding::Native)
+}
+
+/// Run the selected multiscale encoding and emit draft extensions only for PBF fixtures.
+fn run_optimized_multiscale(
+  input: &Path,
+  output: &Path,
+  encoding: MultiscaleEncoding,
+) -> Result<SpatialPipelineResult, PipelineError> {
+  runtime().block_on(Pipeline::run(SpatialPipelineOptions {
+    input: InputOptions {
+      location: input.to_string_lossy().into_owned(),
+      ..Default::default()
+    },
+    output: OutputOptions {
+      path: output.to_path_buf(),
+      mode: OutputMode::Optimized,
+      overwrite: true,
+      multiscale_encoding: encoding,
+      write_extensions: encoding == MultiscaleEncoding::Pbf,
+      ..Default::default()
+    },
+    ..Default::default()
+  }))
+}
+
+/// Create the Tokio runtime used to execute pipeline and scan assertions.
+fn runtime() -> Runtime {
+  Runtime::new().unwrap()
 }

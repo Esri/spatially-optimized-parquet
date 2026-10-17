@@ -43,6 +43,7 @@ pub(crate) struct ResolvedSpatialSource {
 }
 
 impl ResolvedSpatialSource {
+  /// Remove requested Z/M declarations from resolved facts and matching source metadata.
   pub(crate) fn strip_dimensions(&mut self, strip_z: bool, strip_m: bool) {
     self.has_z &= !strip_z;
     self.has_m &= !strip_m;
@@ -52,30 +53,6 @@ impl ResolvedSpatialSource {
       geometry.has_z = self.has_z;
       geometry.has_m = self.has_m;
     }
-  }
-}
-
-impl GeometryColumn {
-  fn resolve(
-    schema: &Schema,
-    inferred_geometry_column: Option<Self>,
-    explicit_geometry_column: Option<&str>,
-  ) -> Result<Self, PipelineError> {
-    if let Some(column) = explicit_geometry_column {
-      schema.field_with_name(column).map_err(|_| {
-        PipelineError::InvalidRequest(format!("missing geometry column '{column}'"))
-      })?;
-      return Ok(Self {
-        column: column.to_string(),
-        encoding: GeometryEncoding::Wkb,
-        ty: None,
-      });
-    }
-    inferred_geometry_column.ok_or_else(|| {
-      PipelineError::InvalidRequest(
-        "unable to resolve geometry column; pass --geometry-column".to_string(),
-      )
-    })
   }
 }
 
@@ -145,4 +122,29 @@ pub(crate) async fn resolve_source(
     has_m,
     source_metadata,
   })
+}
+
+impl GeometryColumn {
+  /// Resolve an explicit schema-checked geometry column or use the source's inferred column.
+  fn resolve(
+    schema: &Schema,
+    inferred_geometry_column: Option<Self>,
+    explicit_geometry_column: Option<&str>,
+  ) -> Result<Self, PipelineError> {
+    if let Some(column) = explicit_geometry_column {
+      schema.field_with_name(column).map_err(|_| {
+        PipelineError::InvalidRequest(format!("missing geometry column '{column}'"))
+      })?;
+      return Ok(Self {
+        column: column.to_string(),
+        encoding: GeometryEncoding::Wkb,
+        ty: None,
+      });
+    }
+    inferred_geometry_column.ok_or_else(|| {
+      PipelineError::InvalidRequest(
+        "unable to resolve geometry column; pass --geometry-column".to_string(),
+      )
+    })
+  }
 }

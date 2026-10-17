@@ -15,8 +15,8 @@
 //! Traverses supported geometry structures through a shared part sink.
 
 use crate::geometry::{
-  CoordinateDimensions, Extent2D, GeometryError, GeometryFamily, GeometryType, PolygonRingOrder,
-  WkbCoordinate, WkbHeader, visit_wkb_geometry as decode_wkb_geometry,
+  Coord, CoordinateDimensions, Extent2D, GeometryError, GeometryFamily, GeometryType,
+  PolygonRingOrder, WkbHeader, visit_wkb_geometry as decode_wkb_geometry,
 };
 
 pub(crate) use crate::geometry::{WkbPartRole as GeometryPartRole, WkbSink as GeometryPartSink};
@@ -38,11 +38,7 @@ impl WkbHeader {
     bytes: &[u8],
     sink: &mut S,
   ) -> Result<Self, GeometryError> {
-    Ok(decode_wkb_geometry(
-      bytes,
-      PolygonRingOrder::Preserve,
-      sink,
-    )?)
+    decode_wkb_geometry(bytes, PolygonRingOrder::Preserve, sink)
   }
 }
 
@@ -81,11 +77,12 @@ impl GeometryFamily {
 }
 
 #[derive(Default)]
-struct ExtentAccumulator {
+struct BoundsCollector {
   extent: Option<Extent2D>,
 }
 
-impl ExtentAccumulator {
+impl BoundsCollector {
+  /// Extend the collected XY bounds with one decoded coordinate.
   fn push(&mut self, x: f64, y: f64) {
     match self.extent.as_mut() {
       Some(extent) => {
@@ -105,28 +102,21 @@ impl ExtentAccumulator {
     }
   }
 
+  /// Return the XY extent when traversal visited at least one coordinate.
   fn finish(self) -> Option<Extent2D> {
     self.extent
   }
 }
 
-#[derive(Default)]
-struct BoundsCollector {
-  bounds: ExtentAccumulator,
-}
-
-impl BoundsCollector {
-  fn finish(self) -> Option<Extent2D> {
-    self.bounds.finish()
-  }
-}
-
 impl GeometryPartSink for BoundsCollector {
+  /// Ignore part boundaries because all coordinates contribute to the same extent.
   fn start_part(&mut self, _: GeometryPartRole) {}
 
-  fn push_coord(&mut self, coordinate: WkbCoordinate) {
-    self.bounds.push(coordinate.x, coordinate.y);
+  /// Include the decoded coordinate's XY position in the collected bounds.
+  fn push_coord(&mut self, coordinate: Coord) {
+    self.push(coordinate.x, coordinate.y);
   }
 
+  /// Ignore part completion because bounds span the complete geometry.
   fn finish_part(&mut self) {}
 }

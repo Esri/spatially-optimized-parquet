@@ -16,6 +16,7 @@ use gdal::spatial_ref::{AxisMappingStrategy, CoordTransform, SpatialRef};
 
 use super::wkb;
 
+/// Transform fixture XY coordinates between EPSG systems using traditional GIS axis order.
 pub fn transform_point_between_epsg(
   x: f64,
   y: f64,
@@ -35,10 +36,12 @@ pub fn transform_point_between_epsg(
   (xs[0], ys[0])
 }
 
+/// Read an XY point from the little-endian fixture WKB encoding.
 pub fn point_from_wkb_xy(bytes: &[u8]) -> Result<(f64, f64), String> {
   wkb::read_point(bytes)
 }
 
+/// Read exterior-ring XY bounds from the little-endian fixture polygon encoding.
 pub fn polygon_extent_from_wkb(bytes: &[u8]) -> Result<[f64; 4], String> {
   wkb::read_polygon_extent(bytes)
 }

@@ -67,14 +67,14 @@ impl GeolodUdf {
     multiscale_encoding: MultiscaleEncoding,
     warnings: PipelineWarnings,
   ) -> Expr {
-    Self::udf(
+    ScalarUDF::new_from_impl(Self::new_with_warnings(
       geometry_type,
       has_z,
       has_m,
       levels.to_vec(),
       multiscale_encoding,
       warnings,
-    )
+    ))
     .call(vec![col(geometry_column)])
     .alias(GEOLOD_COLUMN)
   }
@@ -92,6 +92,7 @@ impl GeolodUdf {
     )
   }
 
+  /// Configure multiscale fields, coordinate dimensions, and shared dimension warnings.
   fn new_with_warnings(
     ty: GeometryFamily,
     has_z: bool,
@@ -121,24 +122,7 @@ impl GeolodUdf {
     }
   }
 
-  fn udf(
-    geometry_type: GeometryFamily,
-    has_z: bool,
-    has_m: bool,
-    levels: Vec<MultiscaleLevel>,
-    multiscale_encoding: MultiscaleEncoding,
-    warnings: PipelineWarnings,
-  ) -> ScalarUDF {
-    ScalarUDF::new_from_impl(Self::new_with_warnings(
-      geometry_type,
-      has_z,
-      has_m,
-      levels,
-      multiscale_encoding,
-      warnings,
-    ))
-  }
-
+  /// Accept the supported WKB binary array types for multiscale encoding.
   fn signature() -> &'static Signature {
     static SIGNATURE: OnceLock<Signature> = OnceLock::new();
     SIGNATURE.get_or_init(|| {
@@ -158,26 +142,23 @@ impl GeolodUdf {
 
   /// Decode each non-null WKB value once and encode every configured multiscale level.
   fn encode_geolod(&self, geometry: &GeometryArray<'_>) -> DataFusionResult<StructArray> {
-    let mut level_builders = self
-      .levels
-      .iter()
-      .map(|_| {
-        self
-          .multiscale_encoding
-          .resolve_writer(self.ty, self.has_z, self.has_m, geometry.len())
-      })
-      .collect::<Vec<_>>();
-    let quantization_options = self
-      .levels
-      .iter()
-      .map(|level| QuantizationOptions {
+    let mut level_builders = Vec::with_capacity(self.levels.len());
+    let mut quantization_options = Vec::with_capacity(self.levels.len());
+    for level in &self.levels {
+      level_builders.push(self.multiscale_encoding.resolve_writer(
+        self.ty,
+        self.has_z,
+        self.has_m,
+        geometry.len(),
+      ));
+      quantization_options.push(QuantizationOptions {
         transform: level.transform.clone(),
         tolerance: level.resolution,
         min_length: level.min_length,
         has_z: self.has_z,
         has_m: self.has_m,
-      })
-      .collect::<Vec<_>>();
+      });
+    }
     let mut quantized_geometry = QuantizedGeometry::default();
 
     for value in geometry.values() {
@@ -239,53 +220,42 @@ impl GeolodUdf {
   }
 }
 
-fn reverse_polygon_parts(geometry: &mut Geometry) {
-  let mut part_start = 0;
-  for part_length in &geometry.lengths {
-    let part_end = part_start + *part_length as usize;
-    geometry.coordinates[part_start..part_end].reverse();
-    part_start = part_end;
-  }
-}
-
 impl PartialEq for GeolodUdf {
+  /// Compare every encoding parameter using exact floating-point bit patterns.
   fn eq(&self, other: &Self) -> bool {
-    self.ty == other.ty
-      && self.has_z == other.has_z
-      && self.has_m == other.has_m
-      && self.multiscale_encoding == other.multiscale_encoding
-      && self.levels.len() == other.levels.len()
-      && self.levels.iter().zip(&other.levels).all(|(left, right)| {
-        left.level == right.level
-          && left.column == right.column
-          && left.resolution.to_bits() == right.resolution.to_bits()
-          && left.scale.to_bits() == right.scale.to_bits()
-          && left
-            .transform
-            .scale
-            .iter()
-            .map(|value| value.to_bits())
-            .eq(right.transform.scale.iter().map(|value| value.to_bits()))
-          && left
-            .transform
-            .translate
-            .iter()
-            .map(|value| value.to_bits())
-            .eq(
-              right
-                .transform
-                .translate
-                .iter()
-                .map(|value| value.to_bits()),
-            )
-          && left.min_length == right.min_length
-      })
+    if self.ty != other.ty
+      || self.has_z != other.has_z
+      || self.has_m != other.has_m
+      || self.multiscale_encoding != other.multiscale_encoding
+      || self.levels.len() != other.levels.len()
+    {
+      return false;
+    }
+    for (left, right) in self.levels.iter().zip(&other.levels) {
+      if left.level != right.level
+        || left.column != right.column
+        || left.resolution.to_bits() != right.resolution.to_bits()
+        || left.scale.to_bits() != right.scale.to_bits()
+        || left.min_length != right.min_length
+      {
+        return false;
+      }
+      for axis in 0..4 {
+        if left.transform.scale[axis].to_bits() != right.transform.scale[axis].to_bits()
+          || left.transform.translate[axis].to_bits() != right.transform.translate[axis].to_bits()
+        {
+          return false;
+        }
+      }
+    }
+    true
   }
 }
 
 impl Eq for GeolodUdf {}
 
 impl Hash for GeolodUdf {
+  /// Hash every encoding parameter with the same exact bit identity used by equality.
   fn hash<H: Hasher>(&self, state: &mut H) {
     match self.ty {
       GeometryFamily::Point => 0u8,
@@ -315,18 +285,22 @@ impl Hash for GeolodUdf {
 }
 
 impl ScalarUDFImpl for GeolodUdf {
+  /// Return the SQL name for complex-geometry multiscale encoding.
   fn name(&self) -> &str {
     "geodisplay_complex_geometry"
   }
 
+  /// Return the WKB argument contract for multiscale encoding.
   fn signature(&self) -> &Signature {
     Self::signature()
   }
 
+  /// Return the struct type containing every configured multiscale level.
   fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
     Ok(DataType::Struct(self.geolod_fields.clone()))
   }
 
+  /// Describe the non-null struct containing nullable multiscale payloads.
   fn return_field_from_args(&self, _: ReturnFieldArgs) -> DataFusionResult<FieldRef> {
     Ok(Arc::new(Field::new(
       self.name(),
@@ -335,6 +309,7 @@ impl ScalarUDFImpl for GeolodUdf {
     )))
   }
 
+  /// Encode the WKB argument into all configured multiscale columns.
   fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
     let arrays = ColumnarValue::values_to_arrays(&args.args)?;
     let geometry = arrays
@@ -370,6 +345,7 @@ impl SopGeometryUdf {
       .alias(SOP_GEOMETRY_COLUMN)
   }
 
+  /// Configure the scalar argument types for XY, XYZ, XYM, or XYZM point output.
   fn new(has_z: bool, has_m: bool) -> Self {
     let mut types = vec![DataType::Float64, DataType::Float64];
     types.extend(std::iter::repeat_n(
@@ -383,6 +359,7 @@ impl SopGeometryUdf {
     }
   }
 
+  /// Build non-null coordinate fields for XY, XYZ, XYM, or XYZM point output.
   fn fields(has_z: bool, has_m: bool) -> Fields {
     let mut fields = vec![
       Arc::new(Field::new(POINT_X_COLUMN, DataType::Float64, false)),
@@ -407,6 +384,7 @@ impl SopGeometryUdf {
 }
 
 impl PartialEq for SopGeometryUdf {
+  /// Compare point struct identity by its Z and M coordinate components.
   fn eq(&self, other: &Self) -> bool {
     self.has_z == other.has_z && self.has_m == other.has_m
   }
@@ -415,6 +393,7 @@ impl PartialEq for SopGeometryUdf {
 impl Eq for SopGeometryUdf {}
 
 impl Hash for SopGeometryUdf {
+  /// Hash the Z and M components defining point struct identity.
   fn hash<H: Hasher>(&self, state: &mut H) {
     self.has_z.hash(state);
     self.has_m.hash(state);
@@ -422,18 +401,22 @@ impl Hash for SopGeometryUdf {
 }
 
 impl ScalarUDFImpl for SopGeometryUdf {
+  /// Return the SQL name for generated point-coordinate packing.
   fn name(&self) -> &str {
     "sop_geometry"
   }
 
+  /// Return the configured XY, XYZ, XYM, or XYZM scalar argument contract.
   fn signature(&self) -> &Signature {
     &self.signature
   }
 
+  /// Return the configured point-coordinate struct type.
   fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
     Ok(DataType::Struct(Self::fields(self.has_z, self.has_m)))
   }
 
+  /// Describe nullable point structs with non-null coordinate fields.
   fn return_field_from_args(&self, _: ReturnFieldArgs) -> DataFusionResult<FieldRef> {
     Ok(Arc::new(Field::new(
       self.name(),
@@ -442,6 +425,7 @@ impl ScalarUDFImpl for SopGeometryUdf {
     )))
   }
 
+  /// Pack coordinate arrays into point structs using X validity for missing geometries.
   fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
     let arrays = ColumnarValue::values_to_arrays(&args.args)?;
     let x = as_float64_array(
@@ -477,6 +461,16 @@ impl ScalarUDFImpl for SopGeometryUdf {
   }
 }
 
+/// Reverse each polygon ring before PBF encoding without changing polygon grouping.
+fn reverse_polygon_parts(geometry: &mut Geometry) {
+  let mut part_start = 0;
+  for part_length in &geometry.lengths {
+    let part_end = part_start + *part_length as usize;
+    geometry.coordinates[part_start..part_end].reverse();
+    part_start = part_end;
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use std::collections::hash_map::DefaultHasher;
@@ -489,6 +483,7 @@ mod tests {
 
   use super::*;
 
+  /// Build a two-vertex XYZ multiline WKB fixture.
   fn multiline_z_wkb() -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.push(1);
@@ -505,6 +500,7 @@ mod tests {
     bytes
   }
 
+  /// Build an XY multipolygon WKB fixture with two separate square polygons.
   fn multipolygon_wkb() -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.push(1);
@@ -529,12 +525,14 @@ mod tests {
     bytes
   }
 
+  /// Hash a multiscale encoder to compare its DataFusion expression identity.
   fn hash_udf(udf: &GeolodUdf) -> u64 {
     let mut hasher = DefaultHasher::new();
     udf.hash(&mut hasher);
     hasher.finish()
   }
 
+  /// Verify that changing one level parameter changes multiscale encoder identity.
   fn assert_encoding_parameter_changes_identity(mutate: impl FnOnce(&mut MultiscaleLevel)) {
     let levels = MultiscaleLevel::create_all(
       crate::geoparquet::DEFAULT_OUTPUT_WKID,
@@ -557,20 +555,16 @@ mod tests {
     assert_encoding_parameter_changes_identity(|encoding| {
       encoding.scale = f64::from_bits(encoding.scale.to_bits() ^ 1)
     });
-    assert_encoding_parameter_changes_identity(|encoding| {
-      encoding.transform.scale[0] = f64::from_bits(encoding.transform.scale[0].to_bits() ^ 1)
-    });
-    assert_encoding_parameter_changes_identity(|encoding| {
-      encoding.transform.scale[1] = f64::from_bits(encoding.transform.scale[1].to_bits() ^ 1)
-    });
-    assert_encoding_parameter_changes_identity(|encoding| {
-      encoding.transform.translate[0] =
-        f64::from_bits(encoding.transform.translate[0].to_bits() ^ 1)
-    });
-    assert_encoding_parameter_changes_identity(|encoding| {
-      encoding.transform.translate[1] =
-        f64::from_bits(encoding.transform.translate[1].to_bits() ^ 1)
-    });
+    for axis in 0..4 {
+      assert_encoding_parameter_changes_identity(|encoding| {
+        encoding.transform.scale[axis] =
+          f64::from_bits(encoding.transform.scale[axis].to_bits() ^ 1)
+      });
+      assert_encoding_parameter_changes_identity(|encoding| {
+        encoding.transform.translate[axis] =
+          f64::from_bits(encoding.transform.translate[axis].to_bits() ^ 1)
+      });
+    }
     assert_encoding_parameter_changes_identity(|encoding| encoding.min_length += 1);
   }
 
@@ -604,7 +598,29 @@ mod tests {
   }
 
   #[test]
-  fn missing_m_values_are_encoded_as_zero_for_output_zm() {
+  fn identity_preserves_signed_zero_and_nan_bits() {
+    let levels = MultiscaleLevel::create_all(
+      crate::geoparquet::DEFAULT_OUTPUT_WKID,
+      GeometryFamily::Polyline,
+    );
+    let original = GeolodUdf::new(GeometryFamily::Polyline, false, false, levels);
+    let mut negative_zero = original.clone();
+    negative_zero.levels[0].transform.translate[3] = -0.0;
+    assert_ne!(original, negative_zero);
+
+    let mut nan = original.clone();
+    nan.levels[0].transform.scale[2] = f64::from_bits(0x7ff8_0000_0000_0001);
+    let equal_nan = nan.clone();
+    assert_eq!(nan, equal_nan);
+    assert_eq!(hash_udf(&nan), hash_udf(&equal_nan));
+
+    let mut different_nan = nan.clone();
+    different_nan.levels[0].transform.scale[2] = f64::from_bits(0x7ff8_0000_0000_0002);
+    assert_ne!(nan, different_nan);
+  }
+
+  #[test]
+  fn missing_m_values_are_encoded_as_zero_for_xyzm_output() {
     let levels = MultiscaleLevel::create_all(
       crate::geoparquet::DEFAULT_OUTPUT_WKID,
       GeometryFamily::Polyline,
@@ -637,7 +653,7 @@ mod tests {
   }
 
   #[test]
-  fn missing_m_values_are_zero_for_native_output_zm() {
+  fn missing_m_values_are_zero_for_native_xyzm_output() {
     let levels = MultiscaleLevel::create_all(
       crate::geoparquet::DEFAULT_OUTPUT_WKID,
       GeometryFamily::Polyline,

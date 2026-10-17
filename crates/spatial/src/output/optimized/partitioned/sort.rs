@@ -63,13 +63,6 @@ impl PartitionedSortConfig {
     &self,
     plan: Arc<dyn ExecutionPlan>,
   ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-    self.insert_partitioned_sort_exec(plan)
-  }
-
-  fn insert_partitioned_sort_exec(
-    &self,
-    plan: Arc<dyn ExecutionPlan>,
-  ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
     let schema = plan.schema();
     let partition_column_index = schema.index_of(&self.partition_column);
     let cluster_key_column_index = schema.index_of(&self.cluster_key_column);
@@ -91,13 +84,14 @@ impl PartitionedSortConfig {
           .collect::<Vec<_>>(),
       )));
     }
-    let rewritten_children = children
-      .into_iter()
-      .map(|child| self.insert_partitioned_sort_exec(Arc::clone(child)))
-      .collect::<DataFusionResult<Vec<_>>>()?;
+    let mut rewritten_children = Vec::with_capacity(children.len());
+    for child in children {
+      rewritten_children.push(self.insert_into(Arc::clone(child))?);
+    }
     plan.with_new_children(rewritten_children)
   }
 
+  /// Repartition by range and sort each partition before optionally dropping its cluster key.
   fn partitioned_sort_exec(
     &self,
     plan: Arc<dyn ExecutionPlan>,
@@ -130,23 +124,22 @@ impl PartitionedSortConfig {
     if !self.drop_cluster_key_after_sort {
       return Ok(sorted_input);
     }
-    let projection_exprs = sorted_input
-      .schema()
-      .fields()
-      .iter()
-      .enumerate()
-      .filter(|(_, field)| field.name() != &self.cluster_key_column)
-      .map(|(index, field)| ProjectionExpr {
-        expr: Arc::new(PhysicalColumn::new(field.name(), index)),
-        alias: field.name().to_string(),
-      })
-      .collect::<Vec<_>>();
+    let mut projection_exprs = Vec::new();
+    for (index, field) in sorted_input.schema().fields().iter().enumerate() {
+      if field.name() != &self.cluster_key_column {
+        projection_exprs.push(ProjectionExpr {
+          expr: Arc::new(PhysicalColumn::new(field.name(), index)),
+          alias: field.name().to_string(),
+        });
+      }
+    }
     Ok(Arc::new(ProjectionExec::try_new(
       projection_exprs,
       sorted_input,
     )?))
   }
 
+  /// Reserve at least eight execution partitions with two partitions per output bucket.
   fn partition_count(bucket_count: usize) -> usize {
     bucket_count.saturating_mul(2).max(8)
   }

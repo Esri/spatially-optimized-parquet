@@ -42,29 +42,26 @@ pub(super) struct GeometrySchemaExec {
 }
 
 impl GeometrySchemaExec {
+  /// Annotate the primary WKB field while retaining input partitioning and batch values.
   pub(super) fn try_new(
     input: Arc<dyn ExecutionPlan>,
     geometry_column: &str,
     crs: &str,
   ) -> DataFusionResult<Self> {
-    let fields = input
-      .schema()
-      .fields()
-      .iter()
-      .map(|field| {
-        if field.name() == geometry_column {
-          Arc::new(
-            field
-              .as_ref()
-              .clone()
-              .with_extension_type(WkbType::new(Some(WkbMetadata::new(Some(crs), None)))),
-          )
-        } else {
-          Arc::clone(field)
-        }
-      })
-      .collect::<Vec<_>>();
-    if !fields.iter().any(|field| field.name() == geometry_column) {
+    let input_schema = input.schema();
+    let mut fields = Vec::with_capacity(input_schema.fields().len());
+    let mut found_geometry = false;
+    for field in input_schema.fields() {
+      if field.name() == geometry_column {
+        found_geometry = true;
+        fields.push(Arc::new(field.as_ref().clone().with_extension_type(
+          WkbType::new(Some(WkbMetadata::new(Some(crs), None))),
+        )));
+      } else {
+        fields.push(Arc::clone(field));
+      }
+    }
+    if !found_geometry {
       return Err(DataFusionError::Plan(format!(
         "geometry column '{geometry_column}' is missing from output schema"
       )));
@@ -92,6 +89,7 @@ impl GeometrySchemaExec {
 }
 
 impl DisplayAs for GeometrySchemaExec {
+  /// Display the geometry-schema annotation step in physical plans.
   fn fmt_as(
     &self,
     _format_type: DisplayFormatType,
@@ -102,26 +100,32 @@ impl DisplayAs for GeometrySchemaExec {
 }
 
 impl ExecutionPlan for GeometrySchemaExec {
+  /// Return the physical plan name for geometry-schema annotation.
   fn name(&self) -> &'static str {
     "GeometrySchemaExec"
   }
 
+  /// Return the cached schema and execution properties.
   fn properties(&self) -> &Arc<PlanProperties> {
     &self.cache
   }
 
+  /// Accept the input's existing distribution without repartitioning.
   fn required_input_distribution(&self) -> Vec<Distribution> {
     vec![Distribution::UnspecifiedDistribution]
   }
 
+  /// Preserve the input row order while replacing field metadata.
   fn maintains_input_order(&self) -> Vec<bool> {
     vec![true]
   }
 
+  /// Expose the single input plan for optimizer traversal.
   fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
     vec![&self.input]
   }
 
+  /// Rebuild geometry-schema annotation around the replacement input.
   fn with_new_children(
     self: Arc<Self>,
     children: Vec<Arc<dyn ExecutionPlan>>,
@@ -133,6 +137,7 @@ impl ExecutionPlan for GeometrySchemaExec {
     )?))
   }
 
+  /// Stream input batches with the annotated schema and unchanged column arrays.
   fn execute(
     &self,
     partition: usize,

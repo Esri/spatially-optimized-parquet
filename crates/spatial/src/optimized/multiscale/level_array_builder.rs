@@ -34,6 +34,7 @@ pub(crate) enum MultiscaleLevelArrayBuilder {
 }
 
 impl MultiscaleEncoding {
+  /// Resolve the Arrow payload type for the geometry family and coordinate dimensions.
   pub(crate) fn geometry_data_type(
     self,
     geometry_type: GeometryFamily,
@@ -47,6 +48,7 @@ impl MultiscaleEncoding {
     }
   }
 
+  /// List native floating-point coordinate leaves that benefit from byte-stream splitting.
   pub(crate) fn byte_stream_split_column_paths(
     self,
     levels: &[MultiscaleLevel],
@@ -69,6 +71,7 @@ impl MultiscaleEncoding {
     }
   }
 
+  /// Create the selected payload builder with space for the expected geometry count.
   pub(crate) fn resolve_writer(
     self,
     geometry_type: GeometryFamily,
@@ -87,6 +90,7 @@ impl MultiscaleEncoding {
 }
 
 impl MultiscaleLevelArrayBuilder {
+  /// Append quantized geometry using the selected codec and world-coordinate transform.
   pub(crate) fn append(
     &mut self,
     geometry: &QuantizedGeometry,
@@ -102,6 +106,7 @@ impl MultiscaleLevelArrayBuilder {
     }
   }
 
+  /// Append one null geometry to the selected payload builder.
   pub(crate) fn append_null(&mut self) {
     match self {
       Self::Pbf(writer) => writer.append_null(),
@@ -110,6 +115,7 @@ impl MultiscaleLevelArrayBuilder {
     }
   }
 
+  /// Finish the selected payload builder as an Arrow array.
   pub(crate) fn finish(self) -> ArrayRef {
     match self {
       Self::Pbf(writer) => writer.finish(),

@@ -29,6 +29,7 @@ pub(super) struct WriteReporter {
 }
 
 impl WriteReporter {
+  /// Initialize cumulative row tracking with an optional progress callback.
   pub(super) fn new(total_rows: u64, callback: Option<SharedWriteReporter>) -> Self {
     Self {
       total_rows,
@@ -38,6 +39,7 @@ impl WriteReporter {
     }
   }
 
+  /// Add a nonempty batch to the cumulative row count and report forward progress.
   pub(super) fn record_batch(&self, row_count: usize) {
     if row_count == 0 {
       return;
@@ -49,11 +51,13 @@ impl WriteReporter {
     self.deliver(rows_written, false);
   }
 
+  /// Publish the authoritative final count even when the last batch reported it.
   pub(super) fn finish(&self, rows_written: u64) {
     self.rows_written.store(rows_written, Ordering::Relaxed);
     self.deliver(rows_written, true);
   }
 
+  /// Serialize callbacks while suppressing stale counts and unforced duplicate counts.
   fn deliver(&self, rows_written: u64, force: bool) {
     let Some(callback) = &self.callback else {
       return;

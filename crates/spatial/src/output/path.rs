@@ -53,9 +53,7 @@ enum OutputPathError {
 }
 
 impl OutputPath {
-  /// Resolve the output path and prepare its parent directory.
-  ///
-  /// Existing compatible destinations are removed only when `overwrite` is true.
+  /// Resolve the output path and prepare its directory, replacing compatible paths only on request.
   pub(crate) fn new(
     output: &Path,
     output_files: Option<usize>,

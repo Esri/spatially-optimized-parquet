@@ -34,10 +34,12 @@ pub(crate) enum ColumnPath {
 }
 
 impl ColumnPath {
+  /// Build a nested field path from its parent and leaf column names.
   pub(crate) fn nested(parent: impl Into<String>, column: impl Into<String>) -> Self {
     Self::Nested([parent.into(), column.into()])
   }
 
+  /// Render the root or nested path using Parquet's dotted field notation.
   pub(crate) fn dotted(&self) -> String {
     match self {
       Self::Root(column) => column.clone(),
@@ -45,6 +47,7 @@ impl ColumnPath {
     }
   }
 
+  /// Detect an empty root name or an empty component of a nested field path.
   pub(crate) fn is_empty(&self) -> bool {
     match self {
       Self::Root(column) => column.is_empty(),
@@ -54,6 +57,7 @@ impl ColumnPath {
 }
 
 impl fmt::Display for ColumnPath {
+  /// Format the column path using dotted field notation.
   fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
     formatter.write_str(&self.dotted())
   }
@@ -85,6 +89,7 @@ pub(crate) enum GeodisplayEncoding {
 }
 
 impl GeodisplayEncoding {
+  /// Return the wire-format name for this multiscale encoding.
   pub(crate) const fn as_str(self) -> &'static str {
     match self {
       Self::EsriPbf => "esriPBF",
@@ -95,6 +100,7 @@ impl GeodisplayEncoding {
 }
 
 impl From<MultiscaleEncoding> for GeodisplayEncoding {
+  /// Map the selected payload codec to its Geodisplay metadata encoding.
   fn from(encoding: MultiscaleEncoding) -> Self {
     match encoding {
       MultiscaleEncoding::Pbf => Self::EsriPbf,
@@ -240,16 +246,15 @@ pub(crate) struct MultiscaleLevel {
 }
 
 impl GeodisplayMetadata {
+  /// Wrap point Z-order metadata in its tagged wire representation.
   pub(super) fn point(index: ClusteringIndexZ) -> Self {
     Self::Z { index }
   }
 
+  /// Wrap complex-geometry XZ-order metadata in its tagged wire representation.
   pub(super) fn xz(index: ClusteringIndexXZ) -> Self {
     Self::Xz { index }
   }
-}
-
-impl GeodisplayMetadata {
   /// Serialize this Geodisplay metadata into one Parquet key-value entry.
   pub(crate) fn parquet_entry(&self) -> Result<KeyValue, crate::GeoParquetError> {
     Ok(KeyValue::new(
@@ -265,6 +270,7 @@ impl GeodisplayMetadata {
 }
 
 impl ClusteringIndexZ {
+  /// Build point-index metadata with the format version and SOP writer identity.
   pub(super) fn new(input: ClusteringIndexZInput) -> Self {
     Self {
       version: GEODISPLAY_VERSION.to_string(),
@@ -286,6 +292,7 @@ impl ClusteringIndexZ {
 }
 
 impl ClusteringIndexXZ {
+  /// Build XZ-index metadata with per-level transforms and the SOP writer identity.
   pub(super) fn new(input: ClusteringIndexXZInput) -> Self {
     Self {
       version: GEODISPLAY_VERSION.to_string(),
@@ -317,6 +324,7 @@ impl ClusteringIndexXZ {
   }
 }
 
+/// Build the writer identity included in newly generated Geodisplay metadata.
 fn sop_writer_metadata() -> WriterMetadata {
   WriterMetadata {
     name: SOP_WRITER_NAME.to_string(),

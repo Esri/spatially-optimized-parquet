@@ -23,14 +23,6 @@ use crate::input::{InputError, InputOpenOptions, SourceGeometryMetadata};
 
 const MAX_GEOMETRY_TYPE_SAMPLE_FEATURES: usize = 64;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-/// Summarizes one layer for selection error messages.
-pub(super) struct GpkgLayerSummary {
-  name: String,
-  geometry_type: String,
-  feature_count: Option<u64>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Captures whether sampled features establish one geometry type or mixed content.
 enum SampledGeometryType {
@@ -42,35 +34,41 @@ enum SampledGeometryType {
   Mixed,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+/// Summarizes one layer for selection error messages.
+pub(super) struct GpkgLayerSummary {
+  name: String,
+  geometry_type: String,
+  feature_count: Option<u64>,
+}
+
 impl GpkgLayerSummary {
   /// Collect user-facing metadata for every vector layer in a dataset.
   pub(super) fn collect(dataset: &Dataset) -> Result<Vec<Self>, InputError> {
-    let layer_summaries = dataset
-      .layers()
-      .map(|mut layer| {
-        let feature_count = layer.try_feature_count();
-        let declared_geometry_type = layer
-          .defn()
-          .geom_fields()
-          .next()
-          .map(|field| Self::geometry_type_hint(field.field_type()));
-        let geometry_type = match declared_geometry_type {
-          Some(declared_type) if declared_type == "Geometry" => {
-            SampledGeometryType::from_layer(&mut layer)
-              .map(|sampled_type| sampled_type.hint())
-              .unwrap_or(declared_type)
-          }
-          Some(declared_type) => declared_type,
-          None => "None".to_string(),
-        };
-
-        Self {
-          name: layer.name(),
-          geometry_type,
-          feature_count,
+    let mut layer_summaries = Vec::new();
+    for mut layer in dataset.layers() {
+      let feature_count = layer.try_feature_count();
+      let declared_geometry_type = layer
+        .defn()
+        .geom_fields()
+        .next()
+        .map(|field| Self::geometry_type_hint(field.field_type()));
+      let geometry_type = match declared_geometry_type {
+        Some(declared_type) if declared_type == "Geometry" => {
+          SampledGeometryType::from_layer(&mut layer)
+            .map(|sampled_type| sampled_type.hint())
+            .unwrap_or(declared_type)
         }
-      })
-      .collect::<Vec<_>>();
+        Some(declared_type) => declared_type,
+        None => "None".to_string(),
+      };
+
+      layer_summaries.push(Self {
+        name: layer.name(),
+        geometry_type,
+        feature_count,
+      });
+    }
     if layer_summaries.is_empty() {
       return Err(InputError::Metadata(
         "GeoPackage contains no vector layers".to_string(),
@@ -108,24 +106,23 @@ impl GpkgLayerSummary {
     )))
   }
 
+  /// Format available layers with geometry and feature-count hints for selection errors.
   fn format_collection(layer_summaries: &[Self]) -> String {
-    layer_summaries
-      .iter()
-      .map(|layer| {
-        let mut hints = Vec::new();
-        hints.push(format!("geometry: {}", layer.geometry_type));
-        if let Some(feature_count) = layer.feature_count {
-          hints.push(format!(
-            "features: {}",
-            Self::format_feature_count(feature_count)
-          ));
-        }
-        format!("- {} ({})", layer.name, hints.join(", "))
-      })
-      .collect::<Vec<_>>()
-      .join("\n")
+    let mut lines = Vec::with_capacity(layer_summaries.len());
+    for layer in layer_summaries {
+      let mut hints = vec![format!("geometry: {}", layer.geometry_type)];
+      if let Some(feature_count) = layer.feature_count {
+        hints.push(format!(
+          "features: {}",
+          Self::format_feature_count(feature_count)
+        ));
+      }
+      lines.push(format!("- {} ({})", layer.name, hints.join(", ")));
+    }
+    lines.join("\n")
   }
 
+  /// Describe a GDAL geometry kind while retaining its declared coordinate layout.
   fn geometry_type_hint(geometry_type: OGRwkbGeometryType::Type) -> String {
     let (ty, has_z, has_m) = SourceGeometryMetadata::from_gpkg_geometry_type(geometry_type);
     if let Some(ty) = ty {
@@ -140,6 +137,7 @@ impl GpkgLayerSummary {
     }
   }
 
+  /// Append the coordinate-layout suffix to a geometry-kind label.
   fn type_hint(ty: GeometryType, has_z: bool, has_m: bool) -> String {
     let base = Self::type_label(ty).unwrap_or("Geometry");
     let suffix = match (has_z, has_m) {
@@ -151,6 +149,7 @@ impl GpkgLayerSummary {
     format!("{base}{suffix}")
   }
 
+  /// Resolve the display label for a known geometry kind.
   fn type_label(ty: GeometryType) -> Option<&'static str> {
     match ty {
       GeometryType::Point => Some("Point"),
@@ -164,14 +163,15 @@ impl GpkgLayerSummary {
     }
   }
 
+  /// Format a feature count with comma-separated thousands.
   fn format_feature_count(feature_count: u64) -> String {
     let digits = feature_count.to_string();
     let mut reversed = String::with_capacity(digits.len() + digits.len() / 3);
-    for (index, ch) in digits.chars().rev().enumerate() {
+    for (index, digit) in digits.chars().rev().enumerate() {
       if index > 0 && index % 3 == 0 {
         reversed.push(',');
       }
-      reversed.push(ch);
+      reversed.push(digit);
     }
     reversed.chars().rev().collect()
   }
@@ -207,6 +207,7 @@ impl SampledGeometryType {
     sampled_geometry.map(|(ty, has_z, has_m)| Self::Concrete { ty, has_z, has_m })
   }
 
+  /// Describe the sampled geometry kind or report mixed content.
   fn hint(self) -> String {
     match self {
       Self::Concrete { ty, has_z, has_m } => GpkgLayerSummary::type_hint(ty, has_z, has_m),
@@ -273,6 +274,7 @@ impl SourceGeometryMetadata {
     })
   }
 
+  /// Export a GDAL spatial reference as PROJJSON when conversion succeeds.
   fn spatial_ref_to_projjson(spatial_ref: &SpatialRef) -> Option<serde_json::Value> {
     spatial_ref
       .to_projjson()
@@ -280,6 +282,7 @@ impl SourceGeometryMetadata {
       .and_then(|projjson| serde_json::from_str(&projjson).ok())
   }
 
+  /// Resolve a GDAL geometry kind and its XY, XYZ, XYM, or XYZM coordinate layout.
   #[allow(non_upper_case_globals)]
   fn from_gpkg_geometry_type(
     geometry_type: OGRwkbGeometryType::Type,

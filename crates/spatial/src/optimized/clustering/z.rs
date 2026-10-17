@@ -26,7 +26,7 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::{col, lit};
 
-use crate::geometry::WkbCoordinate;
+use crate::geometry::Coord;
 use crate::geometry::{Extent2D, GeometryArray, geometry_signature, to_datafusion_error};
 use crate::optimized::multiscale::{
   GEOKEY_COLUMN, POINT_M_COLUMN, POINT_X_COLUMN, POINT_Y_COLUMN, POINT_Z_COLUMN,
@@ -49,6 +49,7 @@ impl ClusterKey {
     Self::swizzle_bits(quantized_x, quantized_y, coordinate_precision)
   }
 
+  /// Interleave quantized XY bits into one Morton Z-order key.
   fn swizzle_bits(x: u32, y: u32, coordinate_precision: u32) -> Self {
     let mut code = 0;
     for bit in 0..coordinate_precision.min(32) {
@@ -60,6 +61,7 @@ impl ClusterKey {
     Self::new(code)
   }
 
+  /// Quantize one axis into a clamped cell index at the requested bit width.
   fn quantize_to_bits(value: f64, min: f64, max: f64, coordinate_precision: u32) -> u32 {
     if coordinate_precision == 0 || (max - min).abs() < f64::EPSILON {
       return 0;
@@ -93,16 +95,19 @@ impl PointGeometryUdf {
       .call(vec![col(geometry_column)])
   }
 
+  /// Store optional XY, XYZ, XYM, or XYZM source-dimension validation.
   fn new(expected_dimensions: Option<(bool, bool)>) -> Self {
     Self {
       expected_dimensions,
     }
   }
 
+  /// Register point-coordinate extraction as a DataFusion scalar function.
   fn udf(self) -> ScalarUDF {
     ScalarUDF::new_from_impl(self)
   }
 
+  /// Decode point coordinates into nullable XY, Z, and M fields without losing missing values.
   fn coordinate_struct(
     geometry: &GeometryArray<'_>,
     expected_dimensions: Option<(bool, bool)>,
@@ -119,7 +124,7 @@ impl PointGeometryUdf {
         ms.push(None);
         continue;
       };
-      let coordinate = WkbCoordinate::from_point_wkb(bytes).map_err(to_datafusion_error)?;
+      let coordinate = Coord::from_point_wkb(bytes).map_err(to_datafusion_error)?;
       if let Some((has_z, has_m)) = expected_dimensions
         && (coordinate.z.is_some() != has_z || coordinate.m.is_some() != has_m)
       {
@@ -145,6 +150,7 @@ impl PointGeometryUdf {
     .map_err(to_datafusion_error)
   }
 
+  /// Return the shared nullable XY, Z, and M point-coordinate fields.
   fn fields() -> Fields {
     static FIELDS: OnceLock<Fields> = OnceLock::new();
     FIELDS
@@ -161,18 +167,22 @@ impl PointGeometryUdf {
 }
 
 impl ScalarUDFImpl for PointGeometryUdf {
+  /// Return the SQL name for point-coordinate extraction.
   fn name(&self) -> &str {
     "clustering_point_geometry"
   }
 
+  /// Accept each supported WKB binary array type.
   fn signature(&self) -> &Signature {
     geometry_signature()
   }
 
+  /// Return the point-coordinate struct type.
   fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
     Ok(DataType::Struct(Self::fields()))
   }
 
+  /// Describe nullable point-coordinate output for expression planning.
   fn return_field_from_args(&self, _: ReturnFieldArgs) -> DataFusionResult<Arc<Field>> {
     Ok(Arc::new(Field::new(
       self.name(),
@@ -181,6 +191,7 @@ impl ScalarUDFImpl for PointGeometryUdf {
     )))
   }
 
+  /// Decode the WKB argument into validated point-coordinate columns.
   fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
     let arrays = ColumnarValue::values_to_arrays(&args.args)?;
     let geometry = arrays
@@ -213,19 +224,23 @@ impl PointGeometryClusterKeyUdf {
       .alias(GEOKEY_COLUMN)
   }
 
+  /// Store the coordinate precision used by point Z-order keys.
   fn new(cluster_depth: u32) -> Self {
     Self { cluster_depth }
   }
 
+  /// Register point Z-order encoding as a DataFusion scalar function.
   fn udf(self) -> ScalarUDF {
     ScalarUDF::new_from_impl(self)
   }
 
+  /// Accept XY positions and four full-extent coordinates.
   fn signature() -> &'static Signature {
     static SIGNATURE: OnceLock<Signature> = OnceLock::new();
     SIGNATURE.get_or_init(|| Signature::exact(vec![DataType::Float64; 6], Volatility::Immutable))
   }
 
+  /// Read the full XY extent from four consecutive scalar arguments.
   fn extent_from_args(arrays: &[ArrayRef], start: usize) -> DataFusionResult<Extent2D> {
     Ok(Extent2D {
       xmin: Self::first_f64(&arrays[start])?,
@@ -235,6 +250,7 @@ impl PointGeometryClusterKeyUdf {
     })
   }
 
+  /// Read the first extent value while rejecting empty or null arguments.
   fn first_f64(array: &ArrayRef) -> DataFusionResult<f64> {
     let array = as_float64_array(array.as_ref())?;
     if array.is_empty() || array.is_null(0) {
@@ -247,22 +263,27 @@ impl PointGeometryClusterKeyUdf {
 }
 
 impl ScalarUDFImpl for PointGeometryClusterKeyUdf {
+  /// Return the SQL name for point Z-order encoding.
   fn name(&self) -> &str {
     "clustering_point_geometry_zcode_from_xy"
   }
 
+  /// Return the XY and full-extent argument contract.
   fn signature(&self) -> &Signature {
     Self::signature()
   }
 
+  /// Return the unsigned Z-order key type.
   fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> {
     Ok(DataType::UInt64)
   }
 
+  /// Describe the non-nullable Z-order key output.
   fn return_field_from_args(&self, _: ReturnFieldArgs) -> DataFusionResult<Arc<Field>> {
     Ok(Arc::new(Field::new(self.name(), DataType::UInt64, false)))
   }
 
+  /// Encode each XY position as a Z-order key, mapping missing positions to zero.
   fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
     let arrays = ColumnarValue::values_to_arrays(&args.args)?;
     let x = as_float64_array(arrays[0].as_ref())?;

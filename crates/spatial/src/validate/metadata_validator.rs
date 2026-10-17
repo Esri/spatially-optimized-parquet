@@ -34,6 +34,7 @@ enum ValidatedCrs {
 }
 
 impl ValidatedCrs {
+  /// Return the EPSG identifier for the resolved supported CRS.
   const fn epsg(self) -> u32 {
     match self {
       Self::Wgs84 => 4326,
@@ -49,18 +50,13 @@ pub(crate) struct ValidatedMetadata {
   crs: ValidatedCrs,
 }
 
-pub(crate) struct ValidatedDatasetFile<'file> {
-  pub(crate) file: &'file FileValidator,
-  pub(crate) metadata: ValidatedMetadata,
-}
-
-pub(crate) struct MetadataValidator;
-
 impl ValidatedMetadata {
+  /// Return the primary WKB geometry column path.
   pub(crate) fn geometry_column(&self) -> &str {
     &self.geo.primary_column
   }
 
+  /// Return declared primary-column geometry types or an empty slice when absent.
   pub(crate) fn geometry_types(&self) -> &[String] {
     self
       .geo
@@ -70,17 +66,25 @@ impl ValidatedMetadata {
   }
 }
 
+pub(crate) struct ValidatedDatasetFile<'file> {
+  pub(crate) file: &'file FileValidator,
+  pub(crate) metadata: ValidatedMetadata,
+}
+
+pub(crate) struct MetadataValidator;
+
 impl MetadataValidator {
+  /// Validate each file's metadata and compare successful contracts with the first valid file.
   pub(crate) fn validate_dataset<'file>(
     files: &'file [FileValidator],
     report: &mut ValidationReport,
   ) -> Vec<ValidatedDatasetFile<'file>> {
-    let validated_files = files
-      .iter()
-      .filter_map(|file| {
-        Self::validate_file(file, report).map(|metadata| ValidatedDatasetFile { file, metadata })
-      })
-      .collect::<Vec<_>>();
+    let mut validated_files = Vec::new();
+    for file in files {
+      if let Some(metadata) = Self::validate_file(file, report) {
+        validated_files.push(ValidatedDatasetFile { file, metadata });
+      }
+    }
 
     if let Some(baseline) = validated_files.first() {
       for validated_file in validated_files.iter().skip(1) {
@@ -101,6 +105,7 @@ impl MetadataValidator {
     validated_files
   }
 
+  /// Resolve a file contract only when all required metadata, CRS, and extent checks pass.
   fn validate_file(
     file: &FileValidator,
     report: &mut ValidationReport,
@@ -156,6 +161,7 @@ impl MetadataValidator {
     })
   }
 
+  /// Parse the first reserved entry while reporting missing, duplicate, or malformed values.
   fn parse_reserved_metadata<T: DeserializeOwned>(
     key: &str,
     entries: &[parquet::file::metadata::KeyValue],
@@ -208,6 +214,7 @@ impl MetadataValidator {
     }
   }
 
+  /// Validate GeoParquet versions, WKB geometry declarations, and finite ordered bounds.
   fn validate_geo_contract(geo: &GeoMetadata, file: &FileValidator, report: &mut ValidationReport) {
     let location = ValidationLocation::file(file.file.relative_path.clone()).with_column("geo");
     if !SUPPORTED_GEO_VERSIONS.contains(&geo.version.as_str()) {
@@ -279,6 +286,7 @@ impl MetadataValidator {
     }
   }
 
+  /// Route geodisplay checks to the declared Z or XZ clustering contract.
   fn validate_geodisplay_contract(
     geodisplay: &GeodisplayMetadata,
     file: &FileValidator,
@@ -290,41 +298,7 @@ impl MetadataValidator {
     }
   }
 
-  fn validate_common_metadata(
-    version: &str,
-    writer: Option<(&str, &str)>,
-    full_extent: Extent2D,
-    file: &FileValidator,
-    report: &mut ValidationReport,
-  ) {
-    let location =
-      ValidationLocation::file(file.file.relative_path.clone()).with_column("geodisplay");
-    if version != GEODISPLAY_VERSION {
-      report.push(
-        ValidationRule::MetadataVersion,
-        ValidationSeverity::Error,
-        location.clone(),
-        format!("geodisplay version must be {GEODISPLAY_VERSION}, found {version}"),
-      );
-    }
-    match writer {
-      None => report.push(
-        ValidationRule::WriterMetadata,
-        ValidationSeverity::Warning,
-        location.clone(),
-        "optional geodisplay writer metadata is missing",
-      ),
-      Some((name, version)) if name.is_empty() || version.is_empty() => report.push(
-        ValidationRule::MetadataContract,
-        ValidationSeverity::Error,
-        location.clone().with_column("geodisplay.writer"),
-        "writer name and version must not be empty",
-      ),
-      Some(_) => {}
-    }
-    Self::validate_extent(full_extent, location, "geodisplay fullExtent", report);
-  }
-
+  /// Validate point Z precision, required column paths, and optional Z/M declarations.
   fn validate_z_metadata(
     index: &ClusteringIndexZ,
     file: &FileValidator,
@@ -382,6 +356,7 @@ impl MetadataValidator {
     }
   }
 
+  /// Validate non-point XZ levels, unique column paths, and quantization transforms.
   fn validate_xz_metadata(
     index: &ClusteringIndexXZ,
     file: &FileValidator,
@@ -498,6 +473,43 @@ impl MetadataValidator {
     }
   }
 
+  /// Validate shared geodisplay version, optional writer identity, and full extent.
+  fn validate_common_metadata(
+    version: &str,
+    writer: Option<(&str, &str)>,
+    full_extent: Extent2D,
+    file: &FileValidator,
+    report: &mut ValidationReport,
+  ) {
+    let location =
+      ValidationLocation::file(file.file.relative_path.clone()).with_column("geodisplay");
+    if version != GEODISPLAY_VERSION {
+      report.push(
+        ValidationRule::MetadataVersion,
+        ValidationSeverity::Error,
+        location.clone(),
+        format!("geodisplay version must be {GEODISPLAY_VERSION}, found {version}"),
+      );
+    }
+    match writer {
+      None => report.push(
+        ValidationRule::WriterMetadata,
+        ValidationSeverity::Warning,
+        location.clone(),
+        "optional geodisplay writer metadata is missing",
+      ),
+      Some((name, version)) if name.is_empty() || version.is_empty() => report.push(
+        ValidationRule::MetadataContract,
+        ValidationSeverity::Error,
+        location.clone().with_column("geodisplay.writer"),
+        "writer name and version must not be empty",
+      ),
+      Some(_) => {}
+    }
+    Self::validate_extent(full_extent, location, "geodisplay fullExtent", report);
+  }
+
+  /// Require every declared primary-column WKB type to match the geodisplay family.
   fn validate_geometry_family(
     geo: &GeoMetadata,
     geodisplay: &GeodisplayMetadata,
@@ -529,6 +541,7 @@ impl MetadataValidator {
     }
   }
 
+  /// Resolve the primary GeoParquet CRS from its EPSG identifier or recognized name.
   fn resolve_geo_crs(
     geo: &GeoMetadata,
     file: &FileValidator,
@@ -566,6 +579,7 @@ impl MetadataValidator {
     crs
   }
 
+  /// Resolve exactly one supported geodisplay WKID or WKT declaration.
   fn resolve_geodisplay_crs(
     geodisplay: &GeodisplayMetadata,
     file: &FileValidator,
@@ -619,6 +633,7 @@ impl MetadataValidator {
     wkid_crs.or(wkt_crs)
   }
 
+  /// Compare primary-column GeoParquet bounds with geodisplay bounds using relative tolerance.
   fn validate_matching_extent(
     geo: &GeoMetadata,
     geodisplay: &GeodisplayMetadata,
@@ -659,6 +674,7 @@ impl MetadataValidator {
     }
   }
 
+  /// Report non-finite or reversed XY bounds with the supplied metadata label.
   fn validate_extent(
     extent: Extent2D,
     location: ValidationLocation,
@@ -679,6 +695,7 @@ impl MetadataValidator {
     }
   }
 
+  /// Resolve only the supported WGS 84 and Web Mercator EPSG identifiers.
   fn supported_crs(wkid: u32) -> Option<ValidatedCrs> {
     match wkid {
       4326 => Some(ValidatedCrs::Wgs84),
@@ -687,6 +704,7 @@ impl MetadataValidator {
     }
   }
 
+  /// Resolve recognized CRS names and identifier substrings with Web Mercator precedence.
   fn resolve_wkt_name(value: &str) -> Option<ValidatedCrs> {
     let normalized = value.to_ascii_uppercase();
     if normalized.contains("3857")
@@ -704,6 +722,7 @@ impl MetadataValidator {
     }
   }
 
+  /// Parse a JSON unsigned integer or numeric string without exceeding UInt32.
   fn json_u32(value: &serde_json::Value) -> Option<u32> {
     value
       .as_u64()
@@ -711,10 +730,12 @@ impl MetadataValidator {
       .or_else(|| value.as_str()?.parse().ok())
   }
 
+  /// Read the geometry family token before optional GeoParquet Z/M suffixes.
   pub(crate) fn geometry_base_type(value: &str) -> &str {
     value.split_whitespace().next().unwrap_or(value)
   }
 
+  /// Compare coordinates with a relative tolerance and a unit minimum scale.
   pub(crate) fn float_matches(left: f64, right: f64) -> bool {
     let scale = left.abs().max(right.abs()).max(1.0);
     (left - right).abs() <= scale * 1.0e-9

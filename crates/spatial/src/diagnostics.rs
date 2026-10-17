@@ -54,13 +54,13 @@ impl Diagnostics {
       let context = Arc::new(TaskContext::from(&state));
       let plan = state.create_physical_plan(&logical_plan).await?;
       self.print_physical_plan(plan.as_ref());
-      Ok(collect(plan, context).await?)
+      collect(plan, context).await
     }
 
     #[cfg(not(feature = "print-plan"))]
     {
       let _ = self;
-      Ok(dataframe.collect().await?)
+      dataframe.collect().await
     }
   }
 

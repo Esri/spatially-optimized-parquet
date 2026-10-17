@@ -80,19 +80,6 @@ impl GeometryFamily {
   }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-/// Represents one coordinate in the format-neutral geometry model.
-pub(crate) struct Coord {
-  /// Defines the horizontal x coordinate.
-  pub(crate) x: f64,
-  /// Defines the horizontal y coordinate.
-  pub(crate) y: f64,
-  /// Provides the optional vertical coordinate.
-  pub(crate) z: Option<f64>,
-  /// Provides the optional measure coordinate.
-  pub(crate) m: Option<f64>,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 /// Represents one format-neutral geometry as coordinate parts.
 ///
@@ -105,7 +92,7 @@ pub(crate) struct Geometry {
   pub(crate) coordinates: Vec<Coord>,
   /// Defines the coordinate count for each part.
   pub(crate) lengths: Vec<u32>,
-  /// Preserve WKB polygon boundaries for writing non-PBF outputs.
+  /// Defines the number of consecutive rings belonging to each polygon for WKB output.
   pub(crate) polygon_ring_counts: Vec<u32>,
 }
 
@@ -135,13 +122,14 @@ impl Geometry {
         count.checked_add(*ring_count as usize)
       })
       .ok_or_else(|| GeometryError::InvalidGeometry("polygon ring count overflow".to_string()))?;
-    if ty.family()? == GeometryFamily::Polygon && polygon_ring_count != lengths.len() {
+    let family = ty.family()?;
+    if family == GeometryFamily::Polygon && polygon_ring_count != lengths.len() {
       return Err(GeometryError::InvalidGeometry(format!(
         "polygon ring counts total {polygon_ring_count}, but geometry has {} parts",
         lengths.len()
       )));
     }
-    if ty.family()? != GeometryFamily::Polygon && !polygon_ring_counts.is_empty() {
+    if family != GeometryFamily::Polygon && !polygon_ring_counts.is_empty() {
       return Err(GeometryError::InvalidGeometry(
         "non-polygon geometry cannot define polygon ring counts".to_string(),
       ));
@@ -155,9 +143,119 @@ impl Geometry {
   }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+/// Represents one coordinate in the format-neutral geometry model.
+pub(crate) struct Coord {
+  /// Defines the horizontal x coordinate.
+  pub(crate) x: f64,
+  /// Defines the horizontal y coordinate.
+  pub(crate) y: f64,
+  /// Provides the optional vertical coordinate.
+  pub(crate) z: Option<f64>,
+  /// Provides the optional measure coordinate.
+  pub(crate) m: Option<f64>,
+}
+
+#[cfg(test)]
+impl PartialEq<(f64, f64)> for Coord {
+  /// Compare the XY position with a test fixture pair.
+  fn eq(&self, other: &(f64, f64)) -> bool {
+    self.x == other.0 && self.y == other.1
+  }
+}
+
 impl GeometryType {
   /// Resolve the normalized family used by shared processing and output layout.
   pub(crate) fn family(self) -> Result<GeometryFamily, GeometryError> {
     GeometryFamily::from_type(self)
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  mod family {
+    use super::*;
+
+    #[test]
+    fn groups_compatible_types_and_rejects_mixed_families() {
+      assert_eq!(
+        GeometryFamily::from_types(&[GeometryType::Polygon, GeometryType::MultiPolygon,]).unwrap(),
+        GeometryFamily::Polygon
+      );
+      assert_eq!(
+        GeometryFamily::from_types(&[GeometryType::LineString, GeometryType::MultiLineString,])
+          .unwrap(),
+        GeometryFamily::Polyline
+      );
+      assert!(GeometryFamily::from_types(&[]).is_err());
+      assert!(
+        GeometryFamily::from_types(&[GeometryType::Point, GeometryType::MultiPoint,]).is_err()
+      );
+      for ty in [GeometryType::GeometryCollection, GeometryType::Unknown] {
+        assert!(matches!(GeometryFamily::from_type(ty),
+          Err(GeometryError::UnsupportedGeometryType(actual)) if actual == ty));
+      }
+    }
+  }
+
+  mod construction {
+    use super::*;
+
+    #[test]
+    fn preserves_multipart_coordinates_and_polygon_groups() {
+      let coordinate = Coord {
+        x: 1.0,
+        y: 2.0,
+        z: Some(3.0),
+        m: Some(4.0),
+      };
+      let geometry = Geometry::new(
+        GeometryType::MultiPolygon,
+        vec![coordinate; 3],
+        vec![1, 0, 2],
+        vec![2, 1],
+      )
+      .unwrap();
+
+      assert_eq!(geometry.coordinates, [coordinate; 3]);
+      assert_eq!(geometry.lengths, [1, 0, 2]);
+      assert_eq!(geometry.polygon_ring_counts, [2, 1]);
+    }
+
+    #[test]
+    fn rejects_inconsistent_parts_and_polygon_groups() {
+      let coordinate = Coord {
+        x: 1.0,
+        y: 2.0,
+        z: None,
+        m: None,
+      };
+      for (ty, lengths, ring_counts, expected) in [
+        (
+          GeometryType::LineString,
+          vec![2],
+          vec![],
+          "part lengths total",
+        ),
+        (
+          GeometryType::Polygon,
+          vec![1],
+          vec![2],
+          "polygon ring counts total",
+        ),
+        (
+          GeometryType::LineString,
+          vec![1],
+          vec![1],
+          "non-polygon geometry",
+        ),
+      ] {
+        let error = Geometry::new(ty, vec![coordinate], lengths, ring_counts).unwrap_err();
+
+        assert!(error.to_string().contains(expected));
+      }
+    }
   }
 }

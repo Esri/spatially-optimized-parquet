@@ -32,7 +32,6 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use spatial::{
   DEFAULT_OUTPUT_WKID, InputOptions, MultiscaleEncoding, OutputMode, OutputOptions, PipelineError,
   RowRange, SourceFormat, SpatialPipelineOptions, ValidationError, ValidationFailure,
-  ValidationReport,
 };
 
 use crate::write_progress::StdoutWriteReporter;
@@ -65,6 +64,7 @@ enum MultiscaleEncodingValue {
 }
 
 impl From<MultiscaleEncodingValue> for MultiscaleEncoding {
+  /// Convert the CLI encoding choice into the pipeline's multiscale encoding.
   fn from(value: MultiscaleEncodingValue) -> Self {
     match value {
       MultiscaleEncodingValue::Pbf => Self::Pbf,
@@ -189,74 +189,8 @@ struct WriteCommand {
   multiscale_encoding: MultiscaleEncodingValue,
 }
 
-#[derive(Args, Debug)]
-struct ValidateCommand {
-  #[arg(value_name = "INPUT")]
-  input: PathBuf,
-}
-
-#[derive(Debug, thiserror::Error)]
-enum CliError {
-  #[error(transparent)]
-  Runtime(#[from] std::io::Error),
-  #[error(transparent)]
-  Pipeline(#[from] PipelineError),
-  #[error(transparent)]
-  Validation(#[from] ValidationError),
-  #[error(transparent)]
-  InvalidDataset(#[from] ValidationFailure),
-}
-
-type CliResult<T> = std::result::Result<T, CliError>;
-
-fn main() -> ExitCode {
-  let cli = Cli::parse();
-  let worker_threads = match &cli.command {
-    Command::Write(args) => args.cores,
-    Command::Validate(_) => None,
-  };
-  let mut runtime = tokio::runtime::Builder::new_multi_thread();
-  runtime.enable_all();
-  if let Some(worker_threads) = worker_threads {
-    runtime.worker_threads(worker_threads);
-  }
-  let result = runtime
-    .build()
-    .map_err(CliError::from)
-    .and_then(|runtime| runtime.block_on(run(cli)));
-  match result {
-    Ok(()) => ExitCode::SUCCESS,
-    Err(error) => {
-      eprintln!("Error: {error}");
-      ExitCode::FAILURE
-    }
-  }
-}
-
-async fn run(cli: Cli) -> CliResult<()> {
-  match cli.command {
-    Command::Write(args) => {
-      let reporter = StdoutWriteReporter::new(!args.no_progress);
-      let mut options = SpatialPipelineOptions::from(args);
-      options.write_reporter = Some(Arc::new(reporter.clone()));
-      let result = spatial::Pipeline::run(options).await?;
-      reporter.finish(result.rows_written(), result.rows_expected());
-      for warning in result.warnings() {
-        eprintln!("{warning}");
-      }
-      Ok(())
-    }
-    Command::Validate(args) => match spatial::validate(&args.input)?.ensure_valid() {
-      Ok(report) => {
-        render_validation_report(&report);
-        Ok(())
-      }
-      Err(failure) => Err(failure.into()),
-    },
-  }
-}
-
 impl From<WriteCommand> for SpatialPipelineOptions {
+  /// Transfer parsed CLI arguments into input, output, and runtime pipeline options.
   fn from(args: WriteCommand) -> Self {
     let output_mode = if args.no_optimization {
       OutputMode::Plain
@@ -299,8 +233,73 @@ impl From<WriteCommand> for SpatialPipelineOptions {
   }
 }
 
-fn render_validation_report(report: &ValidationReport) {
-  print!("{report}");
+#[derive(Args, Debug)]
+struct ValidateCommand {
+  #[arg(value_name = "INPUT")]
+  input: PathBuf,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum CliError {
+  #[error(transparent)]
+  Runtime(#[from] std::io::Error),
+  #[error(transparent)]
+  Pipeline(#[from] PipelineError),
+  #[error(transparent)]
+  Validation(#[from] ValidationError),
+  #[error(transparent)]
+  InvalidDataset(#[from] ValidationFailure),
+}
+
+type CliResult<T> = std::result::Result<T, CliError>;
+
+/// Parse the command, configure Tokio worker threads, and map failures to a process exit code.
+fn main() -> ExitCode {
+  let cli = Cli::parse();
+  let worker_threads = match &cli.command {
+    Command::Write(args) => args.cores,
+    Command::Validate(_) => None,
+  };
+  let mut runtime = tokio::runtime::Builder::new_multi_thread();
+  runtime.enable_all();
+  if let Some(worker_threads) = worker_threads {
+    runtime.worker_threads(worker_threads);
+  }
+  let result = runtime
+    .build()
+    .map_err(CliError::from)
+    .and_then(|runtime| runtime.block_on(run(cli)));
+  match result {
+    Ok(()) => ExitCode::SUCCESS,
+    Err(error) => {
+      eprintln!("Error: {error}");
+      ExitCode::FAILURE
+    }
+  }
+}
+
+/// Execute the selected write or validation command and render its user-visible result.
+async fn run(cli: Cli) -> CliResult<()> {
+  match cli.command {
+    Command::Write(args) => {
+      let reporter = StdoutWriteReporter::new(!args.no_progress);
+      let mut options = SpatialPipelineOptions::from(args);
+      options.write_reporter = Some(Arc::new(reporter.clone()));
+      let result = spatial::Pipeline::run(options).await?;
+      reporter.finish(result.rows_written(), result.rows_expected());
+      for warning in result.warnings() {
+        eprintln!("{warning}");
+      }
+      Ok(())
+    }
+    Command::Validate(args) => match spatial::validate(&args.input)?.ensure_valid() {
+      Ok(report) => {
+        print!("{report}");
+        Ok(())
+      }
+      Err(failure) => Err(failure.into()),
+    },
+  }
 }
 
 /// Parse a zero-based input row offset.
@@ -339,6 +338,7 @@ fn parse_cores(value: &str) -> std::result::Result<usize, String> {
   parse_positive_usize(value, "--cores")
 }
 
+/// Parse a positive resource count while preserving the caller's option name in errors.
 fn parse_positive_usize(value: &str, option: &str) -> std::result::Result<usize, String> {
   let parsed = value
     .parse::<usize>()
@@ -349,6 +349,7 @@ fn parse_positive_usize(value: &str, option: &str) -> std::result::Result<usize,
   Ok(parsed)
 }
 
+/// Parse the inclusive 1–32 clustering depth accepted by the write command.
 fn parse_cluster_depth(value: &str) -> std::result::Result<u32, String> {
   let depth = value
     .parse::<u32>()

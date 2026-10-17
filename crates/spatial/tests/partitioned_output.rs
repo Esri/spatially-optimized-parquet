@@ -39,47 +39,6 @@ use common::parquet::{
   reader_metadata, scan_parquet, write_parquet,
 };
 
-fn runtime() -> Runtime {
-  Runtime::new().unwrap()
-}
-
-fn write_point_input(path: &Path, coordinates: &[(f64, f64)], names: &[&str], epsg: u32) {
-  let schema = Arc::new(Schema::new(vec![
-    Field::new("name", DataType::Utf8, false),
-    Field::new("geometry", DataType::Binary, true),
-  ]));
-  let points = coordinates
-    .iter()
-    .map(|&(x, y)| {
-      let projected = if epsg == 4326 {
-        (x, y)
-      } else {
-        transform_point_between_epsg(x, y, 4326, epsg)
-      };
-      wkb_point(projected.0, projected.1)
-    })
-    .collect::<Vec<_>>();
-  let geometries = points
-    .iter()
-    .map(|point| Some(point.as_slice()))
-    .collect::<Vec<_>>();
-  let batch = RecordBatch::try_new(
-    schema.clone(),
-    vec![
-      Arc::new(StringArray::from(names.to_vec())),
-      Arc::new(BinaryArray::from(geometries)),
-    ],
-  )
-  .unwrap();
-  write_parquet(
-    path,
-    &schema,
-    &[batch],
-    Compression::SNAPPY,
-    &[geoparquet_kv_with_epsg("geometry", &["Point"], epsg)],
-  );
-}
-
 #[test]
 fn partitioned_output_writes_sorted_range_partitions() {
   let temp = TempDir::new().unwrap();
@@ -214,18 +173,18 @@ fn partitioned_output_writes_sorted_range_partitions() {
       .block_on(scan_parquet(range_directory.to_str().unwrap()))
       .unwrap();
     let batches = runtime().block_on(dataframe.collect()).unwrap();
-    let z_codes = batches
-      .iter()
-      .flat_map(|batch| {
-        let geokey = batch
-          .column_by_name("geokey")
-          .unwrap()
-          .as_any()
-          .downcast_ref::<UInt64Array>()
-          .unwrap();
-        (0..batch.num_rows()).map(move |index| geokey.value(index))
-      })
-      .collect::<Vec<_>>();
+    let mut z_codes = Vec::new();
+    for batch in &batches {
+      let geokey = batch
+        .column_by_name("geokey")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<UInt64Array>()
+        .unwrap();
+      for index in 0..batch.num_rows() {
+        z_codes.push(geokey.value(index));
+      }
+    }
     assert!(z_codes.windows(2).all(|pair| pair[0] <= pair[1]));
     assert!(std::fs::read_dir(&range_directory).unwrap().any(|entry| {
       entry
@@ -314,83 +273,6 @@ fn partitioned_output_writes_native_multiscale_coordinate_leaves() {
   );
 }
 
-fn assert_partitioned_multiscale_coordinate_leaves(
-  encoding: MultiscaleEncoding,
-  leaf_suffixes: &[&str],
-  expected_encoding: parquet::basic::Encoding,
-) {
-  let temp = TempDir::new().unwrap();
-  let input = temp.path().join("polygons.parquet");
-  let output = temp.path().join("out");
-  let schema = Arc::new(Schema::new(vec![
-    Field::new("name", DataType::Utf8, false),
-    Field::new("geometry", DataType::Binary, true),
-  ]));
-  let polygons = [
-    wkb_polygon(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 0.0)]),
-    wkb_polygon(&[(4.0, 4.0), (5.0, 4.0), (5.0, 5.0), (4.0, 4.0)]),
-    wkb_polygon(&[(8.0, 8.0), (9.0, 8.0), (9.0, 9.0), (8.0, 8.0)]),
-  ];
-  let batch = RecordBatch::try_new(
-    schema.clone(),
-    vec![
-      Arc::new(StringArray::from(vec!["early", "middle", "late"])),
-      Arc::new(BinaryArray::from(
-        polygons
-          .iter()
-          .map(|polygon| Some(polygon.as_slice()))
-          .collect::<Vec<_>>(),
-      )),
-    ],
-  )
-  .unwrap();
-  write_parquet(
-    &input,
-    &schema,
-    &[batch],
-    Compression::SNAPPY,
-    &[geoparquet_kv("geometry", &["Polygon"])],
-  );
-
-  runtime()
-    .block_on(Pipeline::run(SpatialPipelineOptions {
-      input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
-        ..Default::default()
-      },
-      output: OutputOptions {
-        path: output.clone(),
-        mode: OutputMode::Optimized,
-        file_count: Some(2),
-        overwrite: true,
-        multiscale_encoding: encoding,
-        ..Default::default()
-      },
-      ..Default::default()
-    }))
-    .unwrap();
-
-  validate(&output).unwrap().ensure_valid().unwrap();
-  let files = parquet_files(&output);
-  assert_eq!(files.len(), 2);
-  for file in files {
-    let parquet_metadata = reader_metadata(&file);
-    for leaf_suffix in leaf_suffixes {
-      let coordinate_column = parquet_metadata
-        .metadata()
-        .row_group(0)
-        .columns()
-        .iter()
-        .find(|column| column.column_descr().path().string().ends_with(leaf_suffix))
-        .unwrap_or_else(|| panic!("missing coordinate column ending in {leaf_suffix}"));
-      let encodings = coordinate_column.encodings().collect::<Vec<_>>();
-      assert!(encodings.contains(&expected_encoding));
-      assert!(!encodings.contains(&parquet::basic::Encoding::RLE_DICTIONARY));
-      assert!(!encodings.contains(&parquet::basic::Encoding::PLAIN_DICTIONARY));
-    }
-  }
-}
-
 #[test]
 fn partitioned_output_combines_row_range_covering_and_compression() {
   let temp = TempDir::new().unwrap();
@@ -430,13 +312,13 @@ fn partitioned_output_combines_row_range_covering_and_compression() {
     .block_on(scan_parquet(output.to_str().unwrap()))
     .unwrap();
   let batches = runtime().block_on(dataframe.collect()).unwrap();
-  let mut names = batches
-    .iter()
-    .flat_map(|batch| {
-      let column = batch.column_by_name("name").unwrap();
-      (0..batch.num_rows()).map(move |index| string_value(column.as_ref(), index))
-    })
-    .collect::<Vec<_>>();
+  let mut names = Vec::new();
+  for batch in &batches {
+    let column = batch.column_by_name("name").unwrap();
+    for index in 0..batch.num_rows() {
+      names.push(string_value(column.as_ref(), index));
+    }
+  }
   names.sort();
   assert_eq!(
     names,
@@ -454,14 +336,11 @@ fn partitioned_output_combines_row_range_covering_and_compression() {
     assert_json_extent(&geo["columns"]["geometry"]["bbox"], [1.0, 1.0, 5.0, 5.0]);
 
     let reader_metadata = reader_metadata(&file);
-    assert!(
-      reader_metadata
-        .metadata()
-        .row_groups()
-        .iter()
-        .flat_map(|row_group| row_group.columns())
-        .all(|column| matches!(column.compression(), Compression::ZSTD(_)))
-    );
+    for row_group in reader_metadata.metadata().row_groups() {
+      for column in row_group.columns() {
+        assert!(matches!(column.compression(), Compression::ZSTD(_)));
+      }
+    }
   }
 
   for batch in batches {
@@ -553,4 +432,125 @@ fn partitioned_output_replaces_existing_destination() {
     2
   );
   assert!(!validate(&output).unwrap().has_errors());
+}
+
+/// Write named points transformed from WGS 84 into the fixture's declared EPSG CRS.
+fn write_point_input(path: &Path, coordinates: &[(f64, f64)], names: &[&str], epsg: u32) {
+  let schema = Arc::new(Schema::new(vec![
+    Field::new("name", DataType::Utf8, false),
+    Field::new("geometry", DataType::Binary, true),
+  ]));
+  let points = coordinates
+    .iter()
+    .map(|&(x, y)| {
+      let projected = if epsg == 4326 {
+        (x, y)
+      } else {
+        transform_point_between_epsg(x, y, 4326, epsg)
+      };
+      wkb_point(projected.0, projected.1)
+    })
+    .collect::<Vec<_>>();
+  let geometries = points
+    .iter()
+    .map(|point| Some(point.as_slice()))
+    .collect::<Vec<_>>();
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![
+      Arc::new(StringArray::from(names.to_vec())),
+      Arc::new(BinaryArray::from(geometries)),
+    ],
+  )
+  .unwrap();
+  write_parquet(
+    path,
+    &schema,
+    &[batch],
+    Compression::SNAPPY,
+    &[geoparquet_kv_with_epsg("geometry", &["Point"], epsg)],
+  );
+}
+
+/// Require native coordinate leaves to use the expected Parquet encoding without dictionaries.
+fn assert_partitioned_multiscale_coordinate_leaves(
+  encoding: MultiscaleEncoding,
+  leaf_suffixes: &[&str],
+  expected_encoding: parquet::basic::Encoding,
+) {
+  let temp = TempDir::new().unwrap();
+  let input = temp.path().join("polygons.parquet");
+  let output = temp.path().join("out");
+  let schema = Arc::new(Schema::new(vec![
+    Field::new("name", DataType::Utf8, false),
+    Field::new("geometry", DataType::Binary, true),
+  ]));
+  let polygons = [
+    wkb_polygon(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 0.0)]),
+    wkb_polygon(&[(4.0, 4.0), (5.0, 4.0), (5.0, 5.0), (4.0, 4.0)]),
+    wkb_polygon(&[(8.0, 8.0), (9.0, 8.0), (9.0, 9.0), (8.0, 8.0)]),
+  ];
+  let batch = RecordBatch::try_new(
+    schema.clone(),
+    vec![
+      Arc::new(StringArray::from(vec!["early", "middle", "late"])),
+      Arc::new(BinaryArray::from(
+        polygons
+          .iter()
+          .map(|polygon| Some(polygon.as_slice()))
+          .collect::<Vec<_>>(),
+      )),
+    ],
+  )
+  .unwrap();
+  write_parquet(
+    &input,
+    &schema,
+    &[batch],
+    Compression::SNAPPY,
+    &[geoparquet_kv("geometry", &["Polygon"])],
+  );
+
+  runtime()
+    .block_on(Pipeline::run(SpatialPipelineOptions {
+      input: InputOptions {
+        location: input.to_string_lossy().into_owned(),
+        ..Default::default()
+      },
+      output: OutputOptions {
+        path: output.clone(),
+        mode: OutputMode::Optimized,
+        file_count: Some(2),
+        overwrite: true,
+        multiscale_encoding: encoding,
+        ..Default::default()
+      },
+      ..Default::default()
+    }))
+    .unwrap();
+
+  validate(&output).unwrap().ensure_valid().unwrap();
+  let files = parquet_files(&output);
+  assert_eq!(files.len(), 2);
+  for file in files {
+    let parquet_metadata = reader_metadata(&file);
+    for leaf_suffix in leaf_suffixes {
+      let coordinate_column = parquet_metadata
+        .metadata()
+        .row_group(0)
+        .columns()
+        .iter()
+        .find(|column| column.column_descr().path().string().ends_with(leaf_suffix))
+        .unwrap_or_else(|| panic!("missing coordinate column ending in {leaf_suffix}"));
+      let encodings = coordinate_column.encodings().collect::<Vec<_>>();
+      assert!(encodings.contains(&expected_encoding));
+      assert!(!encodings.contains(&parquet::basic::Encoding::RLE_DICTIONARY));
+      assert!(!encodings.contains(&parquet::basic::Encoding::PLAIN_DICTIONARY));
+    }
+  }
+}
+
+/// Create the Tokio runtime used to execute partitioned writes and scan assertions.
+fn runtime() -> Runtime {
+  Runtime::new().unwrap()
 }

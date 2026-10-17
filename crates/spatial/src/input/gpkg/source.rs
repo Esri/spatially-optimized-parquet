@@ -48,75 +48,6 @@ pub(crate) struct GpkgInputSource {
   source_metadata: SourceDatasetMetadata,
 }
 
-impl InputSource for GpkgInputSource {
-  fn schema(&self) -> Result<arrow_schema::SchemaRef, InputError> {
-    Ok(self.schema.clone())
-  }
-
-  fn total_rows(&self) -> Result<u64, InputError> {
-    Ok(self.total_rows)
-  }
-
-  fn inferred_geometry_column(&self) -> Result<Option<GeometryColumn>, InputError> {
-    Ok(self.geometry.clone())
-  }
-
-  fn source_metadata(&self) -> Result<SourceDatasetMetadata, InputError> {
-    Ok(self.source_metadata.clone())
-  }
-
-  fn to_dataframe<'a>(
-    &'a self,
-    ctx: &'a SessionContext,
-    row_range: RowRange,
-  ) -> BoxFuture<'a, Result<DataFrame, InputError>> {
-    let input_path = self.input_path.clone();
-    let layer_name = self.layer_name.clone();
-    let schema = self.schema.clone();
-    let total_rows = self.total_rows;
-    Box::pin(async move {
-      let partitions = GpkgScanPartition::plan(
-        &input_path,
-        &layer_name,
-        total_rows,
-        row_range,
-        ctx.copied_config().target_partitions(),
-      )?;
-      let streams: Vec<_> = partitions
-        .into_iter()
-        .map(|partition| {
-          Arc::new(GpkgPartitionStream::new(
-            input_path.clone(),
-            layer_name.clone(),
-            schema.clone(),
-            partition.attribute_filter(),
-          )) as Arc<dyn PartitionStream>
-        })
-        .collect();
-      let table =
-        StreamingTable::try_new(schema, streams).map_err(|source| InputError::DataFusion {
-          operation: "create GeoPackage streaming table",
-          source,
-        })?;
-      let mut df = ctx
-        .read_table(Arc::new(table))
-        .map_err(|source| InputError::DataFusion {
-          operation: "read GeoPackage streaming table",
-          source,
-        })?;
-      if let Some(num) = row_range.num() {
-        df = df
-          .limit(0, Some(num))
-          .map_err(|source| InputError::DataFusion {
-            operation: "limit GeoPackage input",
-            source,
-          })?;
-      }
-      Ok(df)
-    })
-  }
-}
-
 impl GpkgInputSource {
   /// Open one local GeoPackage layer through GDAL.
   pub(crate) async fn open(options: &InputOpenOptions) -> Result<Arc<dyn InputSource>, InputError> {
@@ -165,5 +96,78 @@ impl GpkgInputSource {
       geometry,
       source_metadata,
     }))
+  }
+}
+
+impl InputSource for GpkgInputSource {
+  /// Return the normalized Arrow schema captured when the layer opened.
+  fn schema(&self) -> Result<arrow_schema::SchemaRef, InputError> {
+    Ok(self.schema.clone())
+  }
+
+  /// Return the feature count captured from the selected layer.
+  fn total_rows(&self) -> Result<u64, InputError> {
+    Ok(self.total_rows)
+  }
+
+  /// Return the WKB geometry column resolved from GDAL layer metadata.
+  fn inferred_geometry_column(&self) -> Result<Option<GeometryColumn>, InputError> {
+    Ok(self.geometry.clone())
+  }
+
+  /// Return the normalized geometry contract captured at layer opening.
+  fn source_metadata(&self) -> Result<SourceDatasetMetadata, InputError> {
+    Ok(self.source_metadata.clone())
+  }
+
+  /// Build independently executable GDAL scans for the selected row range.
+  fn to_dataframe<'a>(
+    &'a self,
+    ctx: &'a SessionContext,
+    row_range: RowRange,
+  ) -> BoxFuture<'a, Result<DataFrame, InputError>> {
+    let input_path = self.input_path.clone();
+    let layer_name = self.layer_name.clone();
+    let schema = self.schema.clone();
+    let total_rows = self.total_rows;
+    Box::pin(async move {
+      let partitions = GpkgScanPartition::plan(
+        &input_path,
+        &layer_name,
+        total_rows,
+        row_range,
+        ctx.copied_config().target_partitions(),
+      )?;
+      let mut streams: Vec<Arc<dyn PartitionStream>> = Vec::with_capacity(partitions.len());
+      for partition in partitions {
+        streams.push(Arc::new(GpkgPartitionStream::new(
+          input_path.clone(),
+          layer_name.clone(),
+          schema.clone(),
+          partition.attribute_filter(),
+        )));
+      }
+      let table =
+        StreamingTable::try_new(schema, streams).map_err(|source| InputError::DataFusion {
+          operation: "create GeoPackage streaming table",
+          source,
+        })?;
+      let mut dataframe =
+        ctx
+          .read_table(Arc::new(table))
+          .map_err(|source| InputError::DataFusion {
+            operation: "read GeoPackage streaming table",
+            source,
+          })?;
+      if let Some(num) = row_range.num() {
+        dataframe = dataframe
+          .limit(0, Some(num))
+          .map_err(|source| InputError::DataFusion {
+            operation: "limit GeoPackage input",
+            source,
+          })?;
+      }
+      Ok(dataframe)
+    })
   }
 }

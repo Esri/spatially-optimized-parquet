@@ -43,15 +43,12 @@ pub enum FixtureKind {
 }
 
 impl FixtureKind {
+  /// Return the GeoParquet geometry type declared by this benchmark fixture.
   fn geometry_type(self) -> &'static str {
     match self {
       Self::Point => "Point",
       Self::Polygon => "Polygon",
     }
-  }
-
-  fn sample_geometry(self) -> Vec<u8> {
-    geometry_for_row(self, 0)
   }
 }
 
@@ -70,6 +67,7 @@ pub struct BenchmarkFixtureSet {
 }
 
 impl BenchmarkFixtureSet {
+  /// Build deterministic point, polygon, and wide-polygon inputs near the requested byte size.
   pub fn build(target_mib: u64) -> Self {
     let temp = tempfile::tempdir().expect("create benchmark fixture directory");
     let target_bytes = target_mib * 1024 * 1024;
@@ -109,6 +107,16 @@ impl BenchmarkFixtureSet {
   }
 }
 
+/// Remove a completed benchmark output without including cleanup in the measured duration.
+pub fn remove_output(path: &Path) {
+  if path.is_dir() {
+    fs::remove_dir_all(path).expect("remove benchmark output directory");
+  } else if path.exists() {
+    fs::remove_file(path).expect("remove benchmark output file");
+  }
+}
+
+/// Write uncompressed fixture batches with deterministic attributes and WGS 84 metadata.
 fn write_fixture(
   root: &Path,
   kind: FixtureKind,
@@ -119,11 +127,14 @@ fn write_fixture(
 ) -> BenchmarkFixture {
   let path = root.join(format!("{fixture_name}.parquet"));
   let schema = fixture_schema(float_column_count, string_column_count);
-  let sample_string_bytes = (0..string_column_count)
-    .map(|column| string_attribute(0, column).len())
-    .sum::<usize>();
-  let sample_row_bytes =
-    kind.sample_geometry().len() + sample_string_bytes + 16 + float_column_count * size_of::<f64>();
+  let mut sample_string_bytes = 0;
+  for column in 0..string_column_count {
+    sample_string_bytes += string_attribute(0, column).len();
+  }
+  let sample_row_bytes = geometry_for_row(kind, 0).len()
+    + sample_string_bytes
+    + 16
+    + float_column_count * size_of::<f64>();
   let row_count = (target_bytes as usize / sample_row_bytes).max(BATCH_ROWS);
   let properties = WriterProperties::builder()
     .set_compression(Compression::UNCOMPRESSED)
@@ -162,20 +173,28 @@ fn write_fixture(
   }
 }
 
+/// Build fixture fields in ID, numeric attribute, string attribute, and geometry order.
 fn fixture_schema(float_column_count: usize, string_column_count: usize) -> SchemaRef {
   let mut fields = vec![Field::new("id", DataType::Int64, false)];
-  fields.extend(
-    (0..float_column_count)
-      .map(|column| Field::new(format!("value_{column:02}"), DataType::Float64, false)),
-  );
-  fields.extend(
-    (0..string_column_count)
-      .map(|column| Field::new(string_column_name(column), DataType::Utf8, false)),
-  );
+  for column in 0..float_column_count {
+    fields.push(Field::new(
+      format!("value_{column:02}"),
+      DataType::Float64,
+      false,
+    ));
+  }
+  for column in 0..string_column_count {
+    fields.push(Field::new(
+      string_column_name(column),
+      DataType::Utf8,
+      false,
+    ));
+  }
   fields.push(Field::new("geometry", DataType::Binary, false));
   Arc::new(Schema::new(fields))
 }
 
+/// Build one batch whose geometry and attributes depend only on absolute row and column indices.
 fn fixture_batch(
   schema: SchemaRef,
   kind: FixtureKind,
@@ -196,22 +215,23 @@ fn fixture_batch(
     .collect::<Vec<_>>();
 
   let mut columns: Vec<ArrayRef> = vec![Arc::new(Int64Array::from(ids))];
-  columns.extend((0..float_column_count).map(|column| {
-    Arc::new(Float64Array::from_iter_values(
+  for column in 0..float_column_count {
+    columns.push(Arc::new(Float64Array::from_iter_values(
       (batch_start..batch_start + row_count)
         .map(|row| deterministic_float(row as u64, column as u64)),
-    )) as ArrayRef
-  }));
-  columns.extend((0..string_column_count).map(|column| {
-    Arc::new(StringArray::from_iter_values(
+    )));
+  }
+  for column in 0..string_column_count {
+    columns.push(Arc::new(StringArray::from_iter_values(
       (batch_start..batch_start + row_count).map(|row| string_attribute(row as u64, column)),
-    )) as ArrayRef
-  }));
+    )));
+  }
   columns.push(Arc::new(BinaryArray::from(geometry_refs)));
 
   RecordBatch::try_new(schema, columns).expect("construct benchmark fixture batch")
 }
 
+/// Name standard string attributes first and additional wide-fixture attributes by index.
 fn string_column_name(column: usize) -> String {
   STRING_COLUMN_NAMES
     .get(column)
@@ -219,12 +239,14 @@ fn string_column_name(column: usize) -> String {
     .unwrap_or_else(|| format!("text_{column:03}"))
 }
 
+/// Convert deterministic row-column bits into a uniformly spaced value in the unit interval.
 fn deterministic_float(row: u64, column: u64) -> f64 {
   let value = deterministic_u64(row, column);
   let mantissa = value >> 11;
   mantissa as f64 * (1.0 / ((1_u64 << 53) as f64))
 }
 
+/// Mix row and column indices with the fixed benchmark seed using wrapping arithmetic.
 fn deterministic_u64(row: u64, column: u64) -> u64 {
   let mut value = RANDOM_SEED
     ^ row.wrapping_mul(0x9E37_79B9_7F4A_7C15)
@@ -234,6 +256,7 @@ fn deterministic_u64(row: u64, column: u64) -> u64 {
   value ^ (value >> 31)
 }
 
+/// Generate deterministic variable-length fixture attributes for the selected string column.
 fn string_attribute(row: u64, column: usize) -> String {
   match column {
     0 => format!("Feature {}", random_token(row, column as u64, 8, 24)),
@@ -255,6 +278,7 @@ fn string_attribute(row: u64, column: usize) -> String {
   }
 }
 
+/// Generate a repeatable alphanumeric token within the inclusive requested length bounds.
 fn random_token(row: u64, column: u64, min_length: usize, max_length: usize) -> String {
   const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   let mut state = deterministic_u64(row, column);
@@ -267,6 +291,7 @@ fn random_token(row: u64, column: u64, min_length: usize, max_length: usize) -> 
   output
 }
 
+/// Encode a deterministic WGS 84 XY point or closed 64-vertex polygon for one row.
 fn geometry_for_row(kind: FixtureKind, row: usize) -> Vec<u8> {
   let x = -179.0 + ((row.wrapping_mul(37) % 358_000) as f64 / 1_000.0);
   let y = -89.0 + ((row.wrapping_mul(53) % 178_000) as f64 / 1_000.0);
@@ -274,18 +299,18 @@ fn geometry_for_row(kind: FixtureKind, row: usize) -> Vec<u8> {
     FixtureKind::Point => encode_point(x, y),
     FixtureKind::Polygon => {
       let radius = 0.005 + (row % 16) as f64 * 0.0005;
-      let mut coordinates = (0..64)
-        .map(|vertex| {
-          let angle = std::f64::consts::TAU * vertex as f64 / 64.0;
-          (x + radius * angle.cos(), y + radius * angle.sin())
-        })
-        .collect::<Vec<_>>();
+      let mut coordinates = Vec::with_capacity(65);
+      for vertex in 0..64 {
+        let angle = std::f64::consts::TAU * vertex as f64 / 64.0;
+        coordinates.push((x + radius * angle.cos(), y + radius * angle.sin()));
+      }
       coordinates.push(coordinates[0]);
       encode_polygon(&coordinates)
     }
   }
 }
 
+/// Encode one XY benchmark point as little-endian WKB.
 fn encode_point(x: f64, y: f64) -> Vec<u8> {
   let mut output = Vec::with_capacity(21);
   output.push(1);
@@ -295,6 +320,7 @@ fn encode_point(x: f64, y: f64) -> Vec<u8> {
   output
 }
 
+/// Encode a single-ring XY benchmark polygon in the supplied coordinate order.
 fn encode_polygon(coordinates: &[(f64, f64)]) -> Vec<u8> {
   let mut output = Vec::with_capacity(13 + coordinates.len() * 16);
   output.push(1);
@@ -312,6 +338,7 @@ fn encode_polygon(coordinates: &[(f64, f64)]) -> Vec<u8> {
   output
 }
 
+/// Declare fixture WKB geometry with WGS 84 PROJJSON and global XY bounds.
 fn geoparquet_metadata(kind: FixtureKind) -> KeyValue {
   let projjson = SpatialRef::from_epsg(4326)
     .expect("load EPSG:4326")
@@ -332,12 +359,4 @@ fn geoparquet_metadata(kind: FixtureKind) -> KeyValue {
     }
   });
   KeyValue::new("geo".to_string(), Some(value.to_string()))
-}
-
-pub fn remove_output(path: &Path) {
-  if path.is_dir() {
-    fs::remove_dir_all(path).expect("remove benchmark output directory");
-  } else if path.exists() {
-    fs::remove_file(path).expect("remove benchmark output file");
-  }
 }

@@ -68,6 +68,7 @@ impl ClusteringFamily {
 }
 
 impl ClusterRangeBoundaries {
+  /// Store the minimum key and sorted lower boundaries for range assignment.
   pub(crate) fn new(min_value: u64, boundaries: Vec<u64>) -> Self {
     Self {
       min_value: ClusterKey::new(min_value),
@@ -75,6 +76,7 @@ impl ClusterRangeBoundaries {
     }
   }
 
+  /// Assign each cluster key the lower boundary of its containing range.
   pub(crate) fn partition_expr(&self, cluster_key_column: &str) -> DataFusionResult<Expr> {
     let mut lower_bounds = Vec::with_capacity(self.boundaries.len() + 1);
     lower_bounds.push(self.min_value);

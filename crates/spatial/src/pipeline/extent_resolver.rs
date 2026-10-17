@@ -75,6 +75,7 @@ impl<'a> ExtentResolver<'a> {
     Self::extract_target_extent(&batches)
   }
 
+  /// Aggregate canonical covering fields into the selected dataset's target XY extent.
   fn target_extent_aggregate(dataframe: DataFrame) -> Result<DataFrame, PipelineError> {
     dataframe
       .aggregate(
@@ -92,6 +93,7 @@ impl<'a> ExtentResolver<'a> {
       })
   }
 
+  /// Decode the first aggregate row into a target XY extent.
   fn extract_target_extent(batches: &[RecordBatch]) -> Result<Extent2D, PipelineError> {
     let Some(batch) = batches.first().filter(|batch| batch.num_rows() > 0) else {
       return Err(PipelineError::InvalidRequest(
@@ -106,6 +108,7 @@ impl<'a> ExtentResolver<'a> {
     })
   }
 
+  /// Read one required non-null Float64 target-extent aggregate value.
   fn extract_aggregate_value(
     batch: &RecordBatch,
     column_index: usize,

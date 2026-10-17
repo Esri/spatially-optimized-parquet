@@ -33,6 +33,7 @@ pub(crate) struct NormalizedSpatialFrame {
 }
 
 impl NormalizedSpatialFrame {
+  /// Normalize output WKB and attach reusable or computed canonical XY covering bounds.
   pub(crate) fn new(
     mut dataframe: DataFrame,
     source_schema: &Schema,
@@ -61,16 +62,16 @@ impl NormalizedSpatialFrame {
         })?;
     }
 
-    let reusable_covering = (!reprojection.requires_reprojection())
-      .then(|| {
-        source
-          .source_metadata
-          .geometry
-          .as_ref()
-          .and_then(|geometry| geometry.covering.as_ref())
-      })
-      .flatten()
-      .filter(|covering| valid_bbox_field(source_schema, &covering.column));
+    let reusable_covering = if reprojection.requires_reprojection() {
+      None
+    } else {
+      source
+        .source_metadata
+        .geometry
+        .as_ref()
+        .and_then(|geometry| geometry.covering.as_ref())
+        .filter(|covering| valid_bbox_field(source_schema, &covering.column))
+    };
     dataframe = if let Some(covering) = reusable_covering {
       dataframe
         .with_column(COVERING_BBOX_COLUMN, ident(&covering.column))
@@ -96,15 +97,18 @@ impl NormalizedSpatialFrame {
     })
   }
 
+  /// Clone the lazy frame for extent analysis or output execution.
   pub(crate) fn dataframe(&self) -> DataFrame {
     self.dataframe.clone()
   }
 
+  /// Return the normalized WKB column name.
   pub(crate) fn geometry_column(&self) -> &str {
     &self.geometry_column
   }
 }
 
+/// Require a struct containing all four canonical Float64 XY bounds fields.
 fn valid_bbox_field(schema: &Schema, column: &str) -> bool {
   let Ok(field) = schema.field_with_name(column) else {
     return false;
@@ -112,9 +116,13 @@ fn valid_bbox_field(schema: &Schema, column: &str) -> bool {
   let DataType::Struct(fields) = field.data_type() else {
     return false;
   };
-  ["xmin", "ymin", "xmax", "ymax"].into_iter().all(|name| {
-    fields
+  for name in ["xmin", "ymin", "xmax", "ymax"] {
+    if !fields
       .find(name)
       .is_some_and(|(_, field)| field.data_type() == &DataType::Float64)
-  })
+    {
+      return false;
+    }
+  }
+  true
 }

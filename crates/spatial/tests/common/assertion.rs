@@ -17,6 +17,7 @@ use arrow_array::{
   StringViewArray, StructArray,
 };
 
+/// Read a fixture string from either Arrow string or string-view storage.
 pub fn string_value(array: &dyn Array, index: usize) -> String {
   if let Some(array) = array.as_any().downcast_ref::<StringArray>() {
     return array.value(index).to_string();
@@ -27,6 +28,7 @@ pub fn string_value(array: &dyn Array, index: usize) -> String {
   panic!("unexpected string array type: {:?}", array.data_type());
 }
 
+/// Copy a fixture binary value from any supported Arrow binary representation.
 pub fn binary_value(array: &dyn Array, index: usize) -> Vec<u8> {
   if let Some(array) = array.as_any().downcast_ref::<BinaryArray>() {
     return array.value(index).to_vec();
@@ -40,6 +42,7 @@ pub fn binary_value(array: &dyn Array, index: usize) -> Vec<u8> {
   panic!("unexpected binary array type: {:?}", array.data_type());
 }
 
+/// Read a required Float64 child value from a fixture struct array.
 pub fn struct_f64_value(array: &StructArray, field_name: &str, index: usize) -> f64 {
   array
     .column_by_name(field_name)
@@ -50,13 +53,7 @@ pub fn struct_f64_value(array: &StructArray, field_name: &str, index: usize) -> 
     .value(index)
 }
 
-pub fn assert_close(actual: f64, expected: f64) {
-  assert!(
-    (actual - expected).abs() < 1.0e-5,
-    "expected {expected}, got {actual}"
-  );
-}
-
+/// Require GeoParquet covering paths to reference the four root bbox struct children.
 pub fn assert_covering_metadata(geo: &serde_json::Value) {
   let covering = &geo["columns"]["geometry"]["covering"]["bbox"];
   assert_eq!(covering["xmin"], serde_json::json!(["bbox", "xmin"]));
@@ -65,6 +62,7 @@ pub fn assert_covering_metadata(geo: &serde_json::Value) {
   assert_eq!(covering["ymax"], serde_json::json!(["bbox", "ymax"]));
 }
 
+/// Compare array-form or object-form XY bounds using the coordinate test tolerance.
 pub fn assert_json_extent(extent: &serde_json::Value, expected: [f64; 4]) {
   if let Some(values) = extent.as_array() {
     for (actual, expected) in values.iter().zip(expected) {
@@ -76,4 +74,12 @@ pub fn assert_json_extent(extent: &serde_json::Value, expected: [f64; 4]) {
   assert_close(extent["ymin"].as_f64().unwrap(), expected[1]);
   assert_close(extent["xmax"].as_f64().unwrap(), expected[2]);
   assert_close(extent["ymax"].as_f64().unwrap(), expected[3]);
+}
+
+/// Require fixture coordinates to differ by less than the absolute test tolerance.
+pub fn assert_close(actual: f64, expected: f64) {
+  assert!(
+    (actual - expected).abs() < 1.0e-5,
+    "expected {expected}, got {actual}"
+  );
 }

@@ -14,13 +14,10 @@
 
 //! Builds the globally sorted dataframe for single-file optimized output.
 
-use datafusion::dataframe::DataFrame;
-use datafusion::logical_expr::expr_fn::ident;
-
-use crate::geoparquet::COVERING_BBOX_COLUMN;
 use crate::optimized::OptimizedLayout;
 use crate::output::OutputError;
 use crate::pipeline::{PipelineWarnings, SpatialWriteContext};
+use datafusion::dataframe::DataFrame;
 
 /// Build globally sorted optimized output while retaining the cluster key for the physical sink.
 pub(super) fn dataframe(
@@ -33,15 +30,7 @@ pub(super) fn dataframe(
   let dataframe = context
     .frame()
     .dataframe()
-    .select(
-      source_schema
-        .fields()
-        .iter()
-        .filter(|field| field.name() != COVERING_BBOX_COLUMN)
-        .map(|field| ident(field.name()))
-        .chain(std::iter::once(ident(COVERING_BBOX_COLUMN)))
-        .collect::<Vec<_>>(),
-    )
+    .select(super::super::source_expressions(source_schema))
     .map_err(|source| OutputError::DataFusion {
       operation: "select optimized output columns",
       source,

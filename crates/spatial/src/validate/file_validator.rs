@@ -34,14 +34,15 @@ pub(crate) struct FileValidator {
 }
 
 impl FileValidator {
+  /// Load readable file footers and report each failure without skipping remaining files.
   pub(crate) fn load_all(
     files: &[ParquetDatasetFile],
     report: &mut ValidationReport,
   ) -> Vec<FileValidator> {
-    files
-      .iter()
-      .filter_map(|file| match file.load_metadata() {
-        Ok(metadata) => Some(FileValidator {
+    let mut loaded_files = Vec::new();
+    for file in files {
+      match file.load_metadata() {
+        Ok(metadata) => loaded_files.push(FileValidator {
           file: file.clone(),
           metadata,
         }),
@@ -52,12 +53,13 @@ impl FileValidator {
             ValidationLocation::file(file.relative_path.clone()),
             error.to_string(),
           );
-          None
         }
-      })
-      .collect()
+      }
+    }
+    loaded_files
   }
 
+  /// Validate shared schemas and each file's geometry, clustering, and partition contracts.
   pub(crate) fn validate_dataset_structure(
     files: &[FileValidator],
     validated_files: &[ValidatedDatasetFile<'_>],
@@ -77,6 +79,7 @@ impl FileValidator {
     }
   }
 
+  /// Validate row data and collect observed clustering ranges from readable files.
   pub(crate) fn validate_file_data(
     validated_files: &[ValidatedDatasetFile<'_>],
     report: &mut ValidationReport,
@@ -98,6 +101,46 @@ impl FileValidator {
     ranges
   }
 
+  /// Visit selected columns in row-group order with row-group-relative batch offsets.
+  pub(crate) fn read_row_groups(
+    &self,
+    columns: &[String],
+    mut visit_batch: impl FnMut(usize, u64, &RecordBatch) -> Result<(), ValidationError>,
+  ) -> Result<(), ValidationError> {
+    let projection = ProjectionMask::columns(
+      self.metadata.parquet_schema(),
+      columns.iter().map(String::as_str),
+    );
+    for row_group in 0..self.metadata.metadata().num_row_groups() {
+      let input = File::open(&self.file.path).map_err(|source| ValidationError::Io {
+        operation: "open parquet file",
+        path: self.file.path.clone(),
+        source,
+      })?;
+      let reader = ParquetRecordBatchReaderBuilder::new_with_metadata(input, self.metadata.clone())
+        .with_row_groups(vec![row_group])
+        .with_projection(projection.clone())
+        .with_batch_size(1024)
+        .build()
+        .map_err(|source| ValidationError::Parquet {
+          path: self.file.path.clone(),
+          source,
+        })?;
+      let mut row_offset = 0_u64;
+      for batch in reader {
+        let batch = batch.map_err(|source| ValidationError::Arrow {
+          operation: "read parquet rows",
+          path: self.file.path.clone(),
+          source,
+        })?;
+        visit_batch(row_group, row_offset, &batch)?;
+        row_offset += batch.num_rows() as u64;
+      }
+    }
+    Ok(())
+  }
+
+  /// Compare every subsequent file's Arrow schema with the first file's schema.
   fn validate_dataset_schema_consistency(files: &[FileValidator], report: &mut ValidationReport) {
     let Some(baseline) = files.first() else {
       return;
@@ -117,6 +160,7 @@ impl FileValidator {
     }
   }
 
+  /// Validate declared WKB columns and their optional Float64 bbox covering paths.
   fn validate_geometry_schema(
     file: &FileValidator,
     contract: &ValidatedMetadata,
@@ -159,7 +203,7 @@ impl FileValidator {
           covering.bbox.xmax.as_slice(),
           covering.bbox.ymax.as_slice(),
         ];
-        if !valid_covering_paths(covering_paths) {
+        if !Self::valid_covering_paths(covering_paths) {
           report.push(
           ValidationRule::Schema,
           ValidationSeverity::Error,
@@ -190,30 +234,30 @@ impl FileValidator {
             ),
           }
         }
-
-        fn valid_covering_paths(paths: [&[String]; 4]) -> bool {
-          let expected_fields = ["xmin", "ymin", "xmax", "ymax"];
-          let mut root = None;
-          paths
-            .into_iter()
-            .zip(expected_fields)
-            .all(|(path, expected_field)| {
-              if path.len() != 2 || path[1] != expected_field {
-                return false;
-              }
-              match root {
-                Some(existing) => existing == path[0],
-                None => {
-                  root = Some(path[0].as_str());
-                  true
-                }
-              }
-            })
-        }
       }
     }
   }
 
+  /// Require exact bbox child names under one shared root struct.
+  fn valid_covering_paths(paths: [&[String]; 4]) -> bool {
+    let expected_fields = ["xmin", "ymin", "xmax", "ymax"];
+    let mut root = None;
+    for (path, expected_field) in paths.into_iter().zip(expected_fields) {
+      if path.len() != 2 || path[1] != expected_field {
+        return false;
+      }
+      if let Some(existing) = root {
+        if existing != path[0] {
+          return false;
+        }
+      } else {
+        root = Some(path[0].as_str());
+      }
+    }
+    true
+  }
+
+  /// Require the partition directory family to match its geodisplay clustering family.
   fn validate_partition_family(
     file: &FileValidator,
     contract: &ValidatedMetadata,
@@ -239,6 +283,7 @@ impl FileValidator {
     }
   }
 
+  /// Report the first missing column index and offset index for the clustering column.
   fn validate_clustering_page_indexes(
     file: &FileValidator,
     contract: &ValidatedMetadata,
@@ -304,9 +349,8 @@ impl FileValidator {
       );
     }
   }
-}
 
-impl FileValidator {
+  /// Resolve a dotted Arrow schema path through nested struct fields.
   pub(crate) fn field_at_path<'a>(schema: &'a Schema, path: &str) -> Option<&'a Field> {
     let mut segments = path.split('.');
     let first = segments.next()?;
@@ -322,6 +366,7 @@ impl FileValidator {
     Some(field)
   }
 
+  /// Resolve a dotted batch column path and report missing or non-struct segments.
   pub(crate) fn array_at_path<'a>(
     batch: &'a RecordBatch,
     path: &str,
@@ -352,6 +397,7 @@ impl FileValidator {
     Ok(array)
   }
 
+  /// Resolve a dotted batch path and require a Float64 leaf array.
   pub(crate) fn float64_array_at_path<'a>(
     batch: &'a RecordBatch,
     path: &str,
@@ -362,6 +408,7 @@ impl FileValidator {
       .ok_or_else(|| ValidationError::ArrowColumn(format!("Arrow column '{path}' is not Float64")))
   }
 
+  /// Resolve a dotted batch path and require a UInt64 leaf array.
   pub(crate) fn uint64_array_at_path<'a>(
     batch: &'a RecordBatch,
     path: &str,
@@ -370,43 +417,5 @@ impl FileValidator {
       .as_any()
       .downcast_ref::<UInt64Array>()
       .ok_or_else(|| ValidationError::ArrowColumn(format!("Arrow column '{path}' is not UInt64")))
-  }
-
-  pub(crate) fn read_row_groups(
-    &self,
-    columns: &[String],
-    mut visit_batch: impl FnMut(usize, u64, &RecordBatch) -> Result<(), ValidationError>,
-  ) -> Result<(), ValidationError> {
-    let projection = ProjectionMask::columns(
-      self.metadata.parquet_schema(),
-      columns.iter().map(String::as_str),
-    );
-    for row_group in 0..self.metadata.metadata().num_row_groups() {
-      let input = File::open(&self.file.path).map_err(|source| ValidationError::Io {
-        operation: "open parquet file",
-        path: self.file.path.clone(),
-        source,
-      })?;
-      let reader = ParquetRecordBatchReaderBuilder::new_with_metadata(input, self.metadata.clone())
-        .with_row_groups(vec![row_group])
-        .with_projection(projection.clone())
-        .with_batch_size(1024)
-        .build()
-        .map_err(|source| ValidationError::Parquet {
-          path: self.file.path.clone(),
-          source,
-        })?;
-      let mut row_offset = 0_u64;
-      for batch in reader {
-        let batch = batch.map_err(|source| ValidationError::Arrow {
-          operation: "read parquet rows",
-          path: self.file.path.clone(),
-          source,
-        })?;
-        visit_batch(row_group, row_offset, &batch)?;
-        row_offset += batch.num_rows() as u64;
-      }
-    }
-    Ok(())
   }
 }

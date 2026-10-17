@@ -51,12 +51,14 @@ pub(super) enum ParquetInputLocation {
 }
 
 impl ParquetInputSource {
+  /// Retain the scan location and already-loaded Parquet footers.
   pub(super) fn new(location: ParquetInputLocation, metadata: Vec<ArrowReaderMetadata>) -> Self {
     Self { location, metadata }
   }
 }
 
 impl InputSource for ParquetInputSource {
+  /// Load the Arrow schema from the first discovered footer.
   fn schema(&self) -> Result<SchemaRef, InputError> {
     let metadata = self.metadata.first().ok_or_else(|| {
       InputError::Metadata("parquet input requires at least one file".to_string())
@@ -64,23 +66,20 @@ impl InputSource for ParquetInputSource {
     Ok(metadata.schema().clone())
   }
 
+  /// Sum row-group counts across all discovered Parquet footers.
   fn total_rows(&self) -> Result<u64, InputError> {
-    Ok(
-      self
-        .metadata
-        .iter()
-        .map(|metadata| {
-          metadata
-            .metadata()
-            .row_groups()
-            .iter()
-            .map(|row_group| row_group.num_rows() as u64)
-            .sum::<u64>()
-        })
-        .sum(),
-    )
+    let mut total_rows = 0;
+    for metadata in &self.metadata {
+      let mut file_rows = 0;
+      for row_group in metadata.metadata().row_groups() {
+        file_rows += row_group.num_rows() as u64;
+      }
+      total_rows += file_rows;
+    }
+    Ok(total_rows)
   }
 
+  /// Infer the primary WKB column and its type when metadata names exactly one kind.
   fn inferred_geometry_column(&self) -> Result<Option<GeometryColumn>, InputError> {
     let Some(geo_meta) = self.geo_metadata()? else {
       return Ok(None);
@@ -106,6 +105,7 @@ impl InputSource for ParquetInputSource {
     }))
   }
 
+  /// Merge geometry contracts and retain non-reserved file metadata.
   fn source_metadata(&self) -> Result<SourceDatasetMetadata, InputError> {
     let geometry = match self.geo_metadata()? {
       Some(geo_meta) => {
@@ -121,6 +121,7 @@ impl InputSource for ParquetInputSource {
     })
   }
 
+  /// Build a local or HTTP scan restricted to the requested source rows.
   fn to_dataframe<'a>(
     &'a self,
     ctx: &'a SessionContext,
