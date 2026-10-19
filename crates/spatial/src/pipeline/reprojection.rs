@@ -182,7 +182,7 @@ impl OutputGeometryUdf {
     if self.target_wkid == WEB_MERCATOR_OUTPUT_WKID {
       validate_web_mercator_geometry(&geometry)?;
     }
-    geometry.wkb().map_err(|error| {
+    geometry.iso_wkb().map_err(|error| {
       GeometryError::InvalidGeometry(format!("encode normalized geometry as WKB: {error}"))
     })
   }
