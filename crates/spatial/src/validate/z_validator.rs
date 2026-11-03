@@ -35,21 +35,9 @@ impl ZValidator {
     file: &FileValidator,
     report: &mut ValidationReport,
   ) {
-    Self::validate_required_field(file, &index.code.dotted(), &DataType::UInt64, false, report);
-    Self::validate_required_field(
-      file,
-      &index.x_column.dotted(),
-      &DataType::Float64,
-      false,
-      report,
-    );
-    Self::validate_required_field(
-      file,
-      &index.y_column.dotted(),
-      &DataType::Float64,
-      false,
-      report,
-    );
+    Self::validate_field(file, &index.code.dotted(), &DataType::UInt64, report);
+    Self::validate_field(file, &index.x_column.dotted(), &DataType::Float64, report);
+    Self::validate_field(file, &index.y_column.dotted(), &DataType::Float64, report);
     Self::validate_dimension_field(
       file,
       index
@@ -126,75 +114,59 @@ impl ZValidator {
           .with_row_group(row_group)
           .with_row(row)
           .with_column(code_path.clone());
-        if code_values.is_null(row_index) {
-          report.push(
-            ValidationRule::ZCode,
-            ValidationSeverity::Error,
-            code_location,
-            "Z code must not be null",
-          );
-          continue;
+        let code =
+          (!code_values.is_null(row_index)).then(|| -> u64 { code_values.value(row_index) });
+        if let Some(code) = code {
+          if previous_code.is_some_and(|previous| -> bool { previous > code }) {
+            report.push(
+              ValidationRule::ZOrder,
+              ValidationSeverity::Error,
+              code_location.clone(),
+              format!(
+                "Z code {code} is lower than preceding code {}",
+                previous_code.expect("checked as present")
+              ),
+            );
+          }
+          previous_code = Some(code);
+          minimum = Some(minimum.map_or(code, |value| -> u64 { value.min(code) }));
+          maximum = Some(maximum.map_or(code, |value| -> u64 { value.max(code) }));
         }
-        let code = code_values.value(row_index);
-        if previous_code.is_some_and(|previous| previous > code) {
-          report.push(
-            ValidationRule::ZOrder,
-            ValidationSeverity::Error,
-            code_location.clone(),
-            format!(
-              "Z code {code} is lower than preceding code {}",
-              previous_code.expect("checked as present")
-            ),
-          );
-        }
-        previous_code = Some(code);
-        minimum = Some(minimum.map_or(code, |value| value.min(code)));
-        maximum = Some(maximum.map_or(code, |value| value.max(code)));
 
         let x = (!x_values.is_null(row_index)).then(|| x_values.value(row_index));
         let y = (!y_values.is_null(row_index)).then(|| y_values.value(row_index));
+        let z = z_values.as_ref().and_then(|values| -> Option<f64> {
+          (!values.is_null(row_index)).then(|| -> f64 { values.value(row_index) })
+        });
+        let m = m_values.as_ref().and_then(|values| -> Option<f64> {
+          (!values.is_null(row_index)).then(|| -> f64 { values.value(row_index) })
+        });
         let coordinate_location = ValidationLocation::file(file.file.relative_path.clone())
           .with_row_group(row_group)
           .with_row(row)
           .with_column(format!("{x_path},{y_path}"));
-        let coordinates = match (x, y) {
-          (Some(x), Some(y)) => Some((x, y)),
-          _ => {
-            report.push(
-              ValidationRule::ZCoordinate,
-              ValidationSeverity::Error,
-              coordinate_location.clone(),
-              "required point coordinate columns contain null",
-            );
-            None
-          }
-        };
-
         if geometry.is_null(row_index) {
-          if coordinates.is_some_and(|(x, y)| !x.is_nan() || !y.is_nan()) {
-            report.push(
-              ValidationRule::ZCoordinate,
-              ValidationSeverity::Error,
-              coordinate_location.clone(),
-              "null geometry requires NaN x and y values",
-            );
-          }
-          if code != 0 {
-            report.push(
-              ValidationRule::ZCode,
-              ValidationSeverity::Error,
-              code_location,
-              "null geometry requires Z code 0",
-            );
-          }
           continue;
         }
 
-        if sampled_geometry_count >= 4 {
+        let coordinates = x
+          .zip(y)
+          .filter(|(x, y)| -> bool { x.is_finite() && y.is_finite() });
+        let indeterminate_component = (index.has_z
+          && z.is_none_or(|value| -> bool { !value.is_finite() }))
+          || (index.has_m && m.is_none_or(|value| -> bool { !value.is_finite() }));
+        // Omitting fullExtent claims that every source location is indeterminate.
+        // Verify that claim beyond the ordinary geometry sample.
+        if sampled_geometry_count >= 4
+          && index.full_extent.is_some()
+          && coordinates.is_some()
+          && !indeterminate_component
+          && code.is_some()
+        {
           continue;
         }
         sampled_geometry_count += 1;
-        let bytes = match GeometryValidator::binary_value(geometry, row_index) {
+        let bytes = match GeometryValidator::binary_value(geometry.as_ref(), row_index) {
           Ok(Some(bytes)) => bytes,
           Ok(None) => continue,
           Err(error) => {
@@ -220,14 +192,6 @@ impl ZValidator {
               geometry_location,
               format!("invalid sampled WKB geometry: {error}"),
             );
-            if coordinates.is_some_and(|(x, y)| !x.is_nan() || !y.is_nan()) {
-              report.push(
-                ValidationRule::ZCoordinate,
-                ValidationSeverity::Error,
-                coordinate_location,
-                "invalid geometry requires NaN x and y values",
-              );
-            }
             continue;
           }
         };
@@ -239,12 +203,46 @@ impl ZValidator {
           geometry_location,
           report,
         );
+        if inspection.extent.is_none() {
+          if coordinates.is_some() {
+            report.push(
+              ValidationRule::ZCoordinate,
+              ValidationSeverity::Error,
+              coordinate_location,
+              "indeterminate source geometry must not advertise a finite XY location",
+            );
+          }
+          continue;
+        }
+        if code.is_none() {
+          report.push(
+            ValidationRule::ZCode,
+            ValidationSeverity::Error,
+            code_location.clone(),
+            "determinate source geometry requires a non-null Z code",
+          );
+        }
+        let full_extent = index.full_extent;
+        if full_extent.is_none() {
+          report.push(
+            ValidationRule::Extent,
+            ValidationSeverity::Error,
+            code_location.clone().with_column("geodisplay.fullExtent"),
+            "fullExtent is required when a source geometry has a finite XY location",
+          );
+        }
         let Ok(geometry_coordinate) = Coord::from_point_wkb(&bytes) else {
           continue;
         };
         let geometry_x = geometry_coordinate.x;
         let geometry_y = geometry_coordinate.y;
         let Some((x, y)) = coordinates else {
+          report.push(
+            ValidationRule::ZCoordinate,
+            ValidationSeverity::Error,
+            coordinate_location,
+            "determinate source geometry requires finite non-null x and y values",
+          );
           continue;
         };
         if !x.is_finite()
@@ -263,7 +261,7 @@ impl ZValidator {
         }
         Self::validate_point_component(
           geometry_coordinate.z,
-          z_values.map(|values| values.value(row_index)),
+          z,
           z_path.as_deref(),
           row_group,
           row,
@@ -272,15 +270,21 @@ impl ZValidator {
         );
         Self::validate_point_component(
           geometry_coordinate.m,
-          m_values.map(|values| values.value(row_index)),
+          m,
           m_path.as_deref(),
           row_group,
           row,
           file,
           report,
         );
+        let Some(full_extent) = full_extent else {
+          continue;
+        };
+        let Some(code) = code else {
+          continue;
+        };
         let expected_code = ClusterKey::from_z_coordinates(
-          index.full_extent,
+          full_extent,
           geometry_x,
           geometry_y,
           index.coordinate_precision,
@@ -327,9 +331,7 @@ impl ZValidator {
     report: &mut ValidationReport,
   ) {
     match (path, required) {
-      (Some(path), true) => {
-        Self::validate_required_field(file, &path, &DataType::Float64, false, report)
-      }
+      (Some(path), true) => Self::validate_field(file, &path, &DataType::Float64, report),
       (Some(_), false) => report.push(
         ValidationRule::ZSchema,
         ValidationSeverity::Error,
@@ -348,26 +350,24 @@ impl ZValidator {
     }
   }
 
-  /// Require a Z clustering field with the exact Arrow type and nullability.
-  fn validate_required_field(
+  /// Require the declared Arrow type; value validation determines where nulls are permitted.
+  fn validate_field(
     file: &FileValidator,
     path: &str,
     expected_type: &DataType,
-    nullable: bool,
     report: &mut ValidationReport,
   ) {
     let location =
       ValidationLocation::file(file.file.relative_path.clone()).with_column(path.to_string());
     match FileValidator::field_at_path(file.metadata.schema().as_ref(), path) {
-      Some(field) if field.data_type() == expected_type && field.is_nullable() == nullable => {}
+      Some(field) if field.data_type() == expected_type => {}
       Some(field) => report.push(
         ValidationRule::ZSchema,
         ValidationSeverity::Error,
         location,
         format!(
-          "Z column must be {expected_type} with nullable={nullable}, found {} with nullable={}",
+          "Z column must be {expected_type}, found {}",
           field.data_type(),
-          field.is_nullable()
         ),
       ),
       None => report.push(
@@ -379,7 +379,7 @@ impl ZValidator {
     }
   }
 
-  /// Compare a stored Z/M component with sampled WKB while accepting paired NaN values.
+  /// Require finite source Z/M values to match; accept null or non-finite indeterminate components.
   fn validate_point_component(
     geometry_value: Option<f64>,
     column_value: Option<f64>,
@@ -389,14 +389,17 @@ impl ZValidator {
     file: &FileValidator,
     report: &mut ValidationReport,
   ) {
-    let (Some(geometry_value), Some(column_value), Some(column_path)) =
-      (geometry_value, column_value, column_path)
-    else {
+    let (Some(geometry_value), Some(column_path)) = (geometry_value, column_path) else {
       return;
     };
-    if (geometry_value.is_nan() && column_value.is_nan())
-      || MetadataValidator::float_matches(geometry_value, column_value)
-    {
+    let matches = match column_value {
+      Some(column_value) if geometry_value.is_finite() => {
+        column_value.is_finite() && MetadataValidator::float_matches(geometry_value, column_value)
+      }
+      Some(column_value) => !column_value.is_finite(),
+      None => !geometry_value.is_finite(),
+    };
+    if matches {
       return;
     }
     report.push(
@@ -407,7 +410,7 @@ impl ZValidator {
         .with_row(row)
         .with_column(column_path.to_string()),
       format!(
-        "stored coordinate value {column_value} does not match sampled WKB coordinate value {geometry_value}"
+        "stored coordinate value {column_value:?} does not match sampled WKB coordinate value {geometry_value}"
       ),
     );
   }

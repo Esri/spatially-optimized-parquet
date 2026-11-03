@@ -22,6 +22,7 @@ use arrow_array::{Array, ArrayRef, Float64Array, StructArray};
 use arrow_schema::{DataType, Field, FieldRef, Fields};
 use datafusion::common::cast::as_float64_array;
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
+use datafusion::logical_expr::expr_fn::ident;
 use datafusion::logical_expr::{
   ColumnarValue, Expr, ReturnFieldArgs, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature,
   TypeSignature, Volatility,
@@ -75,7 +76,7 @@ impl GeolodUdf {
       multiscale_encoding,
       warnings,
     ))
-    .call(vec![col(geometry_column)])
+    .call(vec![ident(geometry_column)])
     .alias(GEOLOD_COLUMN)
   }
 

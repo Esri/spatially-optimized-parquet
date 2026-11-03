@@ -78,7 +78,7 @@ fn plain_output_preserves_wkb_rows_and_passthrough_metadata() {
   let result = runtime()
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
+        source: spatial::PipelineSource::dataset(input.to_string_lossy()),
         row_range: RowRange::new(0, Some(2)),
         ..Default::default()
       },
@@ -191,7 +191,7 @@ fn plain_output_strips_z_and_m_independently() {
     runtime()
       .block_on(Pipeline::run(SpatialPipelineOptions {
         input: InputOptions {
-          location: input.to_string_lossy().into_owned(),
+          source: spatial::PipelineSource::dataset(input.to_string_lossy()),
           ..Default::default()
         },
         output: OutputOptions {
@@ -253,7 +253,7 @@ fn plain_output_writes_covering_bbox() {
   runtime()
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
+        source: spatial::PipelineSource::dataset(input.to_string_lossy()),
         ..Default::default()
       },
       output: OutputOptions {
@@ -312,7 +312,7 @@ fn plain_output_reprojects_selected_rows_and_covering_extent() {
   runtime()
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
+        source: spatial::PipelineSource::dataset(input.to_string_lossy()),
         row_range: RowRange::new(1, Some(2)),
         ..Default::default()
       },
@@ -398,7 +398,7 @@ fn plain_output_reprojects_wgs84_to_web_mercator() {
   runtime()
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
+        source: spatial::PipelineSource::dataset(input.to_string_lossy()),
         ..Default::default()
       },
       output: OutputOptions {
@@ -471,7 +471,7 @@ fn plain_output_rejects_partition_count() {
   let error = runtime()
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
+        source: spatial::PipelineSource::dataset(input.to_string_lossy()),
         ..Default::default()
       },
       output: OutputOptions {

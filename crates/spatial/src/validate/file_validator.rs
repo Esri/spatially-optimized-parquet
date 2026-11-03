@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use std::fs::File;
+use std::sync::Arc;
 
-use arrow_array::{Array, Float64Array, RecordBatch, StructArray, UInt64Array};
+use arrow_array::{Array, ArrayRef, Float64Array, RecordBatch, StructArray, UInt64Array};
 use arrow_schema::{DataType, Field, Schema};
 use parquet::arrow::ProjectionMask;
 use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ParquetRecordBatchReaderBuilder};
@@ -366,20 +367,21 @@ impl FileValidator {
     Some(field)
   }
 
-  /// Resolve a dotted batch column path and report missing or non-struct segments.
-  pub(crate) fn array_at_path<'a>(
-    batch: &'a RecordBatch,
+  /// Resolve a dotted batch path, propagating every ancestor struct's validity to the leaf.
+  pub(crate) fn array_at_path(
+    batch: &RecordBatch,
     path: &str,
-  ) -> Result<&'a dyn Array, ValidationError> {
+  ) -> Result<ArrayRef, ValidationError> {
     let mut segments = path.split('.');
     let first = segments
       .next()
       .filter(|segment| !segment.is_empty())
       .ok_or_else(|| ValidationError::ArrowColumn("empty Arrow column path".to_string()))?;
-    let mut array = batch
-      .column_by_name(first)
-      .ok_or_else(|| ValidationError::ArrowColumn(format!("missing Arrow column '{first}'")))?
-      .as_ref();
+    let mut array = Arc::clone(
+      batch
+        .column_by_name(first)
+        .ok_or_else(|| ValidationError::ArrowColumn(format!("missing Arrow column '{first}'")))?,
+    );
     for segment in segments {
       let struct_array = array
         .as_any()
@@ -387,35 +389,40 @@ impl FileValidator {
         .ok_or_else(|| {
           ValidationError::ArrowColumn(format!("Arrow column before '{segment}' is not a struct"))
         })?;
-      array = struct_array
-        .column_by_name(segment)
+      let column_index = struct_array
+        .fields()
+        .iter()
+        .position(|field| field.name() == segment)
         .ok_or_else(|| {
           ValidationError::ArrowColumn(format!("missing Arrow struct field '{segment}'"))
-        })?
-        .as_ref();
+        })?;
+      let (_, columns) = struct_array.flatten();
+      array = Arc::clone(&columns[column_index]);
     }
     Ok(array)
   }
 
   /// Resolve a dotted batch path and require a Float64 leaf array.
-  pub(crate) fn float64_array_at_path<'a>(
-    batch: &'a RecordBatch,
+  pub(crate) fn float64_array_at_path(
+    batch: &RecordBatch,
     path: &str,
-  ) -> Result<&'a Float64Array, ValidationError> {
+  ) -> Result<Float64Array, ValidationError> {
     Self::array_at_path(batch, path)?
       .as_any()
       .downcast_ref::<Float64Array>()
+      .cloned()
       .ok_or_else(|| ValidationError::ArrowColumn(format!("Arrow column '{path}' is not Float64")))
   }
 
   /// Resolve a dotted batch path and require a UInt64 leaf array.
-  pub(crate) fn uint64_array_at_path<'a>(
-    batch: &'a RecordBatch,
+  pub(crate) fn uint64_array_at_path(
+    batch: &RecordBatch,
     path: &str,
-  ) -> Result<&'a UInt64Array, ValidationError> {
+  ) -> Result<UInt64Array, ValidationError> {
     Self::array_at_path(batch, path)?
       .as_any()
       .downcast_ref::<UInt64Array>()
+      .cloned()
       .ok_or_else(|| ValidationError::ArrowColumn(format!("Arrow column '{path}' is not UInt64")))
   }
 }

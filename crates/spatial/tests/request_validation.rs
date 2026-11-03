@@ -34,7 +34,7 @@ fn output_rejects_unsupported_crs_before_filesystem_mutation() {
     let error = runtime()
       .block_on(Pipeline::run(SpatialPipelineOptions {
         input: InputOptions {
-          location: input.to_string_lossy().into_owned(),
+          source: spatial::PipelineSource::dataset(input.to_string_lossy()),
           ..Default::default()
         },
         output: OutputOptions {
@@ -85,7 +85,7 @@ fn web_mercator_output_rejects_out_of_domain_projected_coordinates() {
   let error = runtime()
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
+        source: spatial::PipelineSource::dataset(input.to_string_lossy()),
         ..Default::default()
       },
       output: OutputOptions {
@@ -131,7 +131,7 @@ fn web_mercator_output_rejects_out_of_domain_wgs84_latitude() {
   let error = runtime()
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
+        source: spatial::PipelineSource::dataset(input.to_string_lossy()),
         ..Default::default()
       },
       output: OutputOptions {
@@ -185,7 +185,7 @@ fn output_rejects_explicit_geometry_without_crs_metadata() {
     let error = runtime()
       .block_on(Pipeline::run(SpatialPipelineOptions {
         input: InputOptions {
-          location: input.to_string_lossy().into_owned(),
+          source: spatial::PipelineSource::dataset(input.to_string_lossy()),
           geometry_column: Some("geometry".to_string()),
           ..Default::default()
         },
@@ -205,7 +205,7 @@ fn output_rejects_explicit_geometry_without_crs_metadata() {
   runtime()
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
+        source: spatial::PipelineSource::dataset(input.to_string_lossy()),
         geometry_column: Some("geometry".to_string()),
         input_wkid: Some(3857),
         ..Default::default()
@@ -266,7 +266,7 @@ fn output_applies_geoparquet_default_crs_when_omitted() {
   runtime()
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
+        source: spatial::PipelineSource::dataset(input.to_string_lossy()),
         ..Default::default()
       },
       output: OutputOptions {
@@ -314,7 +314,7 @@ fn output_rejects_input_wkid_when_crs_metadata_exists() {
   let error = runtime()
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
+        source: spatial::PipelineSource::dataset(input.to_string_lossy()),
         input_wkid: Some(3857),
         ..Default::default()
       },

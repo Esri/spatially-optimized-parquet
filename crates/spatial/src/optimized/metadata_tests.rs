@@ -54,12 +54,12 @@ fn geo_input<'a>(
   GeoMetadataInput {
     geometry_column: "geometry",
     geometry_types,
-    output_extent: Extent2D {
+    output_extent: Some(Extent2D {
       xmin: -180.0,
       ymin: -90.0,
       xmax: 180.0,
       ymax: 90.0,
-    },
+    }),
     output_spatial_reference: spatial_reference,
     has_z: true,
     has_m: true,

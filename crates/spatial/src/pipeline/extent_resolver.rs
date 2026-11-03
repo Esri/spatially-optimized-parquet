@@ -51,6 +51,11 @@ impl<'a> ExtentResolver<'a> {
     normalized: &NormalizedSpatialFrame,
     reprojection: &ResolvedReprojection,
   ) -> Result<Extent2D, PipelineError> {
+    let source_extent = source.source_extent.ok_or_else(|| {
+      PipelineError::InvalidRequest(
+        "empty or all-null geometry requires an explicit normalization_extent".into(),
+      )
+    })?;
     let source_metadata = self.input.source_metadata()?;
     let metadata_fast_path = self.row_range.is_full()
       && !reprojection.requires_reprojection()
@@ -61,7 +66,7 @@ impl<'a> ExtentResolver<'a> {
         .and_then(|metadata| metadata.bbox)
         .is_some();
     if metadata_fast_path {
-      return Ok(source.source_extent);
+      return Ok(source_extent);
     }
 
     let aggregate_dataframe = Self::target_extent_aggregate(normalized.dataframe())?;

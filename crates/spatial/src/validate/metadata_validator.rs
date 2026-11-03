@@ -272,17 +272,19 @@ impl MetadataValidator {
           );
         }
       }
-      Self::validate_extent(
-        Extent2D {
-          xmin: column.bbox[0],
-          ymin: column.bbox[1],
-          xmax: column.bbox[2],
-          ymax: column.bbox[3],
-        },
-        column_location,
-        "GeoParquet bbox",
-        report,
-      );
+      if let Some([xmin, ymin, xmax, ymax]) = column.bbox {
+        Self::validate_extent(
+          Extent2D {
+            xmin,
+            ymin,
+            xmax,
+            ymax,
+          },
+          column_location,
+          "GeoParquet bbox",
+          report,
+        );
+      }
     }
   }
 
@@ -477,7 +479,7 @@ impl MetadataValidator {
   fn validate_common_metadata(
     version: &str,
     writer: Option<(&str, &str)>,
-    full_extent: Extent2D,
+    full_extent: Option<Extent2D>,
     file: &FileValidator,
     report: &mut ValidationReport,
   ) {
@@ -506,7 +508,9 @@ impl MetadataValidator {
       ),
       Some(_) => {}
     }
-    Self::validate_extent(full_extent, location, "geodisplay fullExtent", report);
+    if let Some(full_extent) = full_extent {
+      Self::validate_extent(full_extent, location, "geodisplay fullExtent", report);
+    }
   }
 
   /// Require every declared primary-column WKB type to match the geodisplay family.
@@ -647,12 +651,12 @@ impl MetadataValidator {
       GeodisplayMetadata::Z { index } => index.full_extent,
       GeodisplayMetadata::Xz { index } => index.full_extent,
     };
-    let geo_extent = [
-      column.bbox[0],
-      column.bbox[1],
-      column.bbox[2],
-      column.bbox[3],
-    ];
+    let Some(display_extent) = display_extent else {
+      return;
+    };
+    let Some(geo_extent) = column.bbox else {
+      return;
+    };
     let display_values = [
       display_extent.xmin,
       display_extent.ymin,

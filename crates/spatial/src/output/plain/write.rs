@@ -51,18 +51,14 @@ impl<'a> PlainWriter<'a> {
   }
 
   /// Write one GeoParquet file from prepared spatial data.
-  pub(crate) async fn write(
-    self,
-    covering: bool,
-    compression: Option<&str>,
-  ) -> Result<u64, OutputError> {
+  pub(crate) async fn write(self, options: &crate::OutputOptions) -> Result<u64, OutputError> {
     let mut expressions = Vec::new();
     for field in self.source_schema.fields() {
       if field.name() != COVERING_BBOX_COLUMN {
         expressions.push(ident(field.name()));
       }
     }
-    if covering {
+    if options.covering {
       expressions.push(ident(COVERING_BBOX_COLUMN));
     }
     debug_assert!(expressions.iter().any(|expression| {
@@ -80,11 +76,15 @@ impl<'a> PlainWriter<'a> {
     let geo_metadata = GeoMetadataInput {
       geometry_column: &self.context.source().geometry.column,
       geometry_types: &self.context.source().geometry_types,
-      output_extent: self.context.target_extent(),
+      output_extent: self
+        .context
+        .source()
+        .source_extent
+        .map(|_| -> crate::geometry::Extent2D { self.context.target_extent() }),
       output_spatial_reference: self.context.reprojection().target_spatial_reference(),
       has_z: self.context.source().has_z,
       has_m: self.context.source().has_m,
-      covering,
+      covering: options.covering,
       covering_column: COVERING_BBOX_COLUMN,
       ordering: None,
       lod: None,
@@ -105,8 +105,12 @@ impl<'a> PlainWriter<'a> {
           OutputError::Configuration("missing output spatial-reference WKID".to_string())
         })?
     );
-    let writer_options = WriterOptions::new(compression.unwrap_or("snappy"), &metadata)?
-      .with_geometry_column(geometry_column, geometry_crs);
+    let writer_options = WriterOptions::new(
+      options.compression.as_deref().unwrap_or("snappy"),
+      &metadata,
+    )?
+    .with_page_layout(options.row_group_size, options.page_size)
+    .with_geometry_column(geometry_column, geometry_crs);
     let output_path = self
       .output_path
       .paths()?

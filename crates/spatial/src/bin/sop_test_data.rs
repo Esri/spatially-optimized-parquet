@@ -389,7 +389,7 @@ fn optimize_fixture(
   runtime
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
+        source: spatial::PipelineSource::dataset(input.to_string_lossy()),
         ..Default::default()
       },
       output: OutputOptions {

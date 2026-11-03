@@ -40,12 +40,16 @@ pub(crate) enum GeometryEncoding {
   Wkb,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Identifies the coordinate dimensions encoded by a geometry.
-pub(crate) enum CoordinateDimensions {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoordinateDimensions {
+  /// XY coordinates.
   Xy,
+  /// XYZ coordinates.
   Xyz,
+  /// XY coordinates with a measure.
   Xym,
+  /// XYZ coordinates with a measure.
   Xyzm,
 }
 

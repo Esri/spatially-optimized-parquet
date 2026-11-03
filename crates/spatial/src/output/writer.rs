@@ -91,6 +91,23 @@ impl WriterOptions {
     self
   }
 
+  /// Apply validated explicit layout overrides without changing default writer behavior.
+  pub(crate) fn with_page_layout(
+    mut self,
+    row_group_size: Option<usize>,
+    page_size: Option<usize>,
+  ) -> Self {
+    if let Some(row_group_size) = row_group_size {
+      self.options.global.max_row_group_size = row_group_size;
+    }
+    if let Some(page_size) = page_size {
+      self.options.global.data_pagesize_limit = page_size;
+      // Check the byte target after each value; oversized values still remain intact.
+      self.options.global.write_batch_size = 1;
+    }
+    self
+  }
+
   /// Apply byte-stream splitting to selected floating-point coordinate leaves.
   pub(crate) fn with_byte_stream_split_columns(
     mut self,

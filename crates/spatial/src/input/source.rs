@@ -21,13 +21,81 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::context::SessionContext;
 use futures_util::future::BoxFuture;
 
-use super::{InputError, SourceDatasetMetadata, SourceFormat, gpkg, parquet};
+use super::{
+  GeometryDeclaration, InputError, SourceDatasetMetadata, SourceFormat, arrow::ArrowInputSource,
+  gpkg, parquet,
+};
 use crate::geometry::GeometryColumn;
+
+/// Select an external dataset or owned Arrow batches as the pipeline source.
+///
+/// Arrow batches remain in memory for the whole run and can be scanned repeatedly.
+/// This API does not accept a one-shot stream or promise bounded input memory.
+#[derive(Debug, Clone)]
+pub enum PipelineSource {
+  /// Read a local Parquet/GeoPackage dataset or a supported HTTP Parquet URL.
+  Dataset {
+    /// Local path or HTTP URL.
+    location: String,
+    /// Optional format override.
+    format: Option<SourceFormat>,
+    /// Optional GeoPackage layer name.
+    layer: Option<String>,
+  },
+  /// Read batches with one shared schema and an explicit geometry declaration.
+  Arrow {
+    /// Schema required of every batch, including when there are no batches.
+    schema: SchemaRef,
+    /// Owned batches whose Arrow buffers are reference-counted when cloned.
+    batches: Vec<RecordBatch>,
+    /// WKB column, kinds, coordinate dimensions and CRS.
+    geometry: GeometryDeclaration,
+  },
+}
+
+impl PipelineSource {
+  /// Create a dataset source with inferred format and default layer selection.
+  pub fn dataset(location: impl Into<String>) -> Self {
+    Self::Dataset {
+      location: location.into(),
+      format: None,
+      layer: None,
+    }
+  }
+
+  /// Resolve either input representation into the shared pipeline source contract.
+  pub(crate) async fn open(&self) -> Result<Arc<dyn InputSource>, InputError> {
+    match self {
+      Self::Dataset {
+        location,
+        format,
+        layer,
+      } => {
+        let format = SourceFormat::resolve(location, *format)?;
+        open_input(
+          format,
+          &InputOpenOptions::new(location.clone(), layer.clone()),
+        )
+        .await
+      }
+      Self::Arrow {
+        schema,
+        batches,
+        geometry,
+      } => Ok(Arc::new(ArrowInputSource::new(
+        Arc::clone(schema),
+        batches.clone(),
+        geometry.clone(),
+      )?)),
+    }
+  }
+}
 
 /// Defines the normalized input contract consumed by output layout resolution.
 pub(crate) trait InputSource: Send + Sync {

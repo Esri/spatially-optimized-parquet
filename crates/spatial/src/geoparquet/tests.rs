@@ -267,7 +267,7 @@ fn resolved_source_retains_spatial_reference_and_extent_in_source_metadata() {
     .unwrap();
   let source_geometry = context.source_metadata.geometry.unwrap();
 
-  assert_eq!(source_geometry.bbox, Some(context.source_extent));
+  assert_eq!(source_geometry.bbox, context.source_extent);
   assert_eq!(
     source_geometry.projjson,
     context.source_spatial_reference.projjson
@@ -313,7 +313,7 @@ fn resolved_source_uses_complete_metadata_without_creating_dataframe() {
     .unwrap();
 
   assert_eq!(context.geometry_types, vec![GeometryType::Point]);
-  assert_eq!(context.source_extent, expected_extent);
+  assert_eq!(context.source_extent, Some(expected_extent));
   assert_eq!(dataframe_calls.load(Ordering::SeqCst), 0);
 }
 

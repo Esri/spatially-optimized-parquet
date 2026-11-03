@@ -38,11 +38,12 @@ use arrow_array::{Array, ArrayRef, Float64Array, StructArray, UInt64Array};
 use arrow_schema::{DataType, Field, Fields};
 use datafusion::common::cast::as_float64_array;
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
+use datafusion::logical_expr::expr_fn::ident;
 use datafusion::logical_expr::{
   ColumnarValue, Expr, ReturnFieldArgs, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature,
   TypeSignature, Volatility,
 };
-use datafusion::prelude::{col, lit};
+use datafusion::prelude::lit;
 
 use crate::geometry::{Extent2D, GeometryArray, geometry_signature, to_datafusion_error};
 use crate::optimized::multiscale::GEOKEY_COLUMN;
@@ -160,7 +161,7 @@ pub(crate) struct BoundsUdf;
 impl BoundsUdf {
   /// Build the bounds-struct expression for one geometry column.
   pub(crate) fn expression(geometry_column: &str) -> Expr {
-    Self::udf().call(vec![col(geometry_column)])
+    Self::udf().call(vec![ident(geometry_column)])
   }
 
   /// Create the DataFusion scalar function used by the bounds expression.

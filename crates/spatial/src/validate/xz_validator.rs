@@ -38,7 +38,7 @@ impl XzValidator {
     report: &mut ValidationReport,
   ) {
     let code_path = index.code.dotted();
-    Self::validate_field(file, &code_path, &DataType::UInt64, Some(false), report);
+    Self::validate_field(file, &code_path, &DataType::UInt64, report);
     let native_geometry_type = Self::optimized_geometry_type(index);
     for level in &index.levels {
       let level_path = level.column.dotted();
@@ -122,47 +122,33 @@ impl XzValidator {
           .with_row_group(row_group)
           .with_row(row)
           .with_column(code_path.clone());
-        if code_values.is_null(row_index) {
-          report.push(
-            ValidationRule::XzCode,
-            ValidationSeverity::Error,
-            code_location,
-            "XZ code must not be null",
-          );
-          continue;
+        let code =
+          (!code_values.is_null(row_index)).then(|| -> u64 { code_values.value(row_index) });
+        if let Some(code) = code {
+          if previous_code.is_some_and(|previous| -> bool { previous > code }) {
+            report.push(
+              ValidationRule::XzOrder,
+              ValidationSeverity::Error,
+              code_location.clone(),
+              format!(
+                "XZ code {code} is lower than preceding code {}",
+                previous_code.expect("checked as present")
+              ),
+            );
+          }
+          previous_code = Some(code);
+          minimum = Some(minimum.map_or(code, |value| -> u64 { value.min(code) }));
+          maximum = Some(maximum.map_or(code, |value| -> u64 { value.max(code) }));
         }
-        let code = code_values.value(row_index);
-        if previous_code.is_some_and(|previous| previous > code) {
-          report.push(
-            ValidationRule::XzOrder,
-            ValidationSeverity::Error,
-            code_location.clone(),
-            format!(
-              "XZ code {code} is lower than preceding code {}",
-              previous_code.expect("checked as present")
-            ),
-          );
-        }
-        previous_code = Some(code);
-        minimum = Some(minimum.map_or(code, |value| value.min(code)));
-        maximum = Some(maximum.map_or(code, |value| value.max(code)));
 
         let geometry_is_null = geometry.is_null(row_index);
-        if geometry_is_null && code != 0 {
-          report.push(
-            ValidationRule::XzCode,
-            ValidationSeverity::Error,
-            code_location.clone(),
-            "null geometry requires XZ code 0",
-          );
-        }
 
         for (level_index, _) in index.levels.iter().enumerate() {
           if level_search_count[level_index] >= PBF_SEARCH_LIMIT {
             continue;
           }
           level_search_count[level_index] += 1;
-          let level_array = level_values[level_index];
+          let level_array = level_values[level_index].as_ref();
           let level_location = ValidationLocation::file(file.file.relative_path.clone())
             .with_row_group(row_group)
             .with_row(row)
@@ -260,7 +246,9 @@ impl XzValidator {
           }
         }
 
-        if geometry_is_null || sampled_geometry_count >= 4 {
+        if geometry_is_null
+          || (sampled_geometry_count >= 4 && index.full_extent.is_some() && code.is_some())
+        {
           continue;
         }
         sampled_geometry_count += 1;
@@ -268,7 +256,7 @@ impl XzValidator {
           .with_row_group(row_group)
           .with_row(row)
           .with_column(contract.geometry_column().to_string());
-        let bytes = match GeometryValidator::binary_value(geometry, row_index) {
+        let bytes = match GeometryValidator::binary_value(geometry.as_ref(), row_index) {
           Ok(Some(bytes)) => bytes,
           Ok(None) => continue,
           Err(error) => {
@@ -329,7 +317,7 @@ impl XzValidator {
           continue;
         }
         for (level_index, level) in index.levels.iter().enumerate() {
-          let level_array = level_values[level_index];
+          let level_array = level_values[level_index].as_ref();
           let Ok(Some(payload)) = GeometryValidator::binary_value(level_array, row_index) else {
             continue;
           };
@@ -425,28 +413,24 @@ impl XzValidator {
     }
   }
 
-  /// Require an XZ field with the expected Arrow type and optional nullability constraint.
+  /// Require the declared Arrow type; value validation determines where nulls are permitted.
   fn validate_field(
     file: &FileValidator,
     path: &str,
     expected_type: &DataType,
-    nullable: Option<bool>,
     report: &mut ValidationReport,
   ) {
     let location =
       ValidationLocation::file(file.file.relative_path.clone()).with_column(path.to_string());
     match FileValidator::field_at_path(file.metadata.schema().as_ref(), path) {
-      Some(field)
-        if field.data_type() == expected_type
-          && nullable.is_none_or(|nullable| field.is_nullable() == nullable) => {}
+      Some(field) if field.data_type() == expected_type => {}
       Some(field) => report.push(
         ValidationRule::XzSchema,
         ValidationSeverity::Error,
         location,
         format!(
-          "XZ column must be {expected_type}, found {} with nullable={}",
+          "XZ column must be {expected_type}, found {}",
           field.data_type(),
-          field.is_nullable()
         ),
       ),
       None => report.push(
@@ -607,22 +591,36 @@ impl XzValidator {
   fn validate_sampled_code(
     index: &ClusteringIndexXZ,
     feature_extent: Option<Extent2D>,
-    code: u64,
+    code: Option<u64>,
     code_location: ValidationLocation,
     geometry_location: ValidationLocation,
     report: &mut ValidationReport,
   ) {
     let Some(feature_extent) = feature_extent else {
+      return;
+    };
+    if code.is_none() {
+      report.push(
+        ValidationRule::XzCode,
+        ValidationSeverity::Error,
+        code_location.clone(),
+        "determinate source geometry requires a non-null XZ code",
+      );
+    }
+    let Some(full_extent) = index.full_extent else {
       report.push(
         ValidationRule::Extent,
         ValidationSeverity::Error,
-        geometry_location,
-        "unable to resolve sampled feature extent",
+        geometry_location.with_column("geodisplay.fullExtent"),
+        "fullExtent is required when a source geometry has a finite XY location",
       );
       return;
     };
+    let Some(code) = code else {
+      return;
+    };
     let expected_code =
-      ClusterKey::from_xz_extent(index.full_extent, feature_extent, index.max_level).value();
+      ClusterKey::from_xz_extent(full_extent, feature_extent, index.max_level).value();
     if code != expected_code {
       report.push(
         ValidationRule::XzCode,
@@ -752,22 +750,22 @@ impl GeometryPartSink for CoordinateCollector {
   fn finish_part(&mut self) {}
 }
 
-struct CoveringExtentView<'array> {
-  xmin: CoveringField<'array>,
-  ymin: CoveringField<'array>,
-  xmax: CoveringField<'array>,
-  ymax: CoveringField<'array>,
+struct CoveringExtentView {
+  xmin: CoveringField,
+  ymin: CoveringField,
+  xmax: CoveringField,
+  ymax: CoveringField,
 }
 
-struct CoveringField<'array> {
-  array: &'array Float64Array,
+struct CoveringField {
+  array: Float64Array,
   path: String,
 }
 
-impl<'array> CoveringExtentView<'array> {
-  /// Resolve optional GeoParquet covering paths into borrowed Float64 arrays.
+impl CoveringExtentView {
+  /// Resolve covering paths into shared Float64 arrays with effective ancestor validity.
   fn from_batch(
-    batch: &'array arrow_array::RecordBatch,
+    batch: &arrow_array::RecordBatch,
     contract: &ValidatedMetadata,
   ) -> Result<Option<Self>, String> {
     let Some(column) = contract.geo.columns.get(contract.geometry_column()) else {
@@ -782,14 +780,17 @@ impl<'array> CoveringExtentView<'array> {
       covering.bbox.xmax.join("."),
       covering.bbox.ymax.join("."),
     ];
-    let fields: [Result<CoveringField<'array>, String>; 4] = paths.map(|path| {
-      let array = FileValidator::array_at_path(batch, &path).map_err(|error| error.to_string())?;
-      let array = array
-        .as_any()
-        .downcast_ref::<Float64Array>()
-        .ok_or_else(|| format!("covering field '{path}' is not Float64"))?;
-      Ok(CoveringField { array, path })
-    });
+    let fields: [Result<CoveringField, String>; 4] =
+      paths.map(|path| -> Result<CoveringField, String> {
+        let array =
+          FileValidator::array_at_path(batch, &path).map_err(|error| error.to_string())?;
+        let array = array
+          .as_any()
+          .downcast_ref::<Float64Array>()
+          .cloned()
+          .ok_or_else(|| format!("covering field '{path}' is not Float64"))?;
+        Ok(CoveringField { array, path })
+      });
     let [xmin, ymin, xmax, ymax] = fields;
     Ok(Some(Self {
       xmin: xmin?,

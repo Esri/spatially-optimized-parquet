@@ -41,11 +41,10 @@ fn source_expressions(source_schema: &Schema) -> Vec<Expr> {
 fn writer_options(
   context: &SpatialWriteContext,
   layout: &OptimizedLayout,
-  covering: bool,
-  compression: Option<&str>,
+  options: &crate::OutputOptions,
 ) -> Result<WriterOptions, OutputError> {
   let metadata = layout
-    .parquet_metadata(context, covering)
+    .parquet_metadata(context, options.covering)
     .map_err(|error| OutputError::Configuration(format!("build optimized metadata: {error}")))?;
   let geometry_crs = format!(
     "srid:{}",
@@ -58,9 +57,13 @@ fn writer_options(
       })?
   );
   Ok(
-    WriterOptions::new(compression.unwrap_or("snappy"), &metadata)?
-      .with_byte_stream_split_columns(layout.byte_stream_split_column_paths())
-      .with_geometry_column(&layout.geometry().geometry.column, geometry_crs),
+    WriterOptions::new(
+      options.compression.as_deref().unwrap_or("snappy"),
+      &metadata,
+    )?
+    .with_page_layout(options.row_group_size, options.page_size)
+    .with_byte_stream_split_columns(layout.byte_stream_split_column_paths())
+    .with_geometry_column(&layout.geometry().geometry.column, geometry_crs),
   )
 }
 

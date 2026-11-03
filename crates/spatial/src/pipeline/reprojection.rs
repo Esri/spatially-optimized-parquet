@@ -22,10 +22,10 @@ use arrow_array::ArrayRef;
 use arrow_array::builder::BinaryBuilder;
 use arrow_schema::DataType;
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
+use datafusion::logical_expr::expr_fn::ident;
 use datafusion::logical_expr::{
   ColumnarValue, Expr, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature,
 };
-use datafusion::prelude::col;
 use gdal::spatial_ref::{CoordTransform, SpatialRef};
 use gdal::vector::Geometry;
 use serde_json::Value;
@@ -88,7 +88,7 @@ impl ResolvedReprojection {
         target_definition,
         target_wkid,
       )
-      .call(vec![col(geometry_column)]),
+      .call(vec![ident(geometry_column)]),
     ))
   }
 }

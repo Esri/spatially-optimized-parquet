@@ -28,8 +28,8 @@ pub(crate) struct ResolvedSpatialSource {
   pub(crate) geometry: GeometryColumn,
   /// Defines the exact source geometry kinds.
   pub(crate) geometry_types: Vec<GeometryType>,
-  /// Defines the selected-row extent in source coordinates.
-  pub(crate) source_extent: Extent2D,
+  /// Defines observed source bounds, absent for empty or all-null selected geometry.
+  pub(crate) source_extent: Option<Extent2D>,
   /// Provides the source coordinate reference system.
   pub(crate) source_spatial_reference: SpatialReference,
   /// Defines the normalized geometry family used by output mechanics.
@@ -80,7 +80,7 @@ pub(crate) async fn resolve_source(
   let requires_scan = !row_range.is_full()
     || source_geometry.is_none_or(|source_geometry| source_geometry.geometry_types.is_empty())
     || source_geometry.is_none_or(|source_geometry| source_geometry.bbox.is_none());
-  let (geometry_types, source_extent) = if requires_scan {
+  let (mut geometry_types, source_extent) = if requires_scan {
     scan_geometry_metadata(input_dataframe, &geometry.column)
       .await
       .map_err(|error| PipelineError::InvalidRequest(format!("scan source geometry: {error}")))?
@@ -88,13 +88,18 @@ pub(crate) async fn resolve_source(
     let source_geometry = source_geometry.ok_or_else(|| {
       PipelineError::InvalidRequest("missing source geometry metadata".to_string())
     })?;
-    (
-      source_geometry.geometry_types.clone(),
-      source_geometry.bbox.ok_or_else(|| {
-        PipelineError::InvalidRequest("missing source geometry extent".to_string())
-      })?,
-    )
+    (source_geometry.geometry_types.clone(), source_geometry.bbox)
   };
+  if geometry_types.is_empty() {
+    geometry_types = source_geometry
+      .map(|geometry| -> Vec<GeometryType> { geometry.geometry_types.clone() })
+      .filter(|types| -> bool { !types.is_empty() })
+      .ok_or_else(|| {
+        PipelineError::InvalidRequest(
+          "unable to determine geometry type from selected rows or source declaration".into(),
+        )
+      })?;
+  }
   let geometry_family = GeometryFamily::from_types(&geometry_types)?;
   let covering = source_geometry.and_then(|source_geometry| source_geometry.covering.clone());
   let has_z = source_geometry.is_some_and(|source_geometry| source_geometry.has_z);
@@ -105,7 +110,7 @@ pub(crate) async fn resolve_source(
     column: geometry.column.clone(),
     encoding: GeometryEncoding::Wkb,
     geometry_types: geometry_types.clone(),
-    bbox: Some(source_extent),
+    bbox: source_extent,
     covering,
     projjson: Some(projjson),
     has_z,

@@ -20,11 +20,12 @@ use arrow_array::{Array, ArrayRef, Float64Array, StructArray, UInt64Array};
 use arrow_schema::{DataType, Field, Fields};
 use datafusion::common::cast::as_float64_array;
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
+use datafusion::logical_expr::expr_fn::ident;
 use datafusion::logical_expr::{
   ColumnarValue, Expr, ReturnFieldArgs, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature,
   Volatility,
 };
-use datafusion::prelude::{col, lit};
+use datafusion::prelude::lit;
 
 use crate::geometry::Coord;
 use crate::geometry::{Extent2D, GeometryArray, geometry_signature, to_datafusion_error};
@@ -81,7 +82,7 @@ pub(crate) struct PointGeometryUdf {
 impl PointGeometryUdf {
   /// Build a point-coordinate expression without source-dimension validation.
   pub(crate) fn expression(geometry_column: &str) -> Expr {
-    Self::new(None).udf().call(vec![col(geometry_column)])
+    Self::new(None).udf().call(vec![ident(geometry_column)])
   }
 
   /// Build a point-coordinate expression with expected source dimensions.
@@ -92,7 +93,7 @@ impl PointGeometryUdf {
   ) -> Expr {
     Self::new(Some((has_z, has_m)))
       .udf()
-      .call(vec![col(geometry_column)])
+      .call(vec![ident(geometry_column)])
   }
 
   /// Store optional XY, XYZ, XYM, or XYZM source-dimension validation.

@@ -87,7 +87,7 @@ fn optimized_output_sorts_points_and_writes_metadata() {
   let result = runtime()
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
+        source: spatial::PipelineSource::dataset(input.to_string_lossy()),
         ..Default::default()
       },
       output: OutputOptions {
@@ -215,7 +215,7 @@ fn optimized_output_writes_extensions_without_sop_metadata() {
   let result = runtime()
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
+        source: spatial::PipelineSource::dataset(input.to_string_lossy()),
         ..Default::default()
       },
       output: OutputOptions {
@@ -310,6 +310,7 @@ fn optimized_output_uses_null_sop_geometry_for_null_points() {
   assert!(!fields.find("x").unwrap().1.is_nullable());
   assert!(!fields.find("y").unwrap().1.is_nullable());
   assert!(sop_geometry.is_null(missing_index));
+  validate(&output).unwrap().ensure_valid().unwrap();
 }
 
 #[test]
@@ -1891,8 +1892,11 @@ fn optimized_output_writes_web_mercator_multiscale_wkb_from_geopackage_line() {
   runtime()
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
-        layer: Some("flowline".to_string()),
+        source: spatial::PipelineSource::Dataset {
+          location: input.to_string_lossy().into_owned(),
+          format: None,
+          layer: Some("flowline".to_string()),
+        },
         ..Default::default()
       },
       output: OutputOptions {
@@ -2079,9 +2083,12 @@ fn run_optimized_with_stripping(
 ) -> Result<SpatialPipelineResult, PipelineError> {
   runtime().block_on(Pipeline::run(SpatialPipelineOptions {
     input: InputOptions {
-      location: input.to_string_lossy().into_owned(),
+      source: spatial::PipelineSource::Dataset {
+        location: input.to_string_lossy().into_owned(),
+        format: None,
+        layer,
+      },
       row_range,
-      layer,
       geometry_column,
       input_wkid,
       ..Default::default()
@@ -2115,7 +2122,7 @@ fn run_optimized_multiscale(
 ) -> Result<SpatialPipelineResult, PipelineError> {
   runtime().block_on(Pipeline::run(SpatialPipelineOptions {
     input: InputOptions {
-      location: input.to_string_lossy().into_owned(),
+      source: spatial::PipelineSource::dataset(input.to_string_lossy()),
       ..Default::default()
     },
     output: OutputOptions {

@@ -23,7 +23,7 @@ use crate::pipeline::PipelineError;
 pub(super) async fn scan_geometry_metadata(
   dataframe: datafusion::dataframe::DataFrame,
   geometry_column: &str,
-) -> Result<(Vec<GeometryType>, Extent2D), PipelineError> {
+) -> Result<(Vec<GeometryType>, Option<Extent2D>), PipelineError> {
   let mut geometry_types = Vec::new();
   let mut full_extent: Option<Extent2D> = None;
   let mut stream = dataframe
@@ -53,19 +53,7 @@ pub(super) async fn scan_geometry_metadata(
       })?;
     scan_binary_values(&geometry, &mut geometry_types, &mut full_extent)?;
   }
-  if geometry_types.is_empty() {
-    return Err(PipelineError::InvalidRequest(
-      "unable to determine geometry type from selected rows".to_string(),
-    ));
-  }
-  Ok((
-    geometry_types,
-    full_extent.ok_or_else(|| {
-      PipelineError::InvalidRequest(
-        "unable to determine geometry extent from selected rows".to_string(),
-      )
-    })?,
-  ))
+  Ok((geometry_types, full_extent))
 }
 
 /// Accumulate geometry kinds and XY bounds from the non-null values of one WKB array.

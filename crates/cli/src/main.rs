@@ -199,10 +199,12 @@ impl From<WriteCommand> for SpatialPipelineOptions {
     };
     Self {
       input: InputOptions {
-        location: args.input,
-        format: args.input_format,
+        source: spatial::PipelineSource::Dataset {
+          location: args.input,
+          format: args.input_format,
+          layer: args.layer,
+        },
         row_range: RowRange::new(args.start.unwrap_or(0), args.num),
-        layer: args.layer,
         geometry_column: args.geometry_column,
         input_wkid: args.in_sr,
       },
@@ -211,6 +213,8 @@ impl From<WriteCommand> for SpatialPipelineOptions {
         mode: output_mode,
         file_count: args.partitions,
         compression: args.compression,
+        row_group_size: None,
+        page_size: None,
         output_wkid: args.out_sr,
         normalization_extent: args.normalization_extent.map(|extent| {
           extent

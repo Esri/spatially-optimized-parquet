@@ -26,14 +26,13 @@ pub(crate) async fn write(
   source_schema: &arrow_schema::Schema,
   context: &SpatialWriteContext,
   layout: &OptimizedLayout,
-  covering: bool,
-  compression: Option<&str>,
+  options: &crate::OutputOptions,
   total_input_rows: u64,
   write_reporter: Option<SharedWriteReporter>,
   warnings: PipelineWarnings,
 ) -> Result<u64, OutputError> {
-  let dataframe = dataframe::dataframe(source_schema, context, layout, covering, warnings)?;
-  let writer_options = super::super::writer_options(context, layout, covering, compression)?;
+  let dataframe = dataframe::dataframe(source_schema, context, layout, options.covering, warnings)?;
+  let writer_options = super::super::writer_options(context, layout, options)?;
   let output_path = output_path
     .paths()?
     .into_iter()

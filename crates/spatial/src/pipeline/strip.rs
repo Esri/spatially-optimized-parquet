@@ -20,10 +20,10 @@ use arrow_array::ArrayRef;
 use arrow_array::builder::BinaryBuilder;
 use arrow_schema::DataType;
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
+use datafusion::logical_expr::expr_fn::ident;
 use datafusion::logical_expr::{
   ColumnarValue, Expr, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature,
 };
-use datafusion::prelude::col;
 
 use crate::geometry::{
   GeometryArray, geometry_signature, strip_wkb_dimensions, to_datafusion_error,
@@ -38,7 +38,7 @@ pub(crate) struct StripGeometryDimensionsUdf {
 impl StripGeometryDimensionsUdf {
   /// Build a lazy WKB expression that removes the requested Z/M components.
   pub(crate) fn expression(geometry_column: &str, strip_z: bool, strip_m: bool) -> Expr {
-    ScalarUDF::new_from_impl(Self { strip_z, strip_m }).call(vec![col(geometry_column)])
+    ScalarUDF::new_from_impl(Self { strip_z, strip_m }).call(vec![ident(geometry_column)])
   }
 }
 

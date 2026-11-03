@@ -130,8 +130,13 @@ pub(crate) struct ClusteringIndexZ {
   pub(crate) m_column: Option<ColumnPath>,
   #[serde(rename = "coordinatePrecision")]
   pub(crate) coordinate_precision: u32,
-  #[serde(rename = "fullExtent")]
-  pub(crate) full_extent: Extent2D,
+  #[serde(
+    rename = "fullExtent",
+    default,
+    deserialize_with = "crate::serialization::deserialize_optional_non_null",
+    skip_serializing_if = "Option::is_none"
+  )]
+  pub(crate) full_extent: Option<Extent2D>,
   #[serde(rename = "geometryType")]
   pub(crate) geometry_type: GeometryFamily,
   #[serde(rename = "hasZ")]
@@ -153,8 +158,13 @@ pub(crate) struct ClusteringIndexXZ {
   pub(crate) encoding: GeodisplayEncoding,
   #[serde(rename = "geometryType")]
   pub(crate) geometry_type: GeometryFamily,
-  #[serde(rename = "fullExtent")]
-  pub(crate) full_extent: Extent2D,
+  #[serde(
+    rename = "fullExtent",
+    default,
+    deserialize_with = "crate::serialization::deserialize_optional_non_null",
+    skip_serializing_if = "Option::is_none"
+  )]
+  pub(crate) full_extent: Option<Extent2D>,
   #[serde(rename = "maxLevel")]
   pub(crate) max_level: u32,
   #[serde(rename = "hasZ")]
@@ -283,7 +293,7 @@ impl ClusteringIndexZ {
       z_column: input.z_column,
       m_column: input.m_column,
       coordinate_precision: input.coordinate_precision,
-      full_extent: input.full_extent,
+      full_extent: Some(input.full_extent),
       geometry_type: GeometryFamily::Point,
       has_z: input.has_z,
       has_m: input.has_m,
@@ -302,7 +312,7 @@ impl ClusteringIndexXZ {
       wkt: input.wkt,
       encoding: input.encoding,
       geometry_type: input.geometry_type,
-      full_extent: input.full_extent,
+      full_extent: Some(input.full_extent),
       max_level: input.max_level,
       has_z: input.has_z,
       has_m: input.has_m,

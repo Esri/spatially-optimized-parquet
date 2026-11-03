@@ -32,7 +32,7 @@ pub(crate) struct GeoMetadataInput<'a> {
   /// Defines exact geometry kinds present in the output.
   pub(crate) geometry_types: &'a [GeometryType],
   /// Defines the geometry extent in output coordinates.
-  pub(crate) output_extent: Extent2D,
+  pub(crate) output_extent: Option<Extent2D>,
   /// Provides the output coordinate reference system.
   pub(crate) output_spatial_reference: &'a SpatialReference,
   /// Indicates whether geometry values contain Z components.
@@ -65,7 +65,12 @@ pub(crate) struct GeoMetadata {
 pub(crate) struct GeoColumnMetadata {
   pub(crate) encoding: String,
   pub(crate) geometry_types: Vec<String>,
-  pub(crate) bbox: [f64; 4],
+  #[serde(
+    default,
+    deserialize_with = "crate::serialization::deserialize_optional_non_null",
+    skip_serializing_if = "Option::is_none"
+  )]
+  pub(crate) bbox: Option<[f64; 4]>,
   pub(crate) crs: Value,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub(crate) covering: Option<GeoCovering>,
@@ -117,12 +122,9 @@ impl GeoMetadata {
     let column = GeoColumnMetadata {
       encoding: "WKB".to_string(),
       geometry_types,
-      bbox: [
-        input.output_extent.xmin,
-        input.output_extent.ymin,
-        input.output_extent.xmax,
-        input.output_extent.ymax,
-      ],
+      bbox: input
+        .output_extent
+        .map(|extent| -> [f64; 4] { [extent.xmin, extent.ymin, extent.xmax, extent.ymax] }),
       crs: input
         .output_spatial_reference
         .projjson

@@ -27,8 +27,7 @@ pub(crate) async fn write(
   source_schema: &arrow_schema::Schema,
   context: &SpatialWriteContext,
   layout: &OptimizedLayout,
-  covering: bool,
-  compression: Option<&str>,
+  options: &crate::OutputOptions,
   total_input_rows: u64,
   write_reporter: Option<SharedWriteReporter>,
   warnings: PipelineWarnings,
@@ -50,10 +49,10 @@ pub(crate) async fn write(
     context,
     layout,
     &boundaries,
-    covering,
+    options.covering,
     warnings,
   )?;
-  let writer_options = super::super::writer_options(context, layout, covering, compression)?;
+  let writer_options = super::super::writer_options(context, layout, options)?;
   let partitioned_sort = PartitionedSortConfig::new(
     partition_column,
     clustering_family.cluster_key_column(),

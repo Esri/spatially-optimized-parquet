@@ -21,6 +21,7 @@ use arrow_schema::{DataType, Field, Fields};
 use datafusion::common::cast::as_float64_array;
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
 use datafusion::functions::core::expr_ext::FieldAccessor;
+use datafusion::logical_expr::expr_fn::ident;
 use datafusion::logical_expr::{
   ColumnarValue, Expr, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature,
   Volatility,
@@ -36,7 +37,7 @@ pub(crate) const COVERING_BBOX_COLUMN: &str = "bbox";
 
 /// Build canonical covering bounds from point coordinates or complex-geometry envelopes.
 pub(crate) fn geometry_bbox_expr(geometry_column: &str, geometry_family: GeometryFamily) -> Expr {
-  let geometry = col(geometry_column);
+  let geometry = ident(geometry_column);
   match geometry_family {
     GeometryFamily::Point => {
       let coordinates = PointGeometryUdf::expression(geometry_column);

@@ -53,7 +53,10 @@ impl OptimizedLayout {
     let geo_metadata = GeoMetadataInput {
       geometry_column: &self.geometry().geometry.column,
       geometry_types: &geometry_types,
-      output_extent: context.target_extent(),
+      output_extent: context
+        .source()
+        .source_extent
+        .map(|_| -> crate::geometry::Extent2D { context.target_extent() }),
       output_spatial_reference: context.reprojection().target_spatial_reference(),
       has_z: self.geometry().has_z,
       has_m: self.geometry().has_m,

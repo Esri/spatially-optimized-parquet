@@ -56,7 +56,7 @@ fn partitioned_output_writes_sorted_range_partitions() {
   let result = runtime()
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
+        source: spatial::PipelineSource::dataset(input.to_string_lossy()),
         ..Default::default()
       },
       output: OutputOptions {
@@ -211,7 +211,7 @@ fn partitioned_output_writes_web_mercator_coordinates_and_metadata() {
   runtime()
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
+        source: spatial::PipelineSource::dataset(input.to_string_lossy()),
         ..Default::default()
       },
       output: OutputOptions {
@@ -288,7 +288,7 @@ fn partitioned_output_combines_row_range_covering_and_compression() {
   let result = runtime()
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
+        source: spatial::PipelineSource::dataset(input.to_string_lossy()),
         row_range: RowRange::new(1, Some(3)),
         ..Default::default()
       },
@@ -369,7 +369,7 @@ fn partitioned_output_requires_overwrite_for_existing_destination() {
   let error = runtime()
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
+        source: spatial::PipelineSource::dataset(input.to_string_lossy()),
         ..Default::default()
       },
       output: OutputOptions {
@@ -406,7 +406,7 @@ fn partitioned_output_replaces_existing_destination() {
   let result = runtime()
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
+        source: spatial::PipelineSource::dataset(input.to_string_lossy()),
         ..Default::default()
       },
       output: OutputOptions {
@@ -514,7 +514,7 @@ fn assert_partitioned_multiscale_coordinate_leaves(
   runtime()
     .block_on(Pipeline::run(SpatialPipelineOptions {
       input: InputOptions {
-        location: input.to_string_lossy().into_owned(),
+        source: spatial::PipelineSource::dataset(input.to_string_lossy()),
         ..Default::default()
       },
       output: OutputOptions {

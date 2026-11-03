@@ -91,12 +91,12 @@ impl GeometryValidator {
         ),
       );
     }
-    if !inspection.finite_coordinates || inspection.extent.is_none() {
+    if inspection.extent.is_some() && !inspection.finite_coordinates {
       report.push(
         ValidationRule::GeometryCoordinate,
         ValidationSeverity::Error,
         location.clone(),
-        "sampled WKB geometry contains no finite coordinates",
+        "sampled WKB geometry mixes finite and indeterminate XY locations",
       );
     }
     for ring in &inspection.rings {

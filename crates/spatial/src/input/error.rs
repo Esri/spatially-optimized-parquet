@@ -17,6 +17,12 @@ use std::path::PathBuf;
 /// Represents failures while identifying, opening, or reading an input source.
 #[derive(Debug, thiserror::Error)]
 pub enum InputError {
+  /// Preserve failures while validating declared Arrow geometry.
+  #[error(transparent)]
+  Geometry(#[from] crate::GeometryError),
+  /// Preserve failures while resolving the declared Arrow CRS.
+  #[error(transparent)]
+  GeoParquet(#[from] crate::GeoParquetError),
   /// Reports an unsupported or invalid source format.
   #[error("invalid input format: {0}")]
   Format(String),

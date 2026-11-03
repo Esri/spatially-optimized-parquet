@@ -39,13 +39,13 @@
 //!
 //! ```no_run
 //! use spatial::{
-//!   InputOptions, OutputMode, OutputOptions, Pipeline, RowRange, SpatialPipelineOptions,
+//!   InputOptions, OutputMode, OutputOptions, Pipeline, PipelineSource, RowRange, SpatialPipelineOptions,
 //! };
 //!
 //! # async fn convert() -> Result<(), spatial::PipelineError> {
 //! let request = SpatialPipelineOptions {
 //!   input: InputOptions {
-//!     location: "roads.parquet".to_string(),
+//!     source: PipelineSource::dataset("roads.parquet"),
 //!     row_range: RowRange::new(500, Some(1_000)),
 //!     ..Default::default()
 //!   },
@@ -75,7 +75,7 @@ use datafusion::execution::context::SessionContext;
 
 use super::{PipelineError, SpatialWriteContext};
 use crate::geoparquet::SpatialReference;
-use crate::input::{InputOpenOptions, InputSource, RowRange, SourceFormat, open_input};
+use crate::input::{InputSource, PipelineSource, RowRange};
 use crate::optimized::{MultiscaleEncoding, OptimizedLayout};
 use crate::output::{OutputMode, OutputPath, PlainWriter, partitioned, single};
 use crate::session::DataFusionSession;
@@ -120,14 +120,10 @@ impl SpatialPipelineOptions {
 /// Configures how [`Pipeline`] reads source data.
 #[derive(Debug, Clone)]
 pub struct InputOptions {
-  /// Local path or HTTP URL for the source dataset.
-  pub location: String,
-  /// Optional source format that overrides inference from the location.
-  pub format: Option<SourceFormat>,
+  /// External dataset or replayable, in-memory Arrow batches.
+  pub source: PipelineSource,
   /// Source rows to process. Defaults to every row.
   pub row_range: RowRange,
-  /// Optional layer name for multi-layer sources such as GeoPackage.
-  pub layer: Option<String>,
   /// Optional WKB geometry column that overrides source metadata.
   pub geometry_column: Option<String>,
   /// Optional EPSG WKID for geometry without coordinate-reference metadata.
@@ -138,10 +134,8 @@ impl Default for InputOptions {
   /// Build input settings that select every row without metadata overrides.
   fn default() -> Self {
     Self {
-      location: String::new(),
-      format: None,
+      source: PipelineSource::dataset(String::new()),
       row_range: RowRange::default(),
-      layer: None,
       geometry_column: None,
       input_wkid: None,
     }
@@ -166,6 +160,10 @@ pub struct OutputOptions {
   pub file_count: Option<usize>,
   /// Optional Parquet codec name. `None` selects Snappy.
   pub compression: Option<String>,
+  /// Optional maximum row count per Parquet row group; must be positive.
+  pub row_group_size: Option<usize>,
+  /// Optional approximate uncompressed data-page byte target; must be positive.
+  pub page_size: Option<usize>,
   /// EPSG WKID written to output geometry and metadata.
   pub output_wkid: u32,
   /// Optional extent used to normalize spatial cluster keys.
@@ -196,6 +194,8 @@ impl Default for OutputOptions {
       mode: OutputMode::default(),
       file_count: None,
       compression: None,
+      row_group_size: None,
+      page_size: None,
       output_wkid: crate::DEFAULT_OUTPUT_WKID,
       normalization_extent: None,
       cluster_depth: 20,
@@ -268,6 +268,11 @@ impl Pipeline {
       write_reporter,
     } = options;
     SpatialReference::validate_output_wkid(output_options.output_wkid)?;
+    if output_options.row_group_size == Some(0) || output_options.page_size == Some(0) {
+      return Err(PipelineError::InvalidRequest(
+        "row_group_size and page_size must be positive".into(),
+      ));
+    }
     if output_options.cluster_depth == 0 || output_options.cluster_depth > 32 {
       return Err(PipelineError::InvalidRequest(
         "cluster depth must be between 1 and 32".to_string(),
@@ -290,12 +295,7 @@ impl Pipeline {
         "--write-extensions cannot be combined with --no-optimization".to_string(),
       ));
     }
-    let input_format = SourceFormat::resolve(&input_options.location, input_options.format)?;
-    let input_source = open_input(
-      input_format,
-      &InputOpenOptions::new(input_options.location.clone(), input_options.layer.clone()),
-    )
-    .await?;
+    let input_source = input_options.source.open().await?;
     let output_path = OutputPath::new(
       &output_options.path,
       output_options.file_count,
@@ -360,7 +360,7 @@ impl Pipeline {
       state.total_input_rows,
       state.write_reporter.clone(),
     )
-    .write(options.covering, options.compression.as_deref())
+    .write(options)
     .await?;
     Ok(state.finish(rows_written))
   }
@@ -376,8 +376,7 @@ impl Pipeline {
       state.source_schema.as_ref(),
       &context,
       &layout,
-      state.output_options.covering,
-      state.output_options.compression.as_deref(),
+      &state.output_options,
       state.total_input_rows,
       state.write_reporter.clone(),
       state.warnings.clone(),
@@ -397,8 +396,7 @@ impl Pipeline {
       state.source_schema.as_ref(),
       &context,
       &layout,
-      state.output_options.covering,
-      state.output_options.compression.as_deref(),
+      &state.output_options,
       state.total_input_rows,
       state.write_reporter.clone(),
       state.warnings.clone(),
@@ -465,7 +463,9 @@ mod tests {
       SpatialPipelineOptions::default(),
       SpatialPipelineOptions::new(),
     ] {
-      assert!(options.input.location.is_empty());
+      assert!(
+        matches!(options.input.source, PipelineSource::Dataset { location, .. } if location.is_empty())
+      );
       assert_eq!(options.output.path, PathBuf::new());
       assert_eq!(options.memory_limit_bytes, None);
       assert_eq!(options.target_partitions, None);
@@ -476,10 +476,11 @@ mod tests {
   #[test]
   fn input_options_default_and_new_preserve_unconfigured_input_policy() {
     for options in [InputOptions::default(), InputOptions::new()] {
-      assert!(options.location.is_empty());
-      assert_eq!(options.format, None);
+      assert!(matches!(
+        options.source,
+        PipelineSource::Dataset { location, format: None, layer: None } if location.is_empty()
+      ));
       assert_eq!(options.row_range, RowRange::default());
-      assert_eq!(options.layer, None);
       assert_eq!(options.geometry_column, None);
       assert_eq!(options.input_wkid, None);
     }

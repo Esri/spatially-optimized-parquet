@@ -672,7 +672,7 @@ fn geopackage_input_preserves_z_and_m_wkb_for_supported_geometry_types() {
       let output = temp.path().join("optimized.parquet");
       let optimization_result = runtime().block_on(Pipeline::run(SpatialPipelineOptions {
         input: InputOptions {
-          location: path.to_string_lossy().into_owned(),
+          source: crate::PipelineSource::dataset(path.to_string_lossy()),
           ..Default::default()
         },
         output: OutputOptions {

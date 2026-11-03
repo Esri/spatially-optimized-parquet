@@ -122,7 +122,7 @@ fn benchmark_case(
           output_index += 1;
           let options = SpatialPipelineOptions {
             input: InputOptions {
-              location: fixture.path.to_string_lossy().into_owned(),
+              source: spatial::PipelineSource::dataset(fixture.path.to_string_lossy()),
               ..Default::default()
             },
             output: OutputOptions {

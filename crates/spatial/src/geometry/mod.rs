@@ -38,8 +38,8 @@ pub(crate) use pbf::{PbfArrayBuilder, PbfGeometry};
 pub(crate) use quantization::{
   QuantizationOptions, QuantizationTransform, QuantizedGeometry, quantize_into,
 };
-pub use types::GeometryType;
-pub(crate) use types::{CoordinateDimensions, GeometryColumn, GeometryEncoding};
+pub use types::{CoordinateDimensions, GeometryType};
+pub(crate) use types::{GeometryColumn, GeometryEncoding};
 pub(crate) use wkb::{
   PolygonRingOrder, WkbArrayBuilder, WkbHeader, WkbPartRole, WkbSink, strip_wkb_dimensions,
   visit_wkb_geometry,
