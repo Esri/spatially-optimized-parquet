@@ -1,3 +1,5 @@
+[![Rust CI](https://github.com/Esri/spatially-optimized-parquet/actions/workflows/ci.yml/badge.svg)](https://github.com/Esri/spatially-optimized-parquet/actions/workflows/ci.yml)
+
 > [!NOTE]
 > We are currently working on proposal extensions to integrate Spatially Optimized Parquet into [GeoParquet](https://geoparquet.org/releases/v1.1.0/).
 
