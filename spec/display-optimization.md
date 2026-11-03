@@ -74,7 +74,7 @@ interface DisplayMetadata {
   type: "xz" | "z";
   version: string;
   writer?: Writer;
-  fullExtent: Extent;
+  fullExtent?: Extent;
   wkid?: number;
   wkt?: string;
   geometryType: "point" | "multipoint" | "polygon" | "polyline";
@@ -90,12 +90,18 @@ where:
 | `type` | Must be `"xz"` or `"z"`. |
 | `version` | Current version of this specification. |
 | `writer` | Optional writer metadata. |
-| `fullExtent` | Full geographical extent of the geometries in the clustering spatial reference. |
+| `fullExtent` | Normalization extent in the clustering spatial reference. Required when any source geometry has a finite XY location; otherwise it may be omitted. |
 | `wkid` | Optional EPSG or Esri latest WKID for the spatial reference used by the clustering. Currently only `4326` or `3857` are supported. |
 | `wkt` | Optional spatial reference WKT. Used when `wkid` is undefined. |
 | `geometryType` | Normalized geometry family for all geometries in the clustering. One of `"point"`, `"multipoint"`, `"polygon"`, or `"polyline"`. Polygon and MultiPolygon inputs share `"polygon"`; LineString and MultiLineString inputs share `"polyline"`. Mixing different families in one clustering is not supported. |
 | `hasZ` | Whether geometries and display columns contain Z values. |
 | `hasM` | Whether geometries and display columns contain M values. |
+
+The normalization extent MUST be defined unless every source geometry is null or spatially
+indeterminate, including an empty dataset. A geometry is spatially indeterminate when it has no
+finite XY coordinate pair, for example an empty point whose coordinates are `NaN`. Missing or
+indeterminate Z/M values alone do not remove the extent requirement. Omitting display coordinates
+for an otherwise determinate source geometry does not remove it either.
 
 #### Writer
 
@@ -117,7 +123,9 @@ where:
 
 #### Extent
 
-An `Extent` defines the bounds of a set of the geometries in the spatial reference used by the display optimization. As will be described later, the `fullExtent` specified in the `DisplayMetadata` will be used in the encoding of features' XZ-codes.
+An `Extent` defines bounds in the spatial reference used by the display optimization.
+`DisplayMetadata.fullExtent` supplies the normalization domain for Z- and XZ-codes, subject to
+the presence requirement above.
 
 ```ts
 interface Extent {
@@ -466,12 +474,13 @@ where:
 | --- | --- |
 | `type` | Must be `"z"`. |
 | `geometryType` | Must be `"point"`. |
-| `code` | Absolute path of the column containing Z-codes for points within the clustering. |
-| `xColumn` | Absolute path of the non-nullable column containing point x-values. A null or invalid geometry should include `NaN`. |
-| `yColumn` | Absolute path of the column containing point y-values. A null or invalid geometry should include `NaN`. |
-| `zColumn` | Required when `hasZ` is true and absent otherwise. Absolute path of the column containing the original point Z value from the full-resolution WKB. A null or invalid geometry uses `NaN`. |
-| `mColumn` | Required when `hasM` is true and absent otherwise. Absolute path of the column containing the original point M value from the full-resolution WKB. A null or invalid geometry uses `NaN`. |
+| `code` | Absolute path of the Z-code column, which may be nullable under the shared clustering-code rules. |
+| `xColumn` | Absolute path of the point x-coordinate column. |
+| `yColumn` | Absolute path of the point y-coordinate column. |
+| `zColumn` | Required when `hasZ` is true and absent otherwise. Absolute path of the original WKB Z-coordinate column. |
+| `mColumn` | Required when `hasM` is true and absent otherwise. Absolute path of the original WKB M-coordinate column. |
 | `coordinatePrecision` | Number of bits of precision used for each coordinate when generating the Z-code. |
+
 
 #### Example
 
